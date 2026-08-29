@@ -112,3 +112,71 @@ class DeviceModelTest(TestCase):
 
     def test_identification_json_default(self):
         self.assertEqual(self.device.identification, {})
+
+
+from devices.android_compatibility import (  # noqa: E402
+    SUPPORTED,
+    PARTIAL,
+    UNAVAILABLE,
+    capability_for,
+    full_compatibility_report,
+    summarize_report,
+    api_from_version,
+    version_from_api,
+    VERSION_TO_API,
+)
+
+
+class CompatibilityTest(TestCase):
+    def test_shared_storage_supported_all(self):
+        for api in (26, 28, 30, 31, 33, 34, 35):
+            self.assertEqual(capability_for("shared_storage", api), SUPPORTED)
+
+    def test_adb_backup_auto_disabled_on_newer(self):
+        self.assertEqual(capability_for("adb_backup_auto", 26), SUPPORTED)
+        self.assertEqual(capability_for("adb_backup_auto", 28), PARTIAL)
+        self.assertEqual(capability_for("adb_backup_auto", 31), UNAVAILABLE)
+        self.assertEqual(capability_for("adb_backup_auto", 35), UNAVAILABLE)
+
+    def test_scoped_storage_restrictions(self):
+        self.assertEqual(capability_for("app_public_data", 28), SUPPORTED)
+        self.assertEqual(capability_for("app_public_data", 30), PARTIAL)
+        self.assertEqual(capability_for("scoped_storage_recent", 28), UNAVAILABLE)
+
+    def test_artifacts_window(self):
+        android = [22, 23, 26, 27]
+        for api in android:
+            self.assertEqual(capability_for("notification_history", api), UNAVAILABLE)
+        self.assertEqual(capability_for("notification_history", 28), SUPPORTED)
+
+    def test_unknown_artifact_is_unavailable(self):
+        self.assertEqual(capability_for("nonsense_key", 35), UNAVAILABLE)
+
+    def test_unknown_api_conservative(self):
+        self.assertEqual(capability_for("shared_storage", None), PARTIAL)
+
+    def test_report_groups(self):
+        grouped = summarize_report(35)
+        self.assertIn("supported", grouped)
+        self.assertIn("partial", grouped)
+        self.assertIn("unavailable", grouped)
+        self.assertIn("Device identification (build.prop/getprop)", grouped["supported"])
+
+    def test_version_parsing(self):
+        self.assertEqual(api_from_version("12"), 31)
+        self.assertEqual(api_from_version("15"), 35)
+        self.assertEqual(api_from_version("14"), 34)
+        self.assertEqual(api_from_version(""), None)
+        self.assertIsNone(api_from_version("unknown"))
+        self.assertEqual(api_from_version("12L"), 32)
+
+    def test_version_from_api(self):
+        self.assertEqual(version_from_api(31), "12")
+        self.assertEqual(version_from_api(35), "15")
+
+    def test_device_capability_integration(self):
+        d = Device(android_version="11", api_level=30)
+        self.assertEqual(d.capability_for("app_public_data"), PARTIAL)
+        self.assertEqual(d.capability_for("adb_backup_auto"), UNAVAILABLE)
+        self.assertIn("supported", d.compatibility_summary())
+

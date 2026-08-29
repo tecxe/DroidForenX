@@ -111,3 +111,31 @@ class Device(models.Model):
         if self.api_level:
             name += f" (Android {self.android_version}, API {self.api_level})"
         return name
+
+    def capability_for(self, artifact_key):
+        """Return the capability tier for an artifact on this device.
+
+        Uses the compatibility layer with this device's API level/version.
+        """
+        from .android_compatibility import capability_for
+
+        api = self.api_level
+        if api is None and self.android_version:
+            from .android_compatibility import api_from_version
+            api = api_from_version(self.android_version)
+        return capability_for(artifact_key, api)
+
+    def compatibility_summary(self) -> dict:
+        """Return the grouped supported/partial/unavailable artifact summary."""
+        from .android_compatibility import api_from_version, summarize_report
+
+        api = self.api_level
+        if api is None and self.android_version:
+            api = api_from_version(self.android_version)
+        return summarize_report(api)
+
+    def compatibility_report(self) -> dict:
+        """Return a full plain-dict compatibility report for this device."""
+        from .android_compatibility import compatibility_for_device
+
+        return compatibility_for_device(self.api_level, self.android_version)
