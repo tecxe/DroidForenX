@@ -1,0 +1,30 @@
+# DroidForenX - Python dependencies
+# Django web framework
+Django>=5.1,<6.0
+
+# PostgreSQL driver
+psycopg[binary]>=3.2
+
+# Environment variable loading (.env)
+python-dotenv>=1.0
+
+# Image handling / metadata / thumbnails
+Pillow>=10.4
+
+# PDF report generation
+reportlab>=4.2
+
+# Advanced HTML->PDF rendering (used for HTML reports)
+WeasyPrint>=62
+
+# Date/time handling
+python-dateutil>=2.9
+
+# Text encoding detection for forensic text extraction
+charset-normalizer>=3.3
+
+# Progress bars for carving/acquisition long operations
+tqdm>=4.66
+
+# EXIF/metadata parsing
+exifread>=3.0

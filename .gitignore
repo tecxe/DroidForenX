@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Environment / secrets - never commit
+.env
+
+# Evidence and reports are generated data - never commit real case data
+evidence/
+reports/
+*.e01
+*.dd
+*.raw
+*.aff4
+*.tar
+*.zip
+
+# Django
+db.sqlite3
+*.log
+staticfiles/
+media/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Tooling
+local_settings.py
