@@ -55,6 +55,7 @@ INSTALLED_APPS = [
     'devices',
     'evidence',
     'hashing',
+    'social',
 ]
 
 MIDDLEWARE = [
