@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'analysis',
     'carving',
     'cases',
+    'custody',
     'database',
     'devices',
     'evidence',
