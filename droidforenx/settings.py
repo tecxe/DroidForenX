@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     'social',
     'timeline',
     'searching',
+    'reports',
 ]
 
 MIDDLEWARE = [
