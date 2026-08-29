@@ -57,11 +57,12 @@ INSTALLED_APPS = [
     'devices',
     'evidence',
     'hashing',
+    'reports',
+    'security',
     'django.contrib.postgres',
     'social',
     'timeline',
     'searching',
-    'reports',
 ]
 
 MIDDLEWARE = [
@@ -176,3 +177,21 @@ MAX_CARVE_SIZE = int(os.getenv("MAX_CARVE_SIZE", str(512 * 1024 * 1024)))
 
 # WeasyPrint / reportlab PDF output directory (base dir for generated reports).
 REPORT_ROOT = Path(os.getenv("REPORT_ROOT", str(BASE_DIR / "reports")))
+
+
+# ---------------------------------------------------------------------------
+# Security hardening
+# ---------------------------------------------------------------------------
+
+# Strength of PBKDF2 iteration count vs. default for released builds.
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_HTTPONLY = True
+    X_FRAME_OPTIONS = "DENY"
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_REFERRER_POLICY = "same-origin"
