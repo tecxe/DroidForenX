@@ -56,8 +56,10 @@ INSTALLED_APPS = [
     'devices',
     'evidence',
     'hashing',
+    'django.contrib.postgres',
     'social',
     'timeline',
+    'searching',
 ]
 
 MIDDLEWARE = [
