@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     'acquisition',
     'analysis',
     'cases',
+    'database',
     'devices',
     'evidence',
     'hashing',
