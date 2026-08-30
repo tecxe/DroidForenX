@@ -74,8 +74,24 @@ droidforenx/
   custody/                       # chain of custody
   reports/                       # PDF/HTML reports
   security/                      # audit logging
+  dashboard/                     # operator web UI (login, cases, acquisition, search, audit)
   setup_adb.py                   # optional platform-tools bundler for ADB
 ```
+
+### Web dashboard
+
+Run `python manage.py runserver` and open `/dashboard/`. Everything requires an
+authenticated operator login (Django `auth.User`):
+
+- **Cases** — list of open cases with evidence & acquisition-run metrics.
+- **Case detail** — per-case evidence, acquisition runs, one-click **Acquire device**
+  and **PDF report**.
+- **Evidence / Artifact detail** — metadata, recovery status, hashes, custody trail.
+- **Acquisition** — pick a device serial + level, run a logical capture (or an
+  image import), see the result. Nothing is reported as recovered unless it was.
+- **Search** — PostgreSQL full-text search over indexed recovered artifact content.
+- **Audit** — append-only security/audit event log (staff operators only; report
+  download is login-gated).
 
 ---
 
@@ -116,6 +132,8 @@ A minimal Django `auth.User` (for admin + audit actors) is created as normal via
 |---------|---------|
 | `detect_devices` | List Android devices reachable via ADB |
 | `compat_report` | Show Android API↔version compatibility tables |
+| `acquire <case> [--serial] [--level 1\|2\|3]` | Run an authorized logical acquisition (or image import) |
+| `run_pipeline <case> [--serial] [--evidence] [--index]` | Orchestrate acquisition → hash → analyze → social → carve → timeline → search index |
 | `register_evidence` | Register an evidence container for a case |
 | `hash_evidence` | Hash evidence streams (MD5/SHA-1/SHA-256/SHA-512) |
 | `verify_hashes` | Re-verify evidence against stored hashes (tamper detection) |
@@ -145,7 +163,7 @@ credential theft, and unauthorized access. These are outside scope by design.
 python manage.py test
 ```
 
-The suite covers all 14 apps (~120+ tests) and requires PostgreSQL (the `searching`
+The suite covers all 14 apps (~138 tests) and requires PostgreSQL (the `searching`
 app and Django's test runner both need a Postgres test database).
 
 ---
