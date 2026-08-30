@@ -1,0 +1,69 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ evidence.evidence_id }} · DroidForenX{% endblock %}
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{% url 'dashboard:home' %}">Cases</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'dashboard:case' evidence.case.pk %}">{{ evidence.case.case_number }}</a></li>
+    <li class="breadcrumb-item active">{{ evidence.evidence_id }}</li>
+  </ol>
+</nav>
+
+<div class="card p-3 mb-3">
+  <h4 class="page-title mb-2">{{ evidence.title }}</h4>
+  <table class="table table-sm mb-0 w-50">
+    <tr><th class="text-muted">Status</th><td><span class="badge bg-secondary">{{ evidence.status }}</span></td></tr>
+    <tr><th class="text-muted">Source</th><td>{{ evidence.source }}</td></tr>
+    <tr><th class="text-muted">Acquisition</th><td>{{ evidence.get_acquisition_level_display }} · {{ evidence.get_acquisition_method_display }}</td></tr>
+    <tr><th class="text-muted">Device</th><td>{{ evidence.device.serial_number|default:"—" }}</td></tr>
+    <tr><th class="text-muted">Collected</th><td>{{ evidence.collected_at|date:"Y-m-d H:i" }} by {{ evidence.collected_by|default:"—" }}</td></tr>
+    {% if evidence.size_bytes %}<tr><th class="text-muted">Size</th><td>{{ evidence.size_bytes|filesizeformat }}</td></tr>{% endif %}
+  </table>
+  {% if evidence.description %}<p class="text-secondary mt-2">{{ evidence.description }}</p>{% endif %}
+</div>
+
+<div class="row g-3">
+  <div class="col-md-7">
+    <div class="card p-3">
+      <h5 class="mb-3">Artifacts ({{ artifacts|length }})</h5>
+      {% if artifacts %}
+      <table class="table table-sm table-hover align-middle">
+        <thead><tr><th>Name</th><th>Source</th><th>Type</th><th>Recovery</th><th>SHA-256</th></tr></thead>
+        <tbody>
+        {% for a in artifacts %}
+          <tr>
+            <td><a href="{% url 'dashboard:artifact' a.pk %}">{{ a.name }}</a></td>
+            <td>{{ a.source }}</td>
+            <td><span class="badge bg-light text-dark">{{ a.artifact_type|default:"—" }}</span></td>
+            <td>{{ a.recovery_status|default:"—" }}</td>
+            <td><code class="small">{{ a.sha256|default:""|truncatechars:12 }}</code></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="text-muted mb-0">No artifacts recorded.</p>
+      {% endif %}
+    </div>
+  </div>
+  <div class="col-md-5">
+    <div class="card p-3">
+      <h5 class="mb-3">Custody trail</h5>
+      {% if trail %}
+      <ul class="list-group list-group-flush">
+        {% for e in trail %}
+        <li class="list-group-item px-0">
+          <div><span class="badge bg-dark">{{ e.action }}</span>
+            <span class="text-muted small">{{ e.occurred_at|date:"Y-m-d H:i" }}</span></div>
+          <div class="small">{{ e.description|default:"" }}</div>
+          <div class="text-muted very-small">by {{ e.investigator|default:"—" }}</div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="text-muted mb-0">No custody events.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

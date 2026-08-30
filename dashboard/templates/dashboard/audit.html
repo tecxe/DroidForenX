@@ -1,0 +1,38 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Audit log · DroidForenX{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="page-title mb-0">Audit log</h3>
+  <span class="badge bg-dark">{{ events|length }} most recent</span>
+</div>
+
+<div class="row mb-3">
+  {% for label, count in count_rows %}
+  <div class="col-md-3 mb-2">
+    <div class="card p-2 d-flex flex-row justify-content-between">
+      <span>{{ label }}</span><span class="badge bg-secondary">{{ count }}</span>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<p class="text-muted small">This view is restricted to staff operators.</p>
+
+<div class="card p-3">
+  <table class="table table-sm table-striped align-middle">
+    <thead><tr><th>When</th><th>Type</th><th>Action</th><th>Subject</th><th>Operator</th><th>Detail</th></tr></thead>
+    <tbody>
+    {% for e in events %}
+      <tr>
+        <td class="small">{{ e.created_at|date:"Y-m-d H:i" }}</td>
+        <td>{{ e.get_event_type_display }}</td>
+        <td>{{ e.action }}</td>
+        <td>{{ e.subject|default:"—" }}</td>
+        <td>{{ e.username|default:e.actor|default:"—" }}</td>
+        <td class="small text-muted">{{ e.detail|default:"—"|truncatechars:60 }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

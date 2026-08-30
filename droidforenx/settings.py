@@ -63,7 +63,12 @@ INSTALLED_APPS = [
     'social',
     'timeline',
     'searching',
+    'dashboard',
 ]
+
+LOGIN_URL = "/dashboard/login/"
+LOGIN_REDIRECT_URL = "/dashboard/"
+LOGOUT_REDIRECT_URL = "/dashboard/login/"
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
