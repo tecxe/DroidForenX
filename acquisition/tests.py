@@ -15,7 +15,7 @@ from cases.models import Case, Investigator
 from custody.models import CustodyAction, CustodyEvent
 from devices.models import Device
 from evidence.models import AcquisitionStatus
-from evidence.services import register_evidence
+from evidence.services import register_artifact, register_evidence
 from security.models import AuditEventType, AuditLog
 from .engine import acquire, AcquisitionError
 from .models import AcquisitionRun, AcquisitionTarget, RunState
@@ -179,3 +179,27 @@ class AcquireCommandTest(TestCase):
         self.assertIn(AcquisitionStatus.FAILED, run.status)
         self.assertTrue(AuditLog.objects.filter(
             event_type=AuditEventType.FAILURE, action="acquisition").exists())
+
+
+class RunPipelineCommandTest(TestCase):
+    def test_pipeline_runs_and_logs_audit(self):
+        case, device = make_case_and_device()
+        ev = register_evidence(case, device=device, title="pipeline evidence")
+        register_artifact(ev, name="note.txt", source="memo",
+                          metadata={"notes": "meeting downtown at 9"})
+        out = io.StringIO()
+        call_command("run_pipeline", case.case_number, stdout=out)
+        self.assertIn("Pipeline complete", out.getvalue())
+        self.assertTrue(AuditLog.objects.filter(
+            event_type=AuditEventType.WRITE, action="pipeline").exists())
+
+    def test_pipeline_indexes_search(self):
+        case, device = make_case_and_device()
+        ev = register_evidence(case, device=device, title="pipeline evidence")
+        register_artifact(ev, name="note.txt", source="memo",
+                          metadata={"notes": "meeting downtown at 9"})
+        call_command("run_pipeline", case.case_number, index=True,
+                     stdout=io.StringIO())
+        from searching.models import SearchEntry
+        self.assertEqual(
+            SearchEntry.objects.filter(artifact__evidence__case=case).count(), 1)
