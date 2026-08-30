@@ -5,14 +5,18 @@ The assertions focus on what we control: honest statuses, audit bookkeeping,
 and correct evidence registration regardless of what the device returned.
 """
 
+import io
 from unittest import mock
 
+from django.core.management import call_command
 from django.test import TestCase
 
 from cases.models import Case, Investigator
+from custody.models import CustodyAction, CustodyEvent
 from devices.models import Device
 from evidence.models import AcquisitionStatus
 from evidence.services import register_evidence
+from security.models import AuditEventType, AuditLog
 from .engine import acquire, AcquisitionError
 from .models import AcquisitionRun, AcquisitionTarget, RunState
 
@@ -126,3 +130,52 @@ class RunSummaryTest(TestCase):
         )
         self.assertIn("3 files", run.summary())
         self.assertIn("100 bytes", run.summary())
+
+
+class AcquireCommandTest(TestCase):
+    def test_command_runs_and_logs_custody_audit(self):
+        case, device = make_case_and_device()
+        acq = mock.Mock()
+        acq.installed_packages.return_value = ["com.example.one"]
+        acq.target_apk_path.return_value = "/data/app/one/base.apk"
+        acq.exists.return_value = False
+        acq.pull.return_value = False
+        acq.adapter.adb_path.return_value = "adb"
+
+        with mock.patch("acquisition.engine.Acquirer", return_value=acq), \
+             mock.patch("acquisition.engine._workspace") as ws:
+            from pathlib import Path
+            import tempfile
+            class DummyWorkspace:
+                def __init__(self):
+                    self._tmp = Path(tempfile.mkdtemp())
+                def __truediv__(self, other):
+                    return self._tmp / other
+            ws.return_value = DummyWorkspace()
+            out = io.StringIO()
+            call_command("acquire", "CASE-ACQ-1", serial=device.serial_number, stdout=out)
+
+        text = out.getvalue()
+        self.assertIn("Run", text)
+        run = AcquisitionRun.objects.get(case=case)
+        self.assertTrue(run.evidence_id)
+        # Custody + audit events written.
+        self.assertTrue(CustodyEvent.objects.filter(evidence=run.evidence_id).exists())
+        self.assertTrue(AuditLog.objects.filter(
+            event_type=AuditEventType.WRITE, action="acquisition").exists())
+
+    def test_command_adb_absent_fails_cleanly(self):
+        case, device = make_case_and_device()
+        with mock.patch("acquisition.engine.Acquirer",
+                        side_effect=Exception("no adb")):
+            out = io.StringIO()
+            err = io.StringIO()
+            call_command("acquire", "CASE-ACQ-1", serial=device.serial_number,
+                         stdout=out, stderr=err)
+        self.assertIn("could not run", out.getvalue())
+        # A failed run + custody/audit trail exists; nothing was pulled.
+        run = AcquisitionRun.objects.get(case=case)
+        self.assertEqual(run.files_pulled, 0)
+        self.assertIn(AcquisitionStatus.FAILED, run.status)
+        self.assertTrue(AuditLog.objects.filter(
+            event_type=AuditEventType.FAILURE, action="acquisition").exists())

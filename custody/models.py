@@ -19,6 +19,7 @@ class CustodyAction(models.TextChoices):
     TRANSFERRED = "transferred", "Transferred Custody"
     RETURNED = "returned", "Returned to Owner"
     STORED = "stored", "Stored"
+    FAILED = "failed", "Failed / Aborted"
 
 
 class CustodyEvent(models.Model):
