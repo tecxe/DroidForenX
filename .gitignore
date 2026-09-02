@@ -16,10 +16,8 @@ reports/
 *.dd
 *.raw
 *.aff4
-*.tar
-*.zip
 
-# Django
+# Django (legacy)
 db.sqlite3
 *.log
 staticfiles/
@@ -34,3 +32,21 @@ Thumbs.db
 
 # Tooling
 local_settings.py
+
+# Build artifacts
+build/
+dist/
+*.spec.bak
+*.spec.log
+*.spec.tmp
+
+# PyInstaller
+*.manifest
+*.src
+
+# Pull cache
+pull_cache/
+
+# DB local copies
+*.db-shm
+*.db-wal

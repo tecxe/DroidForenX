@@ -1,22 +1,33 @@
-#!/usr/bin/env python
-"""Django's command-line utility for administrative tasks."""
-import os
+﻿#!/usr/bin/env python
+"""DroidForenX — command-line entry point for forensic operations."""
+
 import sys
+import argparse
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
 
 
 def main():
-    """Run administrative tasks."""
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'droidforenx.settings')
-    try:
-        from django.core.management import execute_from_command_line
-    except ImportError as exc:
-        raise ImportError(
-            "Couldn't import Django. Are you sure it's installed and "
-            "available on your PYTHONPATH environment variable? Did you "
-            "forget to activate a virtual environment?"
-        ) from exc
-    execute_from_command_line(sys.argv)
+    parser = argparse.ArgumentParser(
+        prog="droidforenx",
+        description="DroidForenX Professional Digital Forensics Platform v2.0",
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    sub.add_parser("gui", help="Launch the desktop GUI application")
+    sub.add_parser("version", help="Show version information")
+
+    args = parser.parse_args()
+
+    if args.command == "gui":
+        from desktop.main import main as gui_main
+        gui_main()
+    elif args.command == "version":
+        print("DroidForenX v2.0.0 — Professional Digital Forensics Platform")
+    else:
+        parser.print_help()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
