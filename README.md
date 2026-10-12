@@ -173,3 +173,7 @@ app and Django's test runner both need a Postgres test database).
 `setup_adb.py` can bundle Google's `platform-tools` (~5 MB) to enable live device
 acquisition via ADB. It is optional — all analysis, hashing, carving, timeline,
 search, reporting, custody and audit features work standalone on imported evidence.
+
+## Future Improvement
+
+**WhatsApp data extraction**: WhatsApp extraction was part of the project’s planned scope, but implementation issues prevented us from completing and validating it within the project timeline. We have therefore identified it as a future improvement. Any implementation should be limited to authorized forensic work and documented lawful exports.
