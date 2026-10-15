@@ -1,7 +1,7 @@
 """Main application window — professional Cellebrite-style sidebar + page stack."""
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                              QPushButton, QStackedWidget, QFrame, QSplitter, QStatusBar,
-                              QMenuBar, QMenu, QMessageBox, QFileDialog)
+from PyQt6.QtWidgets import (QMainWindow, QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+                              QLabel, QPushButton, QStackedWidget, QFrame, QSplitter,
+                              QStatusBar, QMenuBar, QMenu, QMessageBox, QFileDialog)
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QIcon, QFont, QAction
 
@@ -21,12 +21,16 @@ from ..core.database import get_db, init_db, audit_log
 
 
 class MainWindow(QMainWindow):
+    #: Preferred working size. Used as an upper bound, never as a hard floor,
+    #: so the window still opens on laptops smaller than this.
+    PREFERRED_SIZE = (1440, 900)
+    MIN_SIZE = (1280, 800)
+
     def __init__(self):
         super().__init__()
         init_db()
         self.setWindowTitle("DroidForenX — Professional Digital Forensics")
-        self.setMinimumSize(1280, 800)
-        self.resize(1440, 900)
+        self._fit_to_screen()
         self.setStyleSheet(MAIN_STYLESHEET)
 
         self._device_serial = ""
@@ -38,11 +42,53 @@ class MainWindow(QMainWindow):
         self._setup_menu()
         self._connect_signals()
         self._close_stale_cases()
+
         self._refresh_stats()
         audit_log("application_started", details="DroidForenX desktop launched")
 
         # Instant scan on startup
         self._auto_scan_devices()
+
+    def _fit_to_screen(self) -> None:
+        """Size the window to the display it actually opened on.
+
+        The previous hardcoded setMinimumSize(1280, 800) / resize(1440, 900)
+        assumed a large monitor. On a 1280x720 laptop the minimum height alone
+        exceeded the screen and the default width overflowed it, so the window
+        opened larger than the desktop and its right-hand content was clipped
+        with no way to shrink it back.
+
+        Clamp both the minimum and the preferred size to the available screen
+        geometry. Pages carry their own scroll areas, so a smaller window is
+        usable rather than broken.
+        """
+        pref_w, pref_h = self.PREFERRED_SIZE
+        min_w, min_h = self.MIN_SIZE
+
+        avail = None
+        try:
+            screen = QApplication.primaryScreen()
+            if screen is not None:
+                avail = screen.availableGeometry()
+        except Exception:
+            # No usable screen info (headless, exotic WM) -- fall back to the
+            # old behaviour rather than refusing to open.
+            avail = None
+
+        if avail is None:
+            avail_w, avail_h = pref_w, pref_h
+        else:
+            avail_w, avail_h = avail.width(), avail.height()
+
+        self.setMinimumSize(min(min_w, avail_w), min(min_h, avail_h))
+        self.resize(min(pref_w, avail_w), min(pref_h, avail_h))
+
+        # Centre the window in the available area so the clipped-edges look
+        # does not depend on where the WM happens to place it.
+        if avail is not None:
+            frame = self.frameGeometry()
+            frame.moveCenter(avail.center())
+            self.move(frame.topLeft())
 
     def _setup_ui(self):
         central = QWidget()
@@ -68,7 +114,7 @@ class MainWindow(QMainWindow):
         logo_text.setStyleSheet("font-size: 16px; font-weight: 800; color: #f59e0b; letter-spacing: 2px; border: none;")
         logo_layout.addWidget(logo_text)
 
-        version = QLabel("v2.0 Professional")
+        version = QLabel("v2.0.1 Professional")
         version.setStyleSheet("font-size: 10px; color: #475569; letter-spacing: 1px; border: none;")
         logo_layout.addWidget(version)
 
@@ -155,7 +201,7 @@ class MainWindow(QMainWindow):
 
         # Status bar
         self.statusBar().setStyleSheet("background: #111827; color: #64748b; border-top: 1px solid #1e293b; font-size: 11px;")
-        self.statusBar().showMessage("Ready — DroidForenX v2.0 Professional")
+        self.statusBar().showMessage("Ready — DroidForenX v2.0.1 Professional")
 
         self._navigate_to(0)
 
@@ -345,7 +391,7 @@ class MainWindow(QMainWindow):
 
     def _show_about(self):
         QMessageBox.about(self, "About DroidForenX",
-            "<h2>DroidForenX v2.0</h2>"
+            "<h2>DroidForenX v2.0.1</h2>"
             "<p>Professional Digital Forensics</p>"
             "<p>Standalone mobile device forensic tool for law enforcement "
             "and forensic investigators.</p>"

@@ -36,7 +36,11 @@ def enable_page_scroll(page: QWidget, margins=(0, 0, 0, 0)) -> QScrollArea | Non
     scroll = QScrollArea(page)
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QFrame.Shape.NoFrame)
-    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    # Horizontal scrolling stays available. Turning it off does not make the
+    # content fit -- it silently clips whatever is wider than the viewport,
+    # which on a narrow screen means cards sit half-drawn with no way to reach
+    # them. As-needed keeps the common case clean and makes the rest reachable.
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
     scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
     scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
     scroll.setWidget(container)
