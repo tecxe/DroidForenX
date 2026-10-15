@@ -1,0 +1,28 @@
+# Android / ADB udev rules for DroidForenX on Linux (Kali, Debian, Ubuntu, Fedora).
+#
+# Without these rules a non-root user cannot talk to an attached device, and you
+# would be forced to run the whole application under sudo - which is a bad idea
+# for a forensic tool because it writes case evidence as root and leaves root-owned
+# files behind. Install these once, then plug the device in as a normal user.
+#
+#   sudo cp tools/99-android-rules.rules /etc/udev/rules.d/99-android-rules.rules
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger
+#
+# Verify with:  adb devices     (device should list as "device", not "unauthorized")
+
+# Google's vendor ID. Fastboot uses 0x18d1 too but with a different interface.
+SUBSYSTEM=="usb", ATTR{idVendor}=="18d1", MODE="0666", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0505", MODE="0666", TAG+="uaccess"
+
+# Samsung, HTC, LG, Huawei, ZTE and other common Android OEM vendor IDs, so an
+# examiner is not blocked by a device that reports a different vendor.
+SUBSYSTEM=="usb", ATTR{idVendor}=="04e8", MODE="0666", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0bb4", MODE="0666", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="1004", MODE="0666", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="12d1", MODE="0666", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="19d2", MODE="0666", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="22b8", MODE="0666", TAG+="uaccess"
+
+# Qualcomm HSIC / QDLoader used by a number of locked bootloaders.
+SUBSYSTEM=="usb", ATTR{idVendor}=="05c6", MODE="0666", TAG+="uaccess"

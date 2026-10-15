@@ -20,6 +20,7 @@ import argparse
 import io
 import os
 import shutil
+import stat
 import sys
 import urllib.request
 import zipfile
@@ -28,6 +29,14 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent
 TOOLS_DIR = PROJECT_ROOT / "tools"
 DEST_DIR = TOOLS_DIR / "platform-tools"
+
+#: The platform-tools executables that must be runnable on POSIX hosts.
+_POSIX_TOOLS = ("adb", "fastboot", "mke2fs")
+
+
+def adb_binary() -> Path:
+    """Path of the adb executable for this platform (adb.exe on Windows)."""
+    return DEST_DIR / ("adb.exe" if os.name == "nt" else "adb")
 
 # Official Google repository for Android platform-tools.
 _URLS = {
@@ -47,8 +56,40 @@ def platform_urls() -> list[str]:
     return list(urls)
 
 
-def is_installed() -> bool:
-    return (DEST_DIR / "adb.exe").exists() or (DEST_DIR / "adb").exists()
+def make_executable(directory: Path | None = None, posix: bool | None = None) -> None:
+    """
+    Restore the executable bit on POSIX hosts.
+
+    Python's zipfile module does not apply the Unix permission bits stored in a
+    zip entry, so a freshly extracted adb comes out non-executable and every
+    later call fails with "Permission denied". Windows has no such bit.
+
+    ``posix`` is injectable so this stays testable on a Windows host.
+    """
+    if posix is None:
+        posix = os.name != "nt"
+    if not posix:
+        return
+    directory = directory or DEST_DIR
+    for name in _POSIX_TOOLS:
+        target = directory / name
+        if target.exists():
+            mode = target.stat().st_mode
+            target.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def is_installed(posix: bool | None = None) -> bool:
+    """True when adb is present and, on POSIX, actually executable."""
+    if posix is None:
+        posix = os.name != "nt"
+    adb = DEST_DIR / ("adb" if posix else "adb.exe")
+    if not adb.exists():
+        # Tolerate a bundle produced on the other OS rather than re-downloading.
+        legacy = DEST_DIR / ("adb.exe" if posix else "adb")
+        return legacy.exists()
+    if not posix:
+        return True
+    return os.access(adb, os.X_OK)
 
 
 def download_to_bytes(url: str) -> bytes:
@@ -62,6 +103,7 @@ def extract(zip_bytes: bytes) -> None:
         zf.extractall(TOOLS_DIR)
     # The archive contains a top-level "platform-tools/" directory that
     # exactly matches DEST_DIR; nothing to move.
+    make_executable()
 
 
 def install(force: bool = False) -> None:
@@ -88,7 +130,11 @@ def install(force: bool = False) -> None:
 
 def check() -> int:
     if is_installed():
-        print(f"OK: adb present at {DEST_DIR}")
+        adb = adb_binary()
+        print(f"OK: adb present at {adb}")
+        if os.name != "nt" and not os.access(adb, os.X_OK):
+            print("  note: not executable — run without --check to repair", file=sys.stderr)
+            return 1
         return 0
     print("MISSING: adb not bundled (run without --check to install)")
     return 1

@@ -1,6 +1,11 @@
-"""Full ADB integration test."""
+"""Full ADB integration test. Requires a connected device; prints results."""
 import sys, os
-sys.path.insert(0, r"C:\Users\VICTUS\OneDrive\Desktop\android\droidforenx")
+from pathlib import Path
+
+# Resolve the repository root relative to this file so the script is portable.
+_ROOT = Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 from desktop.core import adb_manager as adb
 

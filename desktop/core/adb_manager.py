@@ -1,8 +1,10 @@
 """Standalone ADB manager — no Django dependency."""
+import os
 import subprocess
 import re
 import json
 import logging
+import shutil
 import sys
 from pathlib import Path
 from typing import Optional, Tuple
@@ -10,31 +12,71 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-def _find_adb() -> str:
-    """Locate ADB binary — bundled first, then system PATH."""
-    # When running as PyInstaller .exe, check _MEIPASS first
-    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-        meipass = Path(sys._MEIPASS)
-        for candidate in [
-            meipass / "tools" / "platform-tools" / "adb.exe",
-            meipass / "adb_bundle" / "adb.exe",
-        ]:
+def adb_executable_name(os_name: str | None = None) -> str:
+    """
+    Name of the adb executable for a platform: ``adb.exe`` on Windows, ``adb``
+    everywhere else (Linux/Kali, macOS).
+
+    ``os_name`` is injectable so the platform branches stay testable without
+    mutating ``os.name`` (which pathlib consults at import time).
+    """
+    return "adb.exe" if (os_name or os.name) == "nt" else "adb"
+
+
+def find_adb(exe_name: str | None = None) -> str:
+    """
+    Locate the ADB binary. Works on Windows, Linux (including Kali) and macOS.
+
+    Order of preference:
+      1. DROIDFORENX_ADB_PATH env override (explicit operator choice),
+         with DROIDFORENX_ADB accepted as a legacy alias.
+      2. Bundled copy shipped with the app / PyInstaller bundle.
+      3. adb on the system PATH.
+    """
+    exe_name = exe_name or adb_executable_name()
+
+    # DROIDFORENX_ADB_PATH is the documented name (see .env.example); the
+    # shorter DROIDFORENX_ADB is kept as an alias so either spelling works.
+    override = os.environ.get("DROIDFORENX_ADB_PATH") or os.environ.get("DROIDFORENX_ADB")
+    if override:
+        # Allow a bare executable name as well as a path, so a Linux operator
+        # can set DROIDFORENX_ADB_PATH=adb without it resolving to nothing.
+        resolved = shutil.which(override) or override
+        if Path(resolved).exists():
+            return resolved
+        logger.warning(
+            "ADB override %r not found; falling back to auto-detection", override
+        )
+
+    # When running as a PyInstaller one-file build, check _MEIPASS first.
+    meipass = getattr(sys, "_MEIPASS", None)
+    if getattr(sys, "frozen", False) and meipass:
+        root = Path(meipass)
+        for candidate in (
+            root / "tools" / "platform-tools" / exe_name,
+            root / "adb_bundle" / exe_name,
+        ):
             if candidate.exists():
                 return str(candidate)
 
-    # Running from source
+    # Running from source.
     base = Path(__file__).resolve().parent
-    for candidate in [
-        base / "adb_bundle" / "adb.exe",
-        base.parent / "tools" / "platform-tools" / "adb.exe",
-        base.parent.parent / "tools" / "platform-tools" / "adb.exe",
-    ]:
+    for candidate in (
+        base / "adb_bundle" / exe_name,
+        base.parent / "tools" / "platform-tools" / exe_name,
+        base.parent.parent / "tools" / "platform-tools" / exe_name,
+    ):
         if candidate.exists():
             return str(candidate)
 
-    return "adb"
+    # Finally defer to the system PATH (Kali ships adb via android-tools-adb).
+    return shutil.which("adb") or exe_name
 
-ADB_PATH = _find_adb()
+
+#: Executable name for the current platform.
+ADB_EXE = adb_executable_name()
+#: Resolved absolute or PATH-based ADB location.
+ADB_PATH = find_adb()
 
 
 @dataclass
@@ -67,7 +109,10 @@ def adb_cmd(args: list, timeout: int = 30) -> Tuple[bool, str]:
             capture_output=True, text=True, timeout=timeout, errors="replace",
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
         )
-        return result.returncode == 0, result.stdout.strip()
+        if result.returncode == 0:
+            return True, result.stdout.strip()
+        # adb reports failures on stderr; fall back to stdout so callers get a reason.
+        return False, (result.stderr.strip() or result.stdout.strip())
     except FileNotFoundError:
         logger.error(f"ADB binary not found at: {ADB_PATH}")
         return False, f"ADB binary not found at: {ADB_PATH}"
@@ -85,31 +130,80 @@ def adb_shell(serial: str, command: str, timeout: int = 30) -> Tuple[bool, str]:
 
 
 def list_devices() -> list:
-    """List all connected ADB devices."""
+    """
+    List every ADB-attached device together with its state.
+
+    Devices are NOT filtered out for being unauthorised or offline. Silently
+    dropping them makes an unapproved phone look like an empty list, and an
+    examiner concludes "no device" rather than "tap Allow USB debugging". The
+    caller decides what to do with a non-ready device.
+    """
     ok, output = adb_cmd(["devices", "-l"])
     if not ok:
         return []
     devices = []
     for line in output.splitlines()[1:]:
         line = line.strip()
-        if not line or "offline" in line:
+        if not line or line.startswith("*"):
             continue
         parts = line.split()
-        if len(parts) >= 2 and parts[1] == "device":
-            serial = parts[0]
-            info = {}
-            for part in parts[2:]:
-                if ":" in part:
-                    k, v = part.split(":", 1)
-                    info[k] = v
-            devices.append({
-                "serial": serial,
-                "model": info.get("model", ""),
-                "product": info.get("product", ""),
-                "device": info.get("device", ""),
-                "transport_id": info.get("transport_id", ""),
-            })
+        if len(parts) < 2:
+            continue
+        serial, state = parts[0], parts[1]
+        info = {}
+        for part in parts[2:]:
+            if ":" in part:
+                k, v = part.split(":", 1)
+                info[k] = v
+        devices.append({
+            "serial": serial,
+            "state": state,
+            "ready": state == "device",
+            "model": info.get("model", ""),
+            "product": info.get("product", ""),
+            "device": info.get("device", ""),
+            "transport_id": info.get("transport_id", ""),
+        })
     return devices
+
+
+def ready_devices() -> list:
+    """Only devices that are authorised and ready for acquisition."""
+    return [d for d in list_devices() if d["ready"]]
+
+
+def describe_connection_state() -> str:
+    """
+    A human-readable explanation of why a device may not be usable.
+    Returned to the UI so a stalled phone is diagnosed, not guessed at.
+    """
+    devices = list_devices()
+    if not devices:
+        return ("No device attached. Connect by USB, enable Developer options -> "
+                "USB debugging, and set the USB mode to File Transfer (MTP).")
+    notes = []
+    for dev in devices:
+        state = dev["state"]
+        if state == "device":
+            notes.append(f"{dev['serial']} ({dev['model'] or 'unknown model'}) is ready.")
+        elif state == "unauthorized":
+            notes.append(
+                f"{dev['serial']} is UNAUTHORISED. Unlock the phone and accept the "
+                "'Allow USB debugging' prompt, then reconnect."
+            )
+        elif state == "offline":
+            notes.append(
+                f"{dev['serial']} is offline. Unplug and replug the cable, or run "
+                "'adb kill-server' then reconnect."
+            )
+        elif state == "recovery":
+            notes.append(
+                f"{dev['serial']} is in recovery mode - logical acquisition is not "
+                "possible; use a dedicated acquisition procedure."
+            )
+        else:
+            notes.append(f"{dev['serial']} reports state '{state}'.")
+    return " ".join(notes)
 
 
 def connect_device(serial: str) -> bool:
@@ -218,9 +312,32 @@ def get_device_info(serial: str) -> DeviceInfo:
     return info
 
 
+def pm_list(serial: str, what: str = "packages", flags: str = "") -> tuple:
+    """
+    Run a ``pm list`` query scoped to the primary user.
+
+    Plain ``pm list packages`` enumerates *every* Android user on the device.
+    On any phone carrying a secondary or work profile the shell lacks
+    permission for the other users and the command aborts with
+    ``SecurityException: Shell does not have permission to access user 999``,
+    returning error text instead of a package list. Scoping to user 0 - where
+    the owner's own apps live - is what an examination of the primary user
+    actually wants.
+
+    Falls back to the unscoped form on builds that reject ``--user``.
+    """
+    scoped = f"pm list {what} --user 0 {flags}".strip()
+    ok, out = adb_shell(serial, scoped, timeout=60)
+    if ok and "Shell does not have permission" not in out:
+        return ok, out
+
+    unscoped = f"pm list {what} {flags}".strip()
+    return adb_shell(serial, unscoped, timeout=60)
+
+
 def get_installed_packages(serial: str) -> list:
     """List all installed packages with paths."""
-    ok, output = adb_shell(serial, "pm list packages -f", timeout=60)
+    ok, output = pm_list(serial, "packages", "-f")
     if not ok or not output:
         return []
     packages = []
@@ -597,3 +714,75 @@ def shell_find_signatures(serial: str, base_dir: str, timeout: int = 120) -> lis
             })
 
     return signatures
+
+
+def is_device_rooted(serial: str) -> bool:
+    """
+    Detect whether the device grants root to the adb shell user.
+
+    Several loaders pull from app-private (``/data/data/<pkg>``) and keystore
+    (``/data/misc/wifi``) paths that Android only exposes to root. The tool
+    checks once per session so those loaders can report NOT_ACCESSIBLE with an
+    accurate reason instead of returning an empty result that reads as success.
+
+    Detection is deliberately conservative: any positive indication returns
+    True, but an inconclusive probe returns False so we never overstate access.
+    """
+    probes = (
+        "id",
+        "su -c id",
+        "/system/xbin/su -c id",
+        "/system/bin/su -c id",
+    )
+
+    for probe in probes:
+        ok, out = adb_shell(serial, probe, timeout=10)
+        if not ok or not out:
+            continue
+        text = out.strip().lower()
+        if "uid=0" in text:
+            return True
+        # Some su binaries prompt and time out; a bare "denied" still means no.
+        if "not found" in text or "permission denied" in text:
+            continue
+
+    # Fall back to probing a known root-only path directly.
+    ok, out = adb_shell(serial, "ls /data/data/ 2>/dev/null | head -n 1", timeout=10)
+    if ok and out.strip() and "permission denied" not in out.lower():
+        return True
+
+    return False
+
+
+def device_root_summary(serial: str) -> dict:
+    """
+    A reportable summary of what this device will and will not permit.
+    Surfaced in the UI so an examiner knows the acquisition's ceiling before
+    interpreting a result, rather than discovering it from an empty table.
+    """
+    try:
+        info = get_device_info(serial)
+    except Exception:
+        info = None
+
+    rooted = is_device_rooted(serial)
+    model = getattr(info, "model", "") or ""
+    manufacturer = getattr(info, "manufacturer", "") or ""
+
+    return {
+        "serial": serial,
+        "model": model,
+        "manufacturer": manufacturer,
+        "android_version": getattr(info, "android_version", "") or "",
+        "sdk_int": getattr(info, "api_level", 0) or 0,
+        "encryption_status": getattr(info, "encryption_status", "") or "",
+        "rooted": rooted,
+        "can_reach_app_private_data": rooted,
+        "can_reach_sdcard": True,
+        "limitation": (
+            None if rooted
+            else "App-private data (/data/data/<pkg>) and saved WiFi keys "
+                 "(/data/misc/wifi) are not readable without root. Loaders that "
+                 "require them report NOT_ACCESSIBLE."
+        ),
+    }
