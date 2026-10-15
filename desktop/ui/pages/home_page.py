@@ -3,6 +3,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
                               QFrame, QGridLayout, QScrollArea)
 from PyQt6.QtCore import Qt, pyqtSignal
 from ..widgets.stage_bar import StageBar
+from ..widgets.card import Card
 
 
 class HomePage(QWidget):
@@ -18,6 +19,10 @@ class HomePage(QWidget):
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        # The page is sized to its content and grows downward; a horizontal
+        # bar would only appear when a card's own width is impossible.
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
 
         container = QWidget()
@@ -61,16 +66,7 @@ class HomePage(QWidget):
         ]
         self.stat_values = []
         for val, label, color in stats:
-            card = QFrame()
-            card.setStyleSheet(f"""
-                QFrame {{
-                    background: #111827;
-                    border: 1px solid #1e293b;
-                    border-left: 3px solid {color};
-                    border-radius: 8px;
-                    padding: 20px;
-                }}
-            """)
+            card = Card(accent=color, radius=8)
             v = QVBoxLayout(card)
             v.setSpacing(6)
             lbl_val = QLabel(val)
@@ -84,8 +80,7 @@ class HomePage(QWidget):
         layout.addLayout(stats_layout)
 
         # ── Workflow Progress ──
-        workflow_card = QFrame()
-        workflow_card.setStyleSheet("QFrame { background: #111827; border: 1px solid #1e293b; border-radius: 10px; padding: 20px; }")
+        workflow_card = Card(radius=10)
         wf_layout = QVBoxLayout(workflow_card)
         wf_layout.setSpacing(12)
         wf_title = QLabel("📋 Forensic Workflow Progress")
@@ -97,8 +92,7 @@ class HomePage(QWidget):
         layout.addWidget(workflow_card)
 
         # ── Quick Actions ──
-        actions_card = QFrame()
-        actions_card.setStyleSheet("QFrame { background: #111827; border: 1px solid #1e293b; border-radius: 10px; padding: 20px; }")
+        actions_card = Card(radius=10)
         act_layout = QVBoxLayout(actions_card)
         act_layout.setSpacing(10)
         act_title = QLabel("⚡ Quick Actions")

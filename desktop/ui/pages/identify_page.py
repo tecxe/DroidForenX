@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSignal as Signal
 from ..widgets.log_console import LogConsole
 from ..widgets.device_status_bar import DeviceStatusBar
+from ..widgets.scroll_page import enable_page_scroll
 from ...core import adb_manager as adb
 import uuid
 from datetime import datetime, timezone
@@ -110,6 +111,10 @@ class IdentifyPage(QWidget):
         self.console = LogConsole("Identification Log")
         self.console.setMinimumHeight(200)
         layout.addWidget(self.console)
+
+        # The page had no scroll area, so a short window forced the layout to
+        # compress the console instead of scrolling.
+        enable_page_scroll(self)
 
     def set_device(self, serial: str):
         self._serial = serial

@@ -14,6 +14,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSignal as Signal
 from ..widgets.log_console import LogConsole
 from ..widgets.data_table import DataTable
 from ..widgets.device_status_bar import DeviceStatusBar
+from ..widgets.scroll_page import enable_page_scroll
 from ...core import adb_manager as adb
 from ...core.database import get_db, audit_log
 from ...core.email_extractor import extract_gmail_emails, extract_outlook_emails, extract_email_accounts
@@ -1845,6 +1846,9 @@ class AcquirePage(QWidget):
         self.console = LogConsole("Acquisition Log")
         self.console.setMinimumHeight(200)
         layout.addWidget(self.console)
+
+        # No scroll area previously, so a short window compressed the console.
+        enable_page_scroll(self)
 
     def set_device(self, serial: str, case_id: str = ""):
         self._serial = serial

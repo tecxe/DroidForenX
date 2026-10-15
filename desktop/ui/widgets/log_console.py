@@ -1,16 +1,30 @@
 """Log console widget for real-time forensic output."""
-from PyQt6.QtWidgets import QPlainTextEdit, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+from PyQt6.QtWidgets import (QPlainTextEdit, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+                              QPushButton, QSizePolicy)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QTextCursor
 from datetime import datetime
 
+#: Smallest useful console height. Below this the log stops being readable, so
+#: the containing page is expected to scroll rather than compress the console.
+CONSOLE_MIN_HEIGHT = 200
+CONSOLE_MIN_TOTAL = 240
+
 
 class LogConsole(QWidget):
-    """Real-time forensic log console with clear and copy."""
+    """Real-time forensic log console with clear and copy.
+
+    Vertically ``Expanding`` so it takes any spare height on a tall window, but
+    floored at a readable minimum: with the default ``Preferred`` policy the
+    console is freely shrinkable and a short window squeezes it down to a few
+    unusable lines.
+    """
     cleared = pyqtSignal()
 
     def __init__(self, title: str = "Console Output", parent=None):
         super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        self.setMinimumHeight(CONSOLE_MIN_TOTAL)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -34,6 +48,8 @@ class LogConsole(QWidget):
         self.console = QPlainTextEdit()
         self.console.setReadOnly(True)
         self.console.setMaximumBlockCount(5000)
+        self.console.setMinimumHeight(CONSOLE_MIN_HEIGHT)
+        self.console.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self.console.setFont(QFont("Cascadia Code, Consolas, monospace", 11))
         self.console.setStyleSheet("""
             QPlainTextEdit {

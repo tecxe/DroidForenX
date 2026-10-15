@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
 from ..widgets.data_table import DataTable
+from ..widgets.scroll_page import enable_page_scroll
 
 
 class CaseDialog(QDialog):
@@ -132,6 +133,9 @@ class CasePage(QWidget):
         layout.addWidget(self.table)
 
         layout.addStretch()
+
+        # No scroll area previously, so a short window compressed the table.
+        enable_page_scroll(self)
 
     def refresh(self):
         conn = self.db_get()

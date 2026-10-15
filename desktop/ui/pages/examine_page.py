@@ -8,6 +8,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSignal as Signal
 from PyQt6.QtGui import QFont, QColor
 from ..widgets.log_console import LogConsole
 from ..widgets.device_status_bar import DeviceStatusBar
+from ..widgets.scroll_page import enable_page_scroll
 from ...core import forensic_engine as engine
 
 
@@ -156,8 +157,12 @@ class ExaminePage(QWidget):
 
         # Console
         self.console = LogConsole("Examination Log")
-        self.console.setMinimumHeight(160)
+        # This page previously pinned the console to 160px, which was the
+        # tightest squeeze in the app. Keep the LogConsole's own readable floor.
         layout.addWidget(self.console)
+
+        # No scroll area previously, so a short window compressed the console.
+        enable_page_scroll(self)
 
     def set_device(self, serial: str):
         self._serial = serial

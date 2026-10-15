@@ -6,6 +6,8 @@ from PyQt6.QtGui import QPixmap, QFont
 from pathlib import Path
 import os, json, hashlib, sqlite3, time, subprocess, tempfile
 
+from ..widgets.scroll_page import enable_page_scroll
+
 
 DARK_STYLE = """
 QWidget { background: #0f172a; color: #e2e8f0; font-family: 'Segoe UI', sans-serif; font-size: 13px; }
@@ -385,6 +387,10 @@ class BrowsePage(QWidget):
 
         root_layout.addLayout(status_row)
 
+        # No scroll area previously, so a short window compressed the tree and
+        # preview panes instead of scrolling.
+        enable_page_scroll(self)
+
     def showEvent(self, event):
         super().showEvent(event)
         self.device_bar.auto_scan()
@@ -763,7 +769,7 @@ class BrowsePage(QWidget):
         self.progress.setVisible(True)
         self.progress.setRange(0, 0)
         self.pull_btn.setEnabled(False)
-        self._pull_worker = PullFileWorker(self.adb, remote)
+        self._pull_worker = PullFileWorker(self.current_serial, remote)
         self._pull_worker.finished.connect(self._on_pull_finished)
         self._pull_worker.start()
 
@@ -891,33 +897,38 @@ class BrowsePage(QWidget):
 class PullFileWorker(QThread):
     finished = pyqtSignal(dict)
 
-    def __init__(self, adb, remote_path):
+    def __init__(self, serial, remote_path):
         super().__init__()
-        self.adb = adb
+        self.serial = serial
         self.remote_path = remote_path
 
     def run(self):
         try:
-            fname = os.path.basename(self.remote_path)
-            ext = os.path.splitext(fname)[1].lower()
-            cache_dir = os.path.join(os.path.expanduser("~"), ".droidforenx", "pull_cache")
-            os.makedirs(cache_dir, exist_ok=True)
-            local_path = os.path.join(cache_dir, fname)
-
-            serial = self.adb.device_serial
-            if not serial:
+            if not self.serial:
                 self.finished.emit({"success": False, "error": "No device connected"})
                 return
 
-            import subprocess as sp
-            cmd = self.adb.adb_path
-            result = sp.run(
-                [cmd, "-s", serial, "pull", self.remote_path, local_path],
-                capture_output=True, text=True, timeout=60,
-                creationflags=0x08000000
+            from ...core import adb_manager as adb
+
+            fname = os.path.basename(self.remote_path.rstrip("/"))
+            ext = os.path.splitext(fname)[1].lower()
+            if not fname:
+                self.finished.emit({"success": False, "error": "Not a file path"})
+                return
+
+            cache_dir = os.path.join(os.path.expanduser("~"), ".droidforenx", "pull_cache")
+            os.makedirs(cache_dir, exist_ok=True)
+
+            # Different paths routinely share a basename; disambiguate so a preview
+            # can never silently render the wrong file.
+            tag = hashlib.sha1(self.remote_path.encode("utf-8", "replace")).hexdigest()[:8]
+            local_path = os.path.join(cache_dir, f"{tag}_{fname}")
+
+            ok, msg = adb.adb_cmd(
+                ["-s", self.serial, "pull", self.remote_path, local_path], timeout=120
             )
 
-            if result.returncode == 0 and os.path.isfile(local_path):
+            if ok and os.path.isfile(local_path):
                 self.finished.emit({
                     "success": True,
                     "local_path": local_path,
@@ -925,9 +936,8 @@ class PullFileWorker(QThread):
                     "extension": ext,
                 })
             else:
-                self.finished.emit({
-                    "success": False,
-                    "error": result.stderr or result.stdout or "ADB pull failed"
-                })
+                if not ok and not msg:
+                    msg = "ADB pull failed"
+                self.finished.emit({"success": False, "error": msg})
         except Exception as e:
             self.finished.emit({"success": False, "error": str(e)})
