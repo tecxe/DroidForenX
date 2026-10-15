@@ -7,6 +7,9 @@ PyQt6>=6.7
 # PDF report generation
 fpdf2>=2.8
 
+# XLSX verification workbook
+openpyxl>=3.1
+
 # Image handling / metadata
 Pillow>=10.4
 

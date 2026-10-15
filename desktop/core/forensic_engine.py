@@ -9,14 +9,35 @@ from datetime import datetime, timezone
 from collections import Counter
 from typing import Optional
 from . import adb_manager as adb
+from . import evidence_store
+from .evidence_store import AcquisitionStatus
 
 logger = logging.getLogger(__name__)
 
-EVIDENCE_ROOT = Path.home() / ".droidforenx" / "evidence"
+#: Kept for backward compatibility. New code should use evidence_store.case().
+EVIDENCE_ROOT = evidence_store.EVIDENCE_ROOT
+
+
+def _unique_name(target_dir: Path, local_name: str, remote_path: str) -> str:
+    """
+    Pick a filename inside ``target_dir`` that cannot clobber an existing artifact.
+
+    Two different remote paths routinely share a basename (``.../a/photo.jpg``
+    and ``.../b/photo.jpg``). Pulling both into the evidence set would
+    silently overwrite the first artifact, so a collision is disambiguated
+    with a short digest of the remote path. The original name is always kept
+    for the first pull, so normal cases stay readable.
+    """
+    base = Path(local_name).name
+    candidate = target_dir / base
+    if not candidate.exists():
+        return base
+    tag = hashlib.sha1(remote_path.encode("utf-8", "replace")).hexdigest()[:8]
+    return f"{candidate.stem}_{tag}{candidate.suffix}"
 
 
 def _ensure_evidence_dir():
-    EVIDENCE_ROOT.mkdir(parents=True, exist_ok=True)
+    evidence_store.ensure_case_tree(evidence_store.get_active_case() or "unassigned")
 
 
 def _ts_to_str(ts_ms):
@@ -34,13 +55,37 @@ def _ts_to_str_s(ts_s):
 
 
 def _safe_pull_db(serial, remote_path, local_name, evidence_root=None):
-    _ensure_evidence_dir()
-    base = evidence_root or EVIDENCE_ROOT
-    local_path = str(base / local_name)
-    ok = adb.pull_file(serial, remote_path, local_path)
-    if ok and Path(local_path).exists() and Path(local_path).stat().st_size > 0:
-        return local_path
-    return None
+    """
+    Pull a file off the device into the case's immutable ``acquired/`` tree,
+    hash it, and record it in the manifest.
+
+    The file is never deleted. Parsers read from this location and the copy
+    survives for re-verification and for the defence of the acquisition.
+    """
+    case_id = evidence_store.resolve_case()
+    target_dir = evidence_store.acquired_dir(case_id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    local_path = str(target_dir / _unique_name(target_dir, local_name, remote_path))
+
+    if not adb.pull_file(serial, remote_path, local_path):
+        evidence_store.record_status(
+            case_id, "acquire", AcquisitionStatus.NOT_ACCESSIBLE,
+            f"{remote_path}: not readable on this device (root required, or app not installed)",
+        )
+        return None
+
+    path = Path(local_path)
+    if not path.exists() or path.stat().st_size == 0:
+        path.unlink(missing_ok=True)
+        evidence_store.record_status(
+            case_id, "acquire", AcquisitionStatus.NOT_PRESENT,
+            f"{remote_path}: absent or zero-length on device",
+        )
+        return None
+
+    evidence_store.record_acquired(case_id, remote_path, path, loader="adb-pull")
+    return str(path)
 
 
 def _query_db(db_path, sql, params=None):
@@ -172,8 +217,6 @@ def analyze_browser(serial):
             results["chrome"] = [{"url": r.get("url", ""), "title": r.get("title", ""), "visits": r.get("visit_count", 0), "typed": r.get("typed_count", 0)} for r in rows]
         except Exception as e:
             logger.error(f"Chrome DB error: {e}")
-        finally:
-            Path(local_db).unlink(missing_ok=True)
     if results["chrome"]:
         domains = []
         for entry in results["chrome"]:
@@ -257,7 +300,7 @@ def analyze_bluetooth(serial):
 
 def analyze_apps(serial):
     results = {"installed": [], "social_media": [], "messaging": [], "suspicious": []}
-    ok, packages = adb.adb_shell(serial, "pm list packages -f", timeout=60)
+    ok, packages = adb.pm_list(serial, "packages", "-f")
     if ok and packages:
         social_kw = ["facebook", "twitter", "instagram", "snapchat", "tiktok",
                      "telegram", "whatsapp", "signal", "linkedin", "tinder"]
@@ -375,16 +418,12 @@ def analyze_whatsapp(serial, evidence_root=None):
             results["messages"] = messages
         except Exception as e:
             logger.error(f"WhatsApp msgstore parse error: {e}")
-        finally:
-            Path(local_msgstore).unlink(missing_ok=True)
     if local_wa:
         try:
             contacts = _query_db(local_wa, "SELECT jid, display_name, phone, status FROM wa_contacts WHERE is_whatsapp=1")
             results["contacts"] = contacts
         except Exception as e:
             logger.error(f"WhatsApp wa.db parse error: {e}")
-        finally:
-            Path(local_wa).unlink(missing_ok=True)
     results["stats"] = {
         "total_messages": len(results["messages"]),
         "total_contacts": len(results["contacts"]),
@@ -427,8 +466,6 @@ def analyze_telegram(serial, evidence_root=None):
             results["messages"] = messages
         except Exception as e:
             logger.error(f"Telegram cache4 parse error: {e}")
-        finally:
-            Path(local_cache).unlink(missing_ok=True)
     for remote in userconfig_paths:
         local_conf = _safe_pull_db(serial, remote, f"telegram_userconfig_{serial[:8]}.xml", base)
         if local_conf:
@@ -443,8 +480,6 @@ def analyze_telegram(serial, evidence_root=None):
                     }
             except Exception:
                 pass
-            finally:
-                Path(local_conf).unlink(missing_ok=True)
             break
     results["stats"] = {
         "total_messages": len(results["messages"]),
@@ -479,8 +514,6 @@ def analyze_instagram(serial, evidence_root=None):
                 pulled += 1
             except Exception as e:
                 logger.error(f"Instagram DB parse error: {e}")
-            finally:
-                Path(local_db).unlink(missing_ok=True)
     results["stats"] = {"databases_found": len(db_paths), "databases_pulled": pulled}
     return results
 
@@ -510,8 +543,6 @@ def analyze_snapchat(serial, evidence_root=None):
                 pulled += 1
             except Exception as e:
                 logger.error(f"Snapchat DB parse error: {e}")
-            finally:
-                Path(local_db).unlink(missing_ok=True)
     results["stats"] = {"databases_found": len(db_paths), "databases_pulled": pulled}
     return results
 
@@ -539,8 +570,6 @@ def analyze_tiktok(serial, evidence_root=None):
                 pulled += 1
             except Exception as e:
                 logger.error(f"TikTok DB parse error: {e}")
-            finally:
-                Path(local_db).unlink(missing_ok=True)
     results["stats"] = {"databases_found": len(db_paths), "databases_pulled": pulled}
     return results
 
@@ -571,8 +600,6 @@ def analyze_facebook(serial, evidence_root=None):
                 pulled += 1
             except Exception as e:
                 logger.error(f"Facebook Messenger DB parse error: {e}")
-            finally:
-                Path(local_db).unlink(missing_ok=True)
     results["stats"] = {"databases_found": len(db_paths), "databases_pulled": pulled, "message_samples": len(results["messages"])}
     return results
 
@@ -585,7 +612,7 @@ def analyze_transactions(serial, evidence_root=None):
     airtel_pkg = "com.airtelmoney"
     voda_pkg = "com.vodafone.cash"
     bank_keywords = ["bank", "finance", "payment", "wallet", "credit", "debit"]
-    all_pkgs_ok, packages_raw = adb.adb_shell(serial, "pm list packages", timeout=30)
+    all_pkgs_ok, packages_raw = adb.pm_list(serial, "packages")
     installed = []
     if all_pkgs_ok and packages_raw:
         installed = [line.replace("package:", "").strip() for line in packages_raw.splitlines() if "package:" in line]
@@ -621,8 +648,6 @@ def analyze_transactions(serial, evidence_root=None):
                                 results[category].extend(sample)
                     except Exception as e:
                         logger.error(f"Transaction DB parse error ({category}): {e}")
-                    finally:
-                        Path(local_db).unlink(missing_ok=True)
     for pkg in installed:
         if any(kw in pkg.lower() for kw in bank_keywords):
             db_dir = f"/data/data/{pkg}/databases/"
@@ -645,8 +670,6 @@ def analyze_transactions(serial, evidence_root=None):
                             results["bank_apps"].append(db_info)
                     except Exception as e:
                         logger.error(f"Bank app DB parse error ({pkg}): {e}")
-                    finally:
-                        Path(local_db).unlink(missing_ok=True)
     results["stats"] = {
         "momo_records": len(results["momo"]),
         "airteltigo_records": len(results["airteltigo"]),
@@ -658,7 +681,7 @@ def analyze_transactions(serial, evidence_root=None):
 
 def analyze_installed_apps(serial):
     results = {"apps": [], "stats": {}}
-    ok, output = adb.adb_shell(serial, "pm list packages -f -i", timeout=60)
+    ok, output = adb.pm_list(serial, "packages", "-f -i")
     if not ok or not output:
         return results
     for line in output.splitlines():
@@ -689,7 +712,7 @@ def analyze_installed_apps(serial):
 
 def analyze_app_permissions(serial):
     results = {"permissions": {}, "dangerous": [], "stats": {}}
-    ok, output = adb.adb_shell(serial, "pm list packages -f", timeout=60)
+    ok, output = adb.pm_list(serial, "packages", "-f")
     if not ok or not output:
         return results
     packages = []
@@ -793,7 +816,7 @@ def analyze_clipboard(serial):
 
 
 def analyze_notifications(serial):
-    results = {"notifications": [], "stats": {}}
+    results: dict = {"notifications": [], "stats": {}}
     ok, data = adb.adb_shell(serial, "dumpsys notification --noredact", timeout=30)
     if not ok or not data:
         return results
@@ -831,9 +854,11 @@ def analyze_notifications(serial):
             "text": current_text or "",
             "time": current_time or "",
         })
-    results["stats"] = {"total": len(results["notifications"])}
     pkg_counts = Counter(n.get("package", "") for n in results["notifications"])
-    results["stats"]["by_package"] = [{"package": p, "count": c} for p, c in pkg_counts.most_common(20)]
+    results["stats"] = {
+        "total": len(results["notifications"]),
+        "by_package": [{"package": p, "count": c} for p, c in pkg_counts.most_common(20)],
+    }
     return results
 
 
@@ -893,28 +918,116 @@ ANALYSIS_MODULES = {
 }
 
 
+#: Loaders that pull from app-private (``/data/data/<pkg>``) or keystore
+#: (``/data/misc/wifi``) paths. Android exposes these to root only, so on an
+#: unrooted device they cannot succeed. The tool reports NOT_ACCESSIBLE with
+#: that reason rather than returning an empty result that reads as success.
+ROOT_REQUIRED_MODULES = frozenset({
+    "whatsapp", "telegram", "instagram", "snapchat", "tiktok", "facebook",
+    "transactions", "browser", "wifi_passwords", "deleted",
+})
+
+# Verification tiers are NOT declared here. A tier is a claim that a loader
+# works, so it is earned and recorded with its evidence in the case's
+# verification.jsonl via evidence_store.record_verification(). A loader with no
+# such record is T3_UNTESTED - which, today, is all of them. The old hardcoded
+# table claimed T1_DEVICE_VERIFIED for fourteen loaders with no device ever
+# connected; that was a fabricated claim and it is gone.
+
+
 def run_examination(serial, modules=None):
+    """
+    Run the requested loaders and report what each one actually achieved.
+
+    Every loader ends with one of the eight AcquisitionStatus values and a
+    VerificationTier. A loader that recovered nothing is never presented as a
+    success - the status and its reason are recorded to the case status log.
+    """
     if modules is None:
         modules = list(ANALYSIS_MODULES.keys())
     results = {}
+
+    case_id = evidence_store.resolve_case()
+    try:
+        device_rooted = adb.is_device_rooted(serial)
+    except Exception:
+        device_rooted = False
+
     for mod_key in modules:
         if mod_key not in ANALYSIS_MODULES:
             continue
         name, func = ANALYSIS_MODULES[mod_key]
+        needs_root = mod_key in ROOT_REQUIRED_MODULES
+
+        if needs_root and not device_rooted:
+            evidence_store.record_status(
+                case_id, mod_key, AcquisitionStatus.NOT_ACCESSIBLE,
+                f"{name} reads app-private paths; device is not rooted.",
+            )
+            results[mod_key] = {
+                "name": name,
+                "status": AcquisitionStatus.NOT_ACCESSIBLE,
+                "detail": "Device is not rooted. App-private data is unreadable "
+                          "without root. See the device capability report.",
+                "findings": {},
+                "item_count": 0,
+                "requires_root": True,
+                "verification_tier": evidence_store.get_verification_tier(case_id, mod_key),
+            }
+            continue
+
         try:
             findings = func(serial)
             total_items = sum(len(v) for v in findings.values() if isinstance(v, list))
+
+            if total_items > 0:
+                status = AcquisitionStatus.ACQUIRED
+                detail = f"{total_items} item(s) recovered."
+            else:
+                status = AcquisitionStatus.NOT_PRESENT
+                detail = ("Loader ran successfully but the device held nothing "
+                          "matching this artifact type.")
+
+            evidence_store.record_status(case_id, mod_key, status, detail)
             results[mod_key] = {
                 "name": name,
-                "status": "completed",
+                "status": status,
+                "detail": detail,
                 "findings": findings,
                 "item_count": total_items,
+                "requires_root": needs_root,
+                "verification_tier": evidence_store.get_verification_tier(case_id, mod_key),
             }
+
         except Exception as e:
+            logger.error(f"Loader {mod_key} failed: {e}")
+            evidence_store.record_status(case_id, mod_key, AcquisitionStatus.FAILED, str(e))
             results[mod_key] = {
                 "name": name,
-                "status": "failed",
-                "findings": {"error": str(e)},
+                "status": AcquisitionStatus.FAILED,
+                "detail": str(e),
+                "findings": {},
                 "item_count": 0,
+                "requires_root": needs_root,
+                "verification_tier": evidence_store.get_verification_tier(case_id, mod_key),
             }
+
+    # Derived so a report or the UI can show what was and was not achieved.
+    succeeded = [k for k, v in results.items()
+                 if v["status"] in AcquisitionStatus.SUCCESSFUL]
+    not_accessible = [k for k, v in results.items()
+                      if v["status"] == AcquisitionStatus.NOT_ACCESSIBLE]
+
+    summary = {
+        "device_rooted": device_rooted,
+        "modules_run": len(results),
+        "modules_succeeded": len(succeeded),
+        "modules_not_accessible": len(not_accessible),
+        "total_items": sum(v["item_count"] for v in results.values()),
+        "succeeded": succeeded,
+        "not_accessible": not_accessible,
+    }
+
+    evidence_store.write_parsed(case_id, "examination_summary", summary)
+    results["_summary"] = summary
     return results
