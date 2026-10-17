@@ -213,15 +213,19 @@ def _sheet_integrity(wb, data, integrity, case_id):
         return ws
 
     row = 2
+    actual_hashes = integrity.get("actual") or {}
     for digest, relative in data["hashes"]:
+        actual = actual_hashes.get(relative)
         if relative in integrity["missing"]:
-            result = "MISSING"
+            # Nothing on disk to re-hash; leave the column empty rather than
+            # echoing the manifest digest, which would read as a false match.
+            result, recomputed = "MISSING", ""
         elif relative in integrity["mismatched"]:
-            result = "MISMATCH"
+            result, recomputed = "MISMATCH", (actual or "")
         else:
-            result = "OK"
+            result, recomputed = "OK", (actual or digest)
         # Colour by this row's own result, not by the case-level verdict.
-        _write_row(ws, row, [relative, digest, digest, result],
+        _write_row(ws, row, [relative, digest, recomputed, result],
                    mono_cols=(2, 3), fill=RESULT_FILLS.get(result))
         ws.cell(row=row, column=4).font = _BOLD
         row += 1

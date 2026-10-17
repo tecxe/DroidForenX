@@ -472,9 +472,13 @@ def compute_integrity(case_id: str) -> dict:
     sums_path = manifest_dir(case_id) / "SHA256SUMS"
     if not sums_path.exists():
         return {"case_id": case_id, "checked": 0, "ok": 0, "mismatched": [], "missing": [],
-                "verdict": "NO_MANIFEST"}
+                "actual": {}, "verdict": "NO_MANIFEST"}
 
     mismatched, missing = [], []
+    #: relative path -> digest re-computed from the acquired file, or None when the
+    #: artifact is absent from disk. Callers (e.g. the XLSX workbook) show this
+    #: beside the manifest digest so the two can be compared at a glance.
+    actual_hashes: dict[str, Optional[str]] = {}
     ok = 0
     with open(sums_path, "r", encoding="utf-8") as handle:
         for line in handle:
@@ -488,8 +492,10 @@ def compute_integrity(case_id: str) -> dict:
             target = case_dir(case_id) / relative
             if not target.exists():
                 missing.append(relative)
+                actual_hashes[relative] = None
                 continue
             actual = hash_file(target)
+            actual_hashes[relative] = actual
             if actual == expected:
                 ok += 1
             else:
@@ -502,6 +508,7 @@ def compute_integrity(case_id: str) -> dict:
         "ok": ok,
         "mismatched": mismatched,
         "missing": missing,
+        "actual": actual_hashes,
         "verdict": verdict,
     }
 
