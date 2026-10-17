@@ -14,6 +14,7 @@ copy, and records an append-only chain of custody for every action.
 > | Claim | Status |
 > |---|---|
 > | Evidence preservation, hashing, custody, tamper detection | **Tested** — 22 automated tests, no device needed |
+> | RAW / ZIP / AFF4-L image output | **Tested** — writers, recording and the Create Image dialog, no device needed |
 > | 24 acquisition loaders implemented | **Code complete** |
 > | Device-verified loaders | **14 of 24** |
 > | Root-gated, reported `NOT_ACCESSIBLE` | **10 of 24** |
@@ -284,6 +285,41 @@ that integrity was verified.
 - Case identifiers are sanitised, so a crafted case ID cannot traverse out of
   the evidence root.
 
+### Images
+
+Acquisition writes a folder tree. When a container is wanted instead — the way
+FTK Imager's *Create Disk Image* works — use **Stage 3 → Create Image**. The
+dialog picks a source, an output format, and the parameters for it.
+
+| Format | Source | Output |
+|---|---|---|
+| **Raw (dd)** | a device partition | `evidence.001`, `evidence.002` … (or one `evidence.dd`), plus `.md5`/`.sha1`/`.sha256` sidecars and an `.imageinfo.txt` |
+| **ZIP** | a case folder | `evidence.zip` with a `MANIFEST.json` inventory, plus a hash sidecar |
+| **AFF4-L** | a case folder | `evidence.aff4`, a ZIP64 container with the AFF4 root segments and a Turtle metadata graph |
+
+Source and format are gated against each other: a block device can only be
+written as RAW, and a folder only as ZIP or AFF4. Segment size (default 2 GiB,
+or a single file), compression and hash algorithm are selectable, and the image
+is re-read and re-hashed after writing unless verification is turned off.
+
+Every finished image is recorded: a `disk_images` row, an `ACQUIRED` custody
+event, and one `record_acquired` artifact per segment, so it appears in the
+manifest and `SHA256SUMS` like anything else. A verification that failed, or was
+skipped, is recorded as such — it is never written down as `complete`.
+
+The whole feature is standard library only. There is no `libewf`, no bundled
+native binary, and no third-party dependency to install.
+
+| Writer | Module | Source kind |
+|---|---|---|
+| RAW | `desktop/core/imaging/raw.py` | a file-like reader |
+| ZIP | `desktop/core/imaging/zip.py` | a folder |
+| AFF4-L | `desktop/core/imaging/aff4.py` | a folder |
+| Device/folder sources | `desktop/core/imaging/sources.py` | — |
+| Recording | `desktop/core/imaging/registry.py` | — |
+
+The writers never touch ADB, which is what makes them testable without hardware.
+
 ---
 
 ## The 24 loaders
@@ -352,6 +388,21 @@ State these in any report; they are properties of Android, not bugs to be
 - **Logical acquisition is not a full image.** Files not written to accessible
   storage are not recovered. A full flash image is a separate procedure with
   its own legal authorisation requirement.
+- **Device imaging stops at readable partitions.** *Create Image* can capture
+  `boot`, `recovery` and any partition the ADB shell can open — usually nothing
+  else. Whole-disk and `userdata` capture needs root, and the TECNO KL6 used for
+  verification is unrooted with file-based encryption, so those are listed as
+  `needs root` rather than attempted. Partition metadata
+  (`/dev/block/by-name`, sizes) is readable without root; the data is not.
+- **AFF4 interop is unvalidated.** The AFF4-L writer is standard-library only
+  and its container is checked structurally — ZIP64 integrity, the required root
+  segments in order, the volume URN in `container.description` and the archive
+  comment, and a populated Turtle graph. It has **not** been opened with a
+  third-party AFF4 reader, because the available ones either cannot write
+  (`pyaff4`'s write support is broken and its dependencies do not build on
+  current Python) or are a native binary that omits hashing (`c-aff4`). Treat
+  the container as AFF4-L-shaped until it has been validated against a reference
+  implementation.
 - **Encryption**: a device with a locked FBE screen yields little.
 
 ---
@@ -363,10 +414,13 @@ python -m unittest `
   desktop.tests.test_evidence_store `
   desktop.tests.test_evidence_workbook `
   desktop.tests.test_forensic_engine `
+  desktop.tests.test_imaging `
+  desktop.tests.test_image_registry `
+  desktop.tests.test_create_image_dialog `
   desktop.tests.test_ui_export -v
 ```
 
-44 tests, no device required. They cover the properties that matter:
+85 tests, no device required. They cover the properties that matter:
 
 - an acquired artifact survives being read (the original bug was that 11
   loaders deleted evidence after parsing)
@@ -404,6 +458,36 @@ each report format, proving the default **HTML** renders its custody log, the
 workbook is readable. They also cover `PullFileWorker`'s success and failure
 contracts. This module is skipped when PyQt6 cannot start an application.
 
+The image-writer tests (`test_imaging.py`) exercise the writers without a device:
+
+- RAW segments concatenate back to the original bytes and hash to the same
+  digest as the source, and a source that ends exactly on a segment boundary
+  does not leave a phantom zero-byte segment behind
+- the sidecar and `.imageinfo.txt` carry the real image digest, and the info file
+  records the verification result rather than a default
+- `verify()` catches a modified segment or container, so a tampered image is not
+  reported as verified
+- a failed or empty acquisition leaves no half-written image on disk
+- AFF4 keeps its required root segments when a source folder contains a file
+  with the same name
+- the device layer builds the right `adb exec-out` command, discards stderr
+  inside the device shell, and refuses to call an unreadable partition available
+
+The registry tests (`test_image_registry.py`) pin the recording half:
+
+- the `disk_images` migration is idempotent and safe to re-run on an existing
+  database
+- a finished image gets a row with the real format, digest, segment list and
+  verification outcome
+- a failed verification is recorded as `failed`, not `complete`
+- every segment lands in the manifest and the custody log
+
+The dialog tests (`test_create_image_dialog.py`) run a headless Qt application
+and check the source/format gating (a device offers RAW only, a folder offers ZIP
+and AFF4), that the built request is one the writers accept, that an invalid base
+name is rejected before anything is written, and that an unreadable partition is
+refused rather than dispatched. No ADB call is made.
+
 `desktop/tests/` also contains `test_quick.py`, `test_deep.py`,
 `test_full_adb.py` and `test_integration.py`. These require a connected device
 and are **not** covered by CI.
@@ -416,6 +500,11 @@ DroidForenX is an **analysis and acquisition tool for authorised examination**.
 It does not and will not include: credential or PIN cracking, FRP or lock-screen
 bypass, rooting or unlocking of seized devices, exploitation, spyware, or
 unauthorised access. Use only on devices you are lawfully authorised to examine.
+
+Image output is no exception. *Create Image* writes a container from a source the
+tool can already read — it does not raise an unrooted device's privileges, does
+not bypass encryption, and does not read anything the acquisition stage could not
+already read.
 
 ---
 
