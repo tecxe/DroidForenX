@@ -15,6 +15,7 @@ from ..widgets.log_console import LogConsole
 from ..widgets.data_table import DataTable
 from ..widgets.device_status_bar import DeviceStatusBar
 from ..widgets.scroll_page import enable_page_scroll
+from ..dialogs import CreateImageDialog
 from ...core import adb_manager as adb
 from ...core.database import get_db, audit_log
 from ...core.email_extractor import extract_gmail_emails, extract_outlook_emails, extract_email_accounts
@@ -1715,6 +1716,7 @@ class AcquirePage(QWidget):
         self.db_get = db_get
         self._serial = ""
         self._case_id = ""
+        self._session_id = ""
         self._setup_ui()
 
     def _setup_ui(self):
@@ -1804,6 +1806,13 @@ class AcquirePage(QWidget):
         self.btn_stop.clicked.connect(self._stop_acquisition)
         btn_row.addWidget(self.btn_stop)
 
+        self.btn_create_image = QPushButton("💾 Create Image")
+        self.btn_create_image.setFixedHeight(42)
+        self.btn_create_image.setToolTip(
+            "Write a RAW, ZIP or AFF4 image of a partition or an acquired folder")
+        self.btn_create_image.clicked.connect(self._open_create_image)
+        btn_row.addWidget(self.btn_create_image)
+
         btn_row.addStretch()
 
         btn_next = QPushButton("Next: Examination →")
@@ -1850,12 +1859,24 @@ class AcquirePage(QWidget):
         # No scroll area previously, so a short window compressed the console.
         enable_page_scroll(self)
 
-    def set_device(self, serial: str, case_id: str = ""):
+    def set_device(self, serial: str, case_id: str = "", session_id: str = ""):
         self._serial = serial
         self._case_id = case_id
+        if session_id:
+            self._session_id = session_id
 
     def set_case(self, case_id: str):
         self._case_id = case_id
+
+    def set_session(self, session_id: str):
+        self._session_id = session_id
+
+    def _open_create_image(self):
+        """Open the FTK-style Create Image dialog for the selected device/case."""
+        serial = self._serial or self.device_bar.get_first_serial()
+        dialog = CreateImageDialog(
+            self, serial=serial or "", case_id=self._case_id, session_id=self._session_id)
+        dialog.exec()
 
     def _on_device_rescanned(self, devices):
         if devices:

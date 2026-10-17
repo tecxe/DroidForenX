@@ -1,0 +1,514 @@
+"""FTK-Imager-style *Create Image* dialog.
+
+The operator picks a source (a connected device's partition, or an acquired case
+folder), an output format, and the parameters for it; a worker thread writes the
+image and records it. Everything the writers need comes from
+:mod:`desktop.core.imaging`; this module is only the front end.
+
+Sources and formats are gated against each other on purpose: a block device can
+only be written as RAW, and a folder can only be written as ZIP or AFF4. Offering
+a combination that the writer would reject is worse than not offering it.
+"""
+from __future__ import annotations
+
+from datetime import datetime
+from pathlib import Path
+
+from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtWidgets import (
+    QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QGridLayout, QGroupBox,
+    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton,
+    QTabWidget, QTextEdit, QVBoxLayout, QWidget,
+)
+
+from ...core import evidence_store
+from ...core.imaging import (
+    FORMAT_LABELS, FORMAT_SOURCE_KIND, create_image, registry, sources,
+)
+from ...core.imaging.base import ImageRequest
+
+#: Segment sizes offered in the dialog, ``(label, bytes)``.
+SEGMENT_CHOICES = (
+    ("Single file (no splitting)", 0),
+    ("512 MiB", 512 * 1024 ** 2),
+    ("1 GiB", 1024 ** 3),
+    ("2 GiB", 2 * 1024 ** 3),
+    ("4 GiB", 4 * 1024 ** 3),
+)
+
+HASH_CHOICES = (
+    ("SHA-256", "sha256"),
+    ("SHA-1", "sha1"),
+    ("MD5", "md5"),
+)
+
+COMPRESSION_CHOICES = (
+    ("Fast (default)", "fast"),
+    ("Best (slower)", "best"),
+    ("None (store)", "none"),
+)
+
+
+class PartitionLoader(QThread):
+    """Read the device's partition table off the GUI thread."""
+
+    loaded = pyqtSignal(list)
+    failed = pyqtSignal(str)
+
+    def __init__(self, serial: str, parent=None):
+        super().__init__(parent)
+        self._serial = serial
+
+    def run(self):
+        try:
+            self.loaded.emit(sources.list_partitions(self._serial, probe=True))
+        except Exception as exc:  # pragma: no cover - depends on the device
+            self.failed.emit(str(exc))
+
+
+class ImageWorker(QThread):
+    """Write one image, then record it. Never touches widgets from ``run``."""
+
+    log = pyqtSignal(str, str)
+    progress = pyqtSignal(int, int)
+    finished_ok = pyqtSignal(object)
+    failed = pyqtSignal(str)
+    cancelled = pyqtSignal()
+
+    def __init__(self, request: ImageRequest, source, source_kind: str, case_id: str,
+                 session_id: str = "", source_factory=None, parent=None):
+        super().__init__(parent)
+        self._request = request
+        self._source = source
+        self._source_kind = source_kind
+        self._case_id = case_id
+        self._session_id = session_id
+        self._source_factory = source_factory
+        self._cancelled = False
+        self._reader = None
+        self._stage = ""
+
+    def cancel(self):
+        self._cancelled = True
+        if self._reader is not None:
+            self._reader.close()
+
+    def _on_progress(self, done: int, total: int, stage: str):
+        self.progress.emit(done, total)
+        if stage != self._stage:
+            self._stage = stage
+            self.log.emit(f"  {stage}", "info")
+
+    def run(self):
+        try:
+            if self._source_kind == "stream":
+                self._reader = self._source_factory()
+                self.log.emit(f"Streaming {self._request.source_label}...", "info")
+                try:
+                    result = create_image(self._reader, self._request, progress=self._on_progress)
+                finally:
+                    self._reader.close()
+            else:
+                result = create_image(self._source, self._request, progress=self._on_progress)
+
+            if self._cancelled:
+                self.cancelled.emit()
+                return
+
+            self.log.emit(
+                f"Written {result.primary.name} ({result.total_bytes:,} bytes, "
+                f"{len(result.segments)} segment(s))", "success")
+            self.log.emit(f"{result.hash_algo}: {result.digest}", "info")
+            if self._request.verify:
+                self.log.emit("Verification: PASSED" if result.verified else "Verification: FAILED",
+                              "success" if result.verified else "error")
+
+            info = registry.record_image(
+                result, self._request, self._case_id,
+                session_id=self._session_id or None, actor="operator")
+            self.log.emit(
+                f"Recorded in case manifest ({len(info['artifacts'])} artifact(s), "
+                f"status={info['status']})", "info")
+            self.finished_ok.emit({"result": result, "info": info})
+        except Exception as exc:
+            if self._cancelled:
+                self.cancelled.emit()
+            else:
+                self.failed.emit(str(exc))
+
+
+class CreateImageDialog(QDialog):
+    """Pick a source and a format, then write the image."""
+
+    def __init__(self, parent=None, serial: str = "", case_id: str = "", session_id: str = ""):
+        super().__init__(parent)
+        self.setWindowTitle("Create Image")
+        self.setMinimumWidth(720)
+        self._serial = serial or ""
+        self._case_id = case_id or ""
+        self._session_id = session_id or ""
+        self._partitions = []
+        self._loader = None
+        self._worker = None
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.addWidget(self._build_source_group())
+        layout.addWidget(self._build_output_group())
+        layout.addWidget(self._build_metadata_group())
+        layout.addWidget(self._build_progress_group())
+        layout.addLayout(self._build_buttons())
+
+        # Connected only once every widget exists: adding the first tab emits
+        # currentChanged, and the handler needs the format combo to be there.
+        self.source_tabs.currentChanged.connect(self._on_source_changed)
+        self.folder_edit.textChanged.connect(self._on_source_changed)
+        self.format_combo.currentIndexChanged.connect(self._sync_segment_toggle)
+
+        self._on_source_changed()
+        if self._serial:
+            self._load_partitions()
+        else:
+            self.source_tabs.setTabEnabled(0, False)
+            self.source_tabs.setCurrentIndex(1)
+
+    # ------------------------------------------------------------------ build
+
+    def _build_source_group(self) -> QGroupBox:
+        group = QGroupBox("Source")
+        outer = QVBoxLayout(group)
+
+        self.source_tabs = QTabWidget()
+
+        device = QWidget()
+        device_layout = QVBoxLayout(device)
+        row = QHBoxLayout()
+        self.partition_combo = QComboBox()
+        self.partition_combo.setMinimumWidth(420)
+        row.addWidget(self.partition_combo, 1)
+        self.btn_refresh = QPushButton("Refresh")
+        self.btn_refresh.clicked.connect(self._load_partitions)
+        row.addWidget(self.btn_refresh)
+        device_layout.addLayout(row)
+        self.partition_hint = QLabel(
+            "Reading the partition table..." if self._serial
+            else "No device connected. Attach a device and refresh.")
+        self.partition_hint.setWordWrap(True)
+        self.partition_hint.setStyleSheet("color: #64748b;")
+        device_layout.addWidget(self.partition_hint)
+        self.source_tabs.addTab(device, "Connected device")
+
+        folder = QWidget()
+        folder_layout = QVBoxLayout(folder)
+        folder_row = QHBoxLayout()
+        self.folder_edit = QLineEdit()
+        self.folder_edit.setPlaceholderText("Folder to image (e.g. an acquired case directory)")
+        folder_row.addWidget(self.folder_edit, 1)
+        self.btn_browse_source = QPushButton("Browse...")
+        self.btn_browse_source.clicked.connect(self._pick_source_folder)
+        folder_row.addWidget(self.btn_browse_source)
+        folder_layout.addLayout(folder_row)
+        folder_hint = QLabel(
+            "Folders are the usual unrooted output. Only boot/recovery and readable "
+            "partitions can be captured from a device.")
+        folder_hint.setWordWrap(True)
+        folder_hint.setStyleSheet("color: #64748b;")
+        folder_layout.addWidget(folder_hint)
+        self.source_tabs.addTab(folder, "Case folder")
+
+        outer.addWidget(self.source_tabs)
+        return group
+
+    def _build_output_group(self) -> QGroupBox:
+        group = QGroupBox("Image output")
+        form = QFormLayout(group)
+
+        dest_row = QHBoxLayout()
+        self.dest_edit = QLineEdit(self._default_destination())
+        dest_row.addWidget(self.dest_edit, 1)
+        btn_dest = QPushButton("Browse...")
+        btn_dest.clicked.connect(self._pick_destination)
+        dest_row.addWidget(btn_dest)
+        form.addRow("Destination folder", dest_row)
+
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.name_edit = QLineEdit(f"image_{stamp}")
+        form.addRow("Image base name", self.name_edit)
+
+        self.format_combo = QComboBox()
+        form.addRow("Image format", self.format_combo)
+
+        self.compression_combo = QComboBox()
+        for label, value in COMPRESSION_CHOICES:
+            self.compression_combo.addItem(label, value)
+        form.addRow("Compression", self.compression_combo)
+
+        self.segment_combo = QComboBox()
+        for label, value in SEGMENT_CHOICES:
+            self.segment_combo.addItem(label, value)
+        self.segment_combo.setCurrentIndex(3)  # 2 GiB
+        form.addRow("Segment size", self.segment_combo)
+
+        self.hash_combo = QComboBox()
+        for label, value in HASH_CHOICES:
+            self.hash_combo.addItem(label, value)
+        form.addRow("Hash algorithm", self.hash_combo)
+
+        self.verify_check = QCheckBox("Re-read the image and verify the hash after writing")
+        self.verify_check.setChecked(True)
+        form.addRow("", self.verify_check)
+
+        return group
+
+    def _build_metadata_group(self) -> QGroupBox:
+        group = QGroupBox("Examiner notes (recorded with the image)")
+        grid = QGridLayout(group)
+        self.case_number_edit = QLineEdit(self._case_id)
+        self.evidence_number_edit = QLineEdit()
+        self.examiner_edit = QLineEdit()
+        self.description_edit = QLineEdit()
+        self.description_edit.setPlaceholderText("What was imaged and why")
+
+        grid.addWidget(QLabel("Case number"), 0, 0)
+        grid.addWidget(self.case_number_edit, 0, 1)
+        grid.addWidget(QLabel("Evidence number"), 0, 2)
+        grid.addWidget(self.evidence_number_edit, 0, 3)
+        grid.addWidget(QLabel("Examiner"), 1, 0)
+        grid.addWidget(self.examiner_edit, 1, 1)
+        grid.addWidget(QLabel("Description"), 1, 2)
+        grid.addWidget(self.description_edit, 1, 3)
+        return group
+
+    def _build_progress_group(self) -> QGroupBox:
+        group = QGroupBox("Progress")
+        layout = QVBoxLayout(group)
+        self.progress_bar = QProgressBar()
+        layout.addWidget(self.progress_bar)
+        self.console = QTextEdit()
+        self.console.setReadOnly(True)
+        self.console.setMinimumHeight(150)
+        layout.addWidget(self.console)
+        return group
+
+    def _build_buttons(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.addStretch()
+        self.btn_start = QPushButton("Create Image")
+        self.btn_start.setObjectName("btn-success")
+        self.btn_start.clicked.connect(self._start)
+        row.addWidget(self.btn_start)
+
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_cancel.clicked.connect(self._cancel_or_close)
+        row.addWidget(self.btn_cancel)
+        return row
+
+    # ------------------------------------------------------------------ state
+
+    def _default_destination(self) -> str:
+        if self._case_id:
+            try:
+                return str(evidence_store.acquired_dir(self._case_id))
+            except Exception:  # pragma: no cover - defensive
+                pass
+        return str(Path.home() / ".droidforenx" / "images")
+
+    @property
+    def source_kind(self) -> str:
+        return "stream" if self.source_tabs.currentIndex() == 0 else "folder"
+
+    def available_formats(self) -> list:
+        """Formats that the current source can actually be written as."""
+        kind = self.source_kind
+        return [fmt for fmt, needs in FORMAT_SOURCE_KIND.items() if needs == kind]
+
+    def _on_source_changed(self):
+        """Repopulate the format list so only valid pairings are offered."""
+        wanted = self.available_formats()
+        previous = self.format_combo.currentData()
+        self.format_combo.blockSignals(True)
+        self.format_combo.clear()
+        for fmt in wanted:
+            self.format_combo.addItem(FORMAT_LABELS.get(fmt, fmt), fmt)
+        if previous in wanted:
+            self.format_combo.setCurrentIndex(wanted.index(previous))
+        self.format_combo.blockSignals(False)
+        self._sync_segment_toggle()
+
+    def _sync_segment_toggle(self):
+        self.segment_combo.setEnabled(self.format_combo.currentData() == "raw")
+
+    def _log(self, message: str, level: str = "info"):
+        self.console.append(message)
+
+    # ------------------------------------------------------------------ sources
+
+    def _load_partitions(self):
+        if not self._serial:
+            self.partition_hint.setText("No device connected. Attach a device and refresh.")
+            return
+        self.btn_refresh.setEnabled(False)
+        self.partition_hint.setText("Reading the partition table...")
+        self._loader = PartitionLoader(self._serial, self)
+        self._loader.loaded.connect(self._on_partitions)
+        self._loader.failed.connect(self._on_partitions_failed)
+        self._loader.start()
+
+    def _on_partitions(self, partitions):
+        self.btn_refresh.setEnabled(True)
+        self._partitions = partitions
+        previous = self.partition_combo.currentData()
+        self.partition_combo.clear()
+        for partition in partitions:
+            self.partition_combo.addItem(partition.label(), partition)
+        if not partitions:
+            self.partition_hint.setText(
+                "No partitions returned. The device may need unlocking, or its "
+                "/dev/block/by-name may not be readable.")
+            return
+        usable = [p for p in partitions if p.readable]
+        self.partition_hint.setText(
+            f"{len(usable)} of {len(partitions)} partitions are readable without root. "
+            "Partitions marked 'needs root' cannot be captured on this device.")
+        if previous in partitions:
+            self.partition_combo.setCurrentIndex(partitions.index(previous))
+        elif usable:
+            self.partition_combo.setCurrentIndex(partitions.index(usable[0]))
+
+    def _on_partitions_failed(self, message):
+        self.btn_refresh.setEnabled(True)
+        self.partition_hint.setText(f"Could not read the partition table: {message}")
+
+    def _pick_source_folder(self):
+        chosen = QFileDialog.getExistingDirectory(self, "Select a folder to image",
+                                                  self.folder_edit.text() or str(Path.home()))
+        if chosen:
+            self.folder_edit.setText(chosen)
+
+    def _pick_destination(self):
+        chosen = QFileDialog.getExistingDirectory(self, "Select a destination folder",
+                                                  self.dest_edit.text() or str(Path.home()))
+        if chosen:
+            self.dest_edit.setText(chosen)
+
+    # ------------------------------------------------------------------ run
+
+    def build_request(self) -> ImageRequest:
+        """Assemble the request from the current widget state."""
+        metadata = {
+            "case_number": self.case_number_edit.text().strip(),
+            "evidence_number": self.evidence_number_edit.text().strip(),
+            "examiner": self.examiner_edit.text().strip(),
+            "description": self.description_edit.text().strip(),
+        }
+        metadata = {key: value for key, value in metadata.items() if value}
+
+        if self.source_kind == "stream":
+            partition = self.partition_combo.currentData()
+            source_label = partition.block if partition else ""
+        else:
+            source_label = self.folder_edit.text().strip()
+
+        return ImageRequest(
+            dest_dir=Path(self.dest_edit.text().strip() or "."),
+            base_name=self.name_edit.text().strip(),
+            image_format=self.format_combo.currentData(),
+            source_label=source_label,
+            hash_algo=self.hash_combo.currentData(),
+            compression=self.compression_combo.currentData(),
+            segment_size=self.segment_combo.currentData() or 0,
+            verify=self.verify_check.isChecked(),
+            metadata=metadata,
+        )
+
+    def resolve_source(self):
+        """Return ``(source, reader_factory)``; a reader factory only for devices."""
+        if self.source_kind == "stream":
+            partition = self.partition_combo.currentData()
+            if partition is None:
+                raise ValueError("Select a partition to image.")
+            if not partition.readable:
+                raise ValueError(
+                    f"'{partition.name}' is not readable without root on this device.")
+
+            def factory():
+                return sources.open_partition_reader(
+                    self._serial, partition.block, rooted=False, size=partition.size_bytes)
+
+            return None, factory
+        folder = self.folder_edit.text().strip()
+        if not folder:
+            raise ValueError("Choose a folder to image.")
+        return Path(folder), None
+
+    def _start(self):
+        try:
+            request = self.build_request()
+            source, factory = self.resolve_source()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Cannot create image", str(exc))
+            return
+        except Exception as exc:
+            QMessageBox.critical(self, "Cannot create image", str(exc))
+            return
+
+        if self.source_kind == "folder" and not Path(request.source_label).is_dir():
+            QMessageBox.warning(self, "Cannot create image", "Choose a folder to image first.")
+            return
+
+        self.console.clear()
+        self.btn_start.setEnabled(False)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self._log(f"Creating {request.image_format} image '{request.base_name}' "
+                  f"in {request.dest_dir}", "info")
+
+        self._worker = ImageWorker(request, source, self.source_kind, self._case_id,
+                                   self._session_id, source_factory=factory, parent=self)
+        self._worker.log.connect(self._log)
+        self._worker.progress.connect(self._on_progress)
+        self._worker.finished_ok.connect(self._on_finished)
+        self._worker.failed.connect(self._on_failed)
+        self._worker.cancelled.connect(self._on_cancelled)
+        self._worker.start()
+
+    def _on_progress(self, done: int, total: int):
+        if total > 0:
+            self.progress_bar.setValue(min(int(done / total * 100), 100))
+        else:
+            self.progress_bar.setRange(0, 0)
+
+    def _on_finished(self, payload):
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(100)
+        self.btn_start.setEnabled(True)
+        self._log("Image created and recorded.", "success")
+        QMessageBox.information(
+            self, "Image created",
+            f"{payload['result'].primary}\n\n"
+            f"Verification: {payload['info']['verification_status']}\n"
+            f"Recorded status: {payload['info']['status']}")
+
+    def _on_failed(self, message):
+        self.progress_bar.setRange(0, 100)
+        self.btn_start.setEnabled(True)
+        self._log(f"Failed: {message}", "error")
+        QMessageBox.critical(self, "Image failed", message)
+
+    def _on_cancelled(self):
+        self.progress_bar.setRange(0, 100)
+        self.btn_start.setEnabled(True)
+        self._log("Cancelled. No image was written.", "warning")
+
+    def _cancel_or_close(self):
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.cancel()
+            self._log("Cancelling...", "warning")
+            return
+        self.reject()
+
+    def closeEvent(self, event):
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.cancel()
+            self._worker.wait(5000)
+        super().closeEvent(event)

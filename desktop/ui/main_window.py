@@ -333,7 +333,7 @@ class MainWindow(QMainWindow):
         s = self._device_serial
         self.seizure_page.set_device(s)
         self.identify_page.set_device(s)
-        self.acquire_page.set_device(s, self._current_case_id)
+        self.acquire_page.set_device(s, self._current_case_id, self._current_session_id)
         self.examine_page.set_device(s)
 
     def _on_device_connected(self, device_info: dict):
@@ -353,7 +353,7 @@ class MainWindow(QMainWindow):
         case = conn.execute("SELECT * FROM cases WHERE id=?", (case_id,)).fetchone()
         conn.close()
         if case:
-            self.acquire_page.set_device(self._device_serial, case_id)
+            self.acquire_page.set_device(self._device_serial, case_id, self._current_session_id)
             self.report_page.set_session(self._current_session_id, case["case_number"])
 
     def _on_session_created(self, session_id: str):
