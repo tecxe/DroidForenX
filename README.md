@@ -243,10 +243,20 @@ status table, earned verification tiers, the manifest, and the chain of custody.
 The **XLSX** is the examiner's working copy, with sortable and filterable
 sheets: `Case Summary`, `Integrity`, `Sources`, `Artifacts`, `Custody`. Its
 `Integrity` sheet independently re-hashes every artifact and reports `OK`,
-`MISMATCH` or `MISSING` per file. Building it is strictly **read-only** — it
-never writes to the case tree and never appends a custody event, so producing a
-report cannot alter evidence. Use `evidence_store.verify()` when you *want* the
-verification run recorded in the log.
+`MISMATCH` or `MISSING` per file, showing the manifest digest beside the
+re-computed one. A file that is missing from disk leaves the re-computed column
+blank rather than echoing the manifest digest. Building it is strictly
+**read-only** — it never writes to the case tree and never appends a custody
+event, so producing a report cannot alter evidence. Use
+`evidence_store.verify()` when you *want* the verification run recorded in the
+log.
+
+Both outputs are also reachable from the app: on the **Stage 5** report page,
+pick `Verification Workbook (XLSX)` as the report format and the workbook is
+written alongside the other report artifacts. The workbook is derived from the
+evidence store, so the case number is used as the evidence-store case id; if no
+manifest exists for it, the workbook records `NO_MANIFEST` instead of implying
+that integrity was verified.
 
 ```
 <case_id>/
@@ -349,10 +359,14 @@ State these in any report; they are properties of Android, not bugs to be
 ## Testing
 
 ```powershell
-python -m unittest desktop.tests.test_evidence_store -v
+python -m unittest `
+  desktop.tests.test_evidence_store `
+  desktop.tests.test_evidence_workbook `
+  desktop.tests.test_forensic_engine `
+  desktop.tests.test_ui_export -v
 ```
 
-22 tests, no device required. They cover the properties that matter:
+44 tests, no device required. They cover the properties that matter:
 
 - an acquired artifact survives being read (the original bug was that 11
   loaders deleted evidence after parsing)
@@ -366,6 +380,29 @@ python -m unittest desktop.tests.test_evidence_store -v
   case being copied)
 - derived output in `parsed/` does not alter the evidence count
 - case IDs cannot traverse out of the evidence root
+
+The workbook tests (`test_evidence_workbook.py`) pin the reporting half:
+
+- the `Integrity` sheet's re-computed column is a hash taken from the file on
+  disk, so a tampered artifact shows a different digest and a missing one shows
+  none
+- a case with no manifest reports `NO_MANIFEST` rather than implying verification
+- building a workbook leaves the case tree and the custody log byte-for-byte
+  unchanged
+
+The engine tests (`test_forensic_engine.py`) pin the acquisition edge cases:
+
+- `_unique_name()` never hands out a name that already exists, so pulling two
+  files that share a basename — or pulling the same path repeatedly — cannot
+  overwrite an earlier artifact
+- a pull that ADB cannot read is recorded as `NOT_ACCESSIBLE`, and a zero-length
+  pull as `NOT_PRESENT`; neither leaves an artifact in `acquired/`
+
+The UI tests (`test_ui_export.py`) run a headless Qt application and generate
+each report format, proving the default **HTML** renders its custody log, the
+**PDF** folds typographic characters instead of raising, and the **XLSX**
+workbook is readable. They also cover `PullFileWorker`'s success and failure
+contracts. This module is skipped when PyQt6 cannot start an application.
 
 `desktop/tests/` also contains `test_quick.py`, `test_deep.py`,
 `test_full_adb.py` and `test_integration.py`. These require a connected device
