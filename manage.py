@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python
+#!/usr/bin/env python
 """DroidForenX — command-line entry point for forensic operations."""
 
 import sys
@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 def main():
     parser = argparse.ArgumentParser(
         prog="droidforenx",
-        description="DroidForenX Professional Digital Forensics Platform v2.0.11",
+        description="DroidForenX Professional Digital Forensics Platform v2.0.12",
     )
     sub = parser.add_subparsers(dest="command")
 
@@ -24,7 +24,7 @@ def main():
         from desktop.main import main as gui_main
         gui_main()
     elif args.command == "version":
-        print("DroidForenX v2.0.11 — Professional Digital Forensics Platform")
+        print("DroidForenX v2.0.12 — Professional Digital Forensics Platform")
     else:
         parser.print_help()
 

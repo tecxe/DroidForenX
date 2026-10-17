@@ -119,11 +119,11 @@
 </nav>
 
 <section class="hero">
-    <div class="badge"><span class="dot"></span> v2.0.11 — Latest Release</div>
+    <div class="badge"><span class="dot"></span> v2.0.12 — Latest Release</div>
     <h1>Professional Mobile<br>Digital Forensics</h1>
     <p>Standalone desktop toolkit for Android device forensic analysis. 5-stage forensic workflow, 24 artifact loaders, selectable Raw (dd) / ZIP / AFF4-L image output, court-ready reporting. Single .exe, no installation.</p>
     <div class="hero-btns">
-        <a class="btn btn-primary" href="https://github.com/tecxe/DroidForenX/releases/download/v2.0.11/DroidForenX.exe" download>
+        <a class="btn btn-primary" href="https://github.com/tecxe/DroidForenX/releases/download/v2.0.12/DroidForenX.exe" download>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Download DroidForenX.exe
         </a>
@@ -181,6 +181,11 @@
             <h3>Zero Installation</h3>
             <p>Single .exe file. ADB drivers bundled. No Python, no dependencies, no installation wizard. Just double-click and run.</p>
         </div>
+        <div class="feature">
+            <div class="feature-icon" style="background:rgba(129,140,248,0.15);color:#818cf8">&#127769;</div>
+            <h3>Dark, Light, or System Theme</h3>
+            <p>The interface opens dark and switches from the View menu &mdash; light, or follow the operating system as it changes. Your choice is remembered between launches. Exported reports keep their own fixed palette, so a court document never changes appearance because a UI preference did.</p>
+        </div>
     </div>
 
     <div class="requirements">
@@ -234,13 +239,13 @@
             </div>
             <div class="info-card">
                 <div class="label">Version</div>
-                <div class="value">v2.0.11</div>
+                <div class="value">v2.0.12</div>
             </div>
         </div>
 
         <h3 style="margin-bottom:12px">SHA-256 Hash</h3>
         <div class="hash-box">
-            <code id="hash">5657DACA4BD114211C9AAE81051FA38CCE5B560DAAB045C100F8BAD191A9039E</code>
+            <code id="hash">7D9966E64ED39E43F69AB68D0632EBCEC5FC5B9541E5E4725ACA7C8A34C20B86</code>
             <button class="copy-btn" onclick="copyHash()">Copy Hash</button>
         </div>
 
@@ -282,11 +287,11 @@
 </section>
 
 <footer>
-    <p>DroidForenX v2.0.11 &middot; Built by <a href="https://github.com/tecxe" target="_blank">tecxe</a> &middot; <a href="https://github.com/tecxe/DroidForenX" target="_blank">Source on GitHub</a></p>
+    <p>DroidForenX v2.0.12 &middot; Built by <a href="https://github.com/tecxe" target="_blank">tecxe</a> &middot; <a href="https://github.com/tecxe/DroidForenX" target="_blank">Source on GitHub</a></p>
 </footer>
 
 <script>
-const EXPECTED_HASH = '5657DACA4BD114211C9AAE81051FA38CCE5B560DAAB045C100F8BAD191A9039E';
+const EXPECTED_HASH = '7D9966E64ED39E43F69AB68D0632EBCEC5FC5B9541E5E4725ACA7C8A34C20B86';
 
 function copyHash() {
     navigator.clipboard.writeText(EXPECTED_HASH).then(() => {
