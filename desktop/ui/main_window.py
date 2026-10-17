@@ -114,7 +114,7 @@ class MainWindow(QMainWindow):
         logo_text.setStyleSheet("font-size: 16px; font-weight: 800; color: #f59e0b; letter-spacing: 2px; border: none;")
         logo_layout.addWidget(logo_text)
 
-        version = QLabel("v2.0.1 Professional")
+        version = QLabel("v2.0.11 Professional")
         version.setStyleSheet("font-size: 10px; color: #475569; letter-spacing: 1px; border: none;")
         logo_layout.addWidget(version)
 
@@ -201,7 +201,7 @@ class MainWindow(QMainWindow):
 
         # Status bar
         self.statusBar().setStyleSheet("background: #111827; color: #64748b; border-top: 1px solid #1e293b; font-size: 11px;")
-        self.statusBar().showMessage("Ready — DroidForenX v2.0.1 Professional")
+        self.statusBar().showMessage("Ready — DroidForenX v2.0.11 Professional")
 
         self._navigate_to(0)
 
@@ -391,7 +391,7 @@ class MainWindow(QMainWindow):
 
     def _show_about(self):
         QMessageBox.about(self, "About DroidForenX",
-            "<h2>DroidForenX v2.0.1</h2>"
+            "<h2>DroidForenX v2.0.11</h2>"
             "<p>Professional Digital Forensics</p>"
             "<p>Standalone mobile device forensic tool for law enforcement "
             "and forensic investigators.</p>"
