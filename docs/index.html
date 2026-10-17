@@ -121,7 +121,7 @@
 <section class="hero">
     <div class="badge"><span class="dot"></span> v2.0.11 — Latest Release</div>
     <h1>Professional Mobile<br>Digital Forensics</h1>
-    <p>Standalone desktop toolkit for Android device forensic analysis. 5-stage forensic workflow, 24 artifact loaders, court-ready reporting. Single .exe, no installation.</p>
+    <p>Standalone desktop toolkit for Android device forensic analysis. 5-stage forensic workflow, 24 artifact loaders, selectable Raw (dd) / ZIP / AFF4-L image output, court-ready reporting. Single .exe, no installation.</p>
     <div class="hero-btns">
         <a class="btn btn-primary" href="https://github.com/tecxe/DroidForenX/releases/download/v2.0.11/DroidForenX.exe" download>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -135,11 +135,16 @@
 </section>
 
 <div class="stats">
-    <div class="stat"><div class="stat-val">61.8 MB</div><div class="stat-label">File Size</div></div>
+    <div class="stat"><div class="stat-val">61.9 MB</div><div class="stat-label">File Size</div></div>
     <div class="stat"><div class="stat-val">5</div><div class="stat-label">Forensic Stages</div></div>
     <div class="stat"><div class="stat-val">24</div><div class="stat-label">Artifact Loaders</div></div>
     <div class="stat"><div class="stat-val">0</div><div class="stat-label">Dependencies Required</div></div>
 </div>
+
+<p style="text-align:center;color:var(--muted);font-size:12px;margin-top:14px;padding:0 24px">
+    14 of 24 loaders are device-verified on an unrooted Android 14 handset. The other 10 read app-private
+    paths and are reported as NOT_ACCESSIBLE without root &mdash; never silently dropped.
+</p>
 
 <section class="section" id="features">
     <h2 class="section-title">Everything You Need</h2>
@@ -148,13 +153,13 @@
     <div class="features">
         <div class="feature">
             <div class="feature-icon" style="background:rgba(59,130,246,0.15);color:var(--accent)">&#128274;</div>
-            <h3>Seizure & Isolation</h3>
-            <p>Airplane mode activation, WiFi/data disable, lock screen bypass. Chain-of-custody logging for every action.</p>
+            <h3>Seizure &amp; Isolation</h3>
+            <p>Disable airplane mode, WiFi, Bluetooth, NFC, mobile data and USB in one pass. Chain-of-custody logging for every action.</p>
         </div>
         <div class="feature">
             <div class="feature-icon" style="background:rgba(168,85,247,0.15);color:var(--purple)">&#128270;</div>
             <h3>Device Identification</h3>
-            <p>Auto-detect device model, Android version, installed packages, storage info. Works with any Android device.</p>
+            <p>Auto-detect device model, Android version, installed packages and storage info over ADB. Works with any Android device with USB debugging enabled.</p>
         </div>
         <div class="feature">
             <div class="feature-icon" style="background:rgba(34,197,94,0.15);color:var(--green)">&#128229;</div>
@@ -163,13 +168,13 @@
         </div>
         <div class="feature">
             <div class="feature-icon" style="background:rgba(245,158,11,0.15);color:var(--orange)">&#128269;</div>
-            <h3>Examination & Analysis</h3>
-            <p>24 forensic examination modules. SQLite database viewer, hex viewer, file carving, timeline analysis, keyword search.</p>
+            <h3>Examination &amp; Analysis</h3>
+            <p>Run 11 analysis modules over the preserved copy: call logs, SMS/MMS, contacts, browser history, GPS, WiFi, Bluetooth, app artifacts, calendar, deleted data and notes. Read-only &mdash; it parses from the acquired copy, never the device.</p>
         </div>
         <div class="feature">
             <div class="feature-icon" style="background:rgba(236,72,153,0.15);color:#ec4899">&#128196;</div>
             <h3>Court-Ready Reporting</h3>
-            <p>Generate professional forensic reports in HTML, JSON, and PDF. Written in plain English for lawyers and judges.</p>
+            <p>Generate forensic reports in HTML, PDF, JSON, or an XLSX verification workbook that independently re-hashes every artifact. Written in plain English for lawyers and judges.</p>
         </div>
         <div class="feature">
             <div class="feature-icon" style="background:rgba(100,116,139,0.15);color:var(--muted)">&#128187;</div>
@@ -198,7 +203,7 @@
             </div>
             <div class="req-item">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                100 MB free disk space
+                ~250 MB free disk space, more for acquired data and images
             </div>
             <div class="req-item">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
@@ -206,7 +211,7 @@
             </div>
             <div class="req-item">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                No root required on target device
+                No root required &mdash; app-private data needs root and is reported as such
             </div>
         </div>
     </div>
@@ -225,7 +230,7 @@
             </div>
             <div class="info-card">
                 <div class="label">File Size</div>
-                <div class="value">61.8 MB</div>
+                <div class="value">61.9 MB</div>
             </div>
             <div class="info-card">
                 <div class="label">Version</div>
@@ -235,7 +240,7 @@
 
         <h3 style="margin-bottom:12px">SHA-256 Hash</h3>
         <div class="hash-box">
-            <code id="hash">9F165586BD7D713747C15592CB7CB767A14DAEE0B433BBBDDAF2B6E2F09DAF9F</code>
+            <code id="hash">D00654FF93003CFCADC5A671F4CC3E360D8AFB60D44AEC121875490ED7607F9C</code>
             <button class="copy-btn" onclick="copyHash()">Copy Hash</button>
         </div>
 
@@ -281,7 +286,7 @@
 </footer>
 
 <script>
-const EXPECTED_HASH = '9F165586BD7D713747C15592CB7CB767A14DAEE0B433BBBDDAF2B6E2F09DAF9F';
+const EXPECTED_HASH = 'D00654FF93003CFCADC5A671F4CC3E360D8AFB60D44AEC121875490ED7607F9C';
 
 function copyHash() {
     navigator.clipboard.writeText(EXPECTED_HASH).then(() => {
