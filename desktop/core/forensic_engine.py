@@ -33,7 +33,15 @@ def _unique_name(target_dir: Path, local_name: str, remote_path: str) -> str:
     if not candidate.exists():
         return base
     tag = hashlib.sha1(remote_path.encode("utf-8", "replace")).hexdigest()[:8]
-    return f"{candidate.stem}_{tag}{candidate.suffix}"
+    stem, suffix = candidate.stem, candidate.suffix
+    candidate = target_dir / f"{stem}_{tag}{suffix}"
+    # The tagged name can itself already exist (e.g. the same remote path pulled
+    # a third time yields the same tag), so keep counting until the name is free.
+    counter = 2
+    while candidate.exists():
+        candidate = target_dir / f"{stem}_{tag}_{counter}{suffix}"
+        counter += 1
+    return candidate.name
 
 
 def _ensure_evidence_dir():
