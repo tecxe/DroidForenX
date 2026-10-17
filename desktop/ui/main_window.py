@@ -3,9 +3,9 @@ from PyQt6.QtWidgets import (QMainWindow, QApplication, QWidget, QVBoxLayout, QH
                               QLabel, QPushButton, QStackedWidget, QFrame, QSplitter,
                               QStatusBar, QMenuBar, QMenu, QMessageBox, QFileDialog)
 from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QIcon, QFont, QAction
+from PyQt6.QtGui import QIcon, QFont, QAction, QActionGroup
 
-from .theme import MAIN_STYLESHEET
+from .theme import MAIN_STYLESHEET, theme
 from .pages.home_page import HomePage
 from .pages.case_page import CasePage
 from .pages.device_page import DevicePage
@@ -213,7 +213,7 @@ class MainWindow(QMainWindow):
             QMenuBar::item:selected { background: #1e293b; }
             QMenu { background: #1a2234; border: 1px solid #1e293b; color: #e2e8f0; }
             QMenu::item { padding: 8px 30px; }
-            QMenu::item:selected { background: #2563eb; }
+            QMenu::item:selected { background: #2563eb; color: #ffffff; }
         """)
 
         file_menu = menubar.addMenu("File")
@@ -252,10 +252,43 @@ class MainWindow(QMainWindow):
         isolate_action.triggered.connect(lambda: self._navigate_to(3))
         tools_menu.addAction(isolate_action)
 
+        view_menu = menubar.addMenu("View")
+
+        # Theme choice. "Follow System" is a real mode, not a convenience that
+        # resolves once at startup: Qt reports colour-scheme changes while the
+        # application is running, and the manager re-paints on that signal.
+        self._theme_actions = {}
+        theme_group = QActionGroup(self)
+        theme_group.setExclusive(True)
+        for key, label, shortcut in (
+            ("dark", "Dark Theme", "Ctrl+1"),
+            ("light", "Light Theme", "Ctrl+2"),
+            ("system", "Follow System Theme", "Ctrl+3"),
+        ):
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.setChecked(theme.mode == key)
+            action.setShortcut(shortcut)
+            action.triggered.connect(lambda _checked=False, mode=key: theme.set_mode(mode))
+            theme_group.addAction(action)
+            view_menu.addAction(action)
+            self._theme_actions[key] = action
+
+        theme.changed.connect(self._sync_theme_actions)
+
         help_menu = menubar.addMenu("Help")
         about_action = QAction("About DroidForenX", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
+
+    def _sync_theme_actions(self, _resolved: str = "") -> None:
+        """Keep the menu ticked on the selected mode.
+
+        Deliberately keyed off ``theme.mode`` and not the resolved value, so
+        System stays ticked while it happens to look dark.
+        """
+        for key, action in getattr(self, "_theme_actions", {}).items():
+            action.setChecked(theme.mode == key)
 
     def _connect_signals(self):
         self.home_page.new_case_requested.connect(lambda: self._navigate_to(1))

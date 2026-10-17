@@ -50,6 +50,12 @@ def main():
     font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
     app.setFont(font)
 
+    # Owns the light/dark/system preference. Installed after the application
+    # name so QSettings has somewhere to persist it, and before the first
+    # window is built so the chosen mode is what opens.
+    from desktop.ui.theme import theme
+    theme.install(app)
+
     init_db()
     audit_log("app_launch", details="Desktop application started")
 

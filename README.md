@@ -417,10 +417,11 @@ python -m unittest `
   desktop.tests.test_imaging `
   desktop.tests.test_image_registry `
   desktop.tests.test_create_image_dialog `
+  desktop.tests.test_theme `
   desktop.tests.test_ui_export -v
 ```
 
-85 tests, no device required. They cover the properties that matter:
+115 tests, no device required. They cover the properties that matter:
 
 - an acquired artifact survives being read (the original bug was that 11
   loaders deleted evidence after parsing)
@@ -488,6 +489,22 @@ and AFF4), that the built request is one the writers accept, that an invalid bas
 name is rejected before anything is written, and that an unreadable partition is
 refused rather than dispatched. No ADB call is made.
 
+The theme tests (`test_theme.py`) pin the light/dark switch:
+
+- the central one is a coverage guard. Every hex literal under `desktop/ui` must
+  either have a light counterpart or appear in the explicit allowlist of colours
+  that must *not* translate — brand marks and the printed report's document
+  palette. Adding a new dark colour without a counterpart fails the suite instead
+  of shipping a label that is invisible on white.
+- dark mode is an identity transform, so the shipped look is byte-for-byte
+  unchanged
+- body text clears 7:1 against every light surface, muted text clears 4.5:1, and
+  the deliberately faint tertiary text is no worse than it is in dark mode
+- switching themes repeatedly does not drift: the widget's *recorded* source is
+  re-translated each time, so nothing is darkened twice
+- a widget built after a switch is themed immediately, and one built before it is
+  re-themed on change
+
 `desktop/tests/` also contains `test_quick.py`, `test_deep.py`,
 `test_full_adb.py` and `test_integration.py`. These require a connected device
 and are **not** covered by CI.
@@ -542,3 +559,21 @@ DROIDFORENX_AI_ENABLED=false
 DROIDFORENX_AI_MODEL=meta-llama/llama-3.1-8b-instruct
 DROIDFORENX_AI_REDACT=true
 ```
+
+### Theme
+
+The interface ships **dark** and can be switched to **light** or **follow the
+system** from `View ▸ Dark Theme / Light Theme / Follow System Theme`
+(`Ctrl+1`, `Ctrl+2`, `Ctrl+3`). The choice is remembered in `QSettings`, so the
+next launch opens in it, and "follow the system" keeps tracking changes while the
+application is running rather than resolving once at startup.
+
+Dark is the default and is byte-for-byte unchanged from earlier builds. Light is
+a designed palette, not an inversion: cards rise to white on a tinted page, body
+text clears WCAG AAA against every surface, and each accent is darkened one step
+so it still holds up on white.
+
+Two things are deliberately *not* themed. Brand marks in the artifact viewer keep
+their real colours, and the exported HTML report keeps its own document palette —
+a report is a file someone else reads, and it should not change appearance
+because an examiner flipped a UI preference.

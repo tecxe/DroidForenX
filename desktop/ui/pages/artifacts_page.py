@@ -2366,6 +2366,14 @@ class ArtifactsPage(QWidget):
 
         self.refresh_btn = QPushButton("Extract All")
         self.refresh_btn.setFixedWidth(110)
+        # Flat by design, but its text has to be themed: it sits on the page
+        # background with no fill, and the inherited white was invisible once
+        # that background stopped being near-black.
+        self.refresh_btn.setStyleSheet(
+            "QPushButton { background: transparent; border: none; color: #e2e8f0;"
+            " font-weight: 600; font-size: 13px; padding: 6px 10px; }"
+            "QPushButton:hover { color: #3b82f6; }"
+        )
         self.refresh_btn.clicked.connect(self._on_refresh)
         header.addWidget(self.refresh_btn)
         outer.addLayout(header)
