@@ -77,7 +77,12 @@ class ReportPage(QWidget):
 
         config_layout.addWidget(QLabel("Report Format:"), 4, 0)
         self.format_combo = QComboBox()
-        self.format_combo.addItems(["HTML (Recommended)", "PDF (Court-Ready)", "JSON (Machine Readable)"])
+        self.format_combo.addItems([
+            "HTML (Recommended)",
+            "PDF (Court-Ready)",
+            "JSON (Machine Readable)",
+            "Verification Workbook (XLSX)",
+        ])
         config_layout.addWidget(self.format_combo, 4, 1)
 
         cl.addWidget(config_group)
@@ -237,7 +242,11 @@ class ReportPage(QWidget):
         examiner = self.examiner_input.text().strip() or "Unknown Examiner"
         badge = self.badge_input.text().strip() or ""
         org = self.org_input.text().strip() or ""
-        fmt = self.format_combo.currentText().split(" ")[0].lower()
+        fmt_text = self.format_combo.currentText()
+        fmt = fmt_text.split(" ")[0].lower()
+        is_workbook = fmt == "verification"
+        if is_workbook:
+            fmt = "xlsx"
 
         REPORT_ROOT.mkdir(parents=True, exist_ok=True)
         case_dir = REPORT_ROOT / case_number
@@ -246,20 +255,25 @@ class ReportPage(QWidget):
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         report_id = uuid.uuid4().hex[:8]
 
-        data = self._gather_data(case_number, examiner, badge, org)
-        self.console.log(f"Gathered data: {len(data['results'])} examination results, "
-                         f"{len(data['audit_log'])} audit entries", "info")
-
-        if fmt == "json":
-            path = case_dir / f"investigation_report_{report_id}.json"
-            path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
-        elif fmt == "pdf":
-            path = case_dir / f"investigation_report_{report_id}.pdf"
-            self._build_pdf_report(data, path)
+        if is_workbook:
+            # The XLSX workbook is derived from the evidence store, not the app
+            # database, so it needs no database gather.
+            path = self._build_workbook(case_number, case_dir, report_id)
         else:
-            path = case_dir / f"investigation_report_{report_id}.html"
-            html = self._build_html_report(data)
-            path.write_text(html, encoding="utf-8")
+            data = self._gather_data(case_number, examiner, badge, org)
+            self.console.log(f"Gathered data: {len(data['results'])} examination results, "
+                             f"{len(data['audit_log'])} audit entries", "info")
+
+            if fmt == "json":
+                path = case_dir / f"investigation_report_{report_id}.json"
+                path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+            elif fmt == "pdf":
+                path = case_dir / f"investigation_report_{report_id}.pdf"
+                self._build_pdf_report(data, path)
+            else:
+                path = case_dir / f"investigation_report_{report_id}.html"
+                html = self._build_html_report(data)
+                path.write_text(html, encoding="utf-8")
 
         # Hash
         sha256 = hashlib.sha256()
@@ -302,6 +316,36 @@ class ReportPage(QWidget):
             f"Size: {path.stat().st_size:,} bytes\n"
             f"SHA-256: {report_hash[:32]}..."
         )
+
+    # ═══════════════════════════════════════════════════════════════════════
+    #  XLSX VERIFICATION WORKBOOK — evidence-store derived
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def _build_workbook(self, case_number, case_dir, report_id):
+        """Build the read-only XLSX verification workbook for ``case_number``.
+
+        The workbook is derived from the evidence store (``~/.droidforenx/evidence``),
+        not the app database, so the case number is used as the evidence-store case
+        id. If no manifest exists for it yet, the workbook records ``NO_MANIFEST``
+        rather than implying that integrity was verified.
+        """
+        from ...report import evidence_workbook
+        from ...core import evidence_store
+
+        path = case_dir / f"verification_workbook_{report_id}.xlsx"
+        evidence_workbook.build(case_number, output=path)
+
+        integrity = evidence_store.compute_integrity(case_number)
+        self.console.log(
+            f"Integrity verdict: {integrity['verdict']} "
+            f"({integrity['ok']}/{integrity['checked']} artifacts re-hashed OK)", "info")
+        if integrity["verdict"] == "NO_MANIFEST":
+            self.console.log(
+                f"No evidence tree at {evidence_store.case_dir(case_number)} — "
+                "the workbook records NO_MANIFEST. Acquire evidence for this case "
+                "first to assert integrity.", "warning")
+
+        return path
 
     # ═══════════════════════════════════════════════════════════════════════
     #  HTML REPORT — Professional, non-technical
@@ -362,7 +406,6 @@ class ReportPage(QWidget):
 
         # ── Build HTML sections ──────────────────────────────────────────
         device_section = self._html_device_section(dev)
-        custody_section = self._html_custody_section(audit, session)
         methodology_section = self._html_methodology_section()
         findings_section = self._html_findings_section(
             results, sms_count, calls_count, contacts_count,
@@ -1197,6 +1240,27 @@ with tabular data are available.</p>
     def _build_pdf_report(self, d, path):
         from fpdf import FPDF
 
+        class _Latin1PDF(FPDF):
+            """FPDF whose core-font text is folded to Latin-1.
+
+            The built-in Helvetica face is Latin-1 only, so characters such as
+            the em dash used in this report's headings would otherwise raise
+            ``FPDFUnicodeEncodingException``. Folding happens before encoding so
+            the common typographic characters survive as readable ASCII, and any
+            other out-of-range character (e.g. from a device-supplied string) is
+            replaced rather than crashing the export.
+            """
+
+            _FOLD = {
+                "\u2014": "-", "\u2013": "-", "\u2018": "'", "\u2019": "'",
+                "\u201c": '"', "\u201d": '"', "\u2026": "...", "\u00a0": " ",
+                "\u200b": "",
+            }
+
+            def normalize_text(self, text: str) -> str:
+                folded = "".join(self._FOLD.get(ch, ch) for ch in text)
+                return folded.encode("latin-1", "replace").decode("latin-1")
+
         dev = d["device"]
         results = d["results"]
         audit = d["audit_log"]
@@ -1225,7 +1289,7 @@ with tabular data are available.</p>
 
         total = sms_count + calls_count + contacts_count + media_count + apps_count
 
-        pdf = FPDF()
+        pdf = _Latin1PDF()
         pdf.set_auto_page_break(auto=True, margin=20)
 
         # ── Cover Page ──────────────────────────────────────────────
