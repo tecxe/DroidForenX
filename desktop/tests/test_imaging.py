@@ -28,6 +28,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 from desktop.core.imaging import (
     Aff4ImageWriter,
@@ -335,6 +336,80 @@ class DeviceSourceTest(unittest.TestCase):
             return (True, "0\n")
 
         self.assertTrue(sources.is_root("SER", shell=rooted))
+
+
+class DeviceSourceWiringTest(unittest.TestCase):
+    """The *default* shell/ADB path, with nothing injected.
+
+    Every other device test passes ``shell=FakeShell()``, which bypassed the real
+    lookup entirely -- so a wrong relative import inside ``_shell`` and
+    ``open_partition_reader`` sailed through the whole suite while the dialog
+    failed on every device with "cannot import name 'adb_manager'". These tests
+    exercise the unwired path on purpose.
+    """
+
+    def test_default_shell_delegates_to_adb_manager(self):
+        from desktop.core import adb_manager
+
+        calls = []
+
+        def fake_shell(serial, command, timeout=20):
+            calls.append((serial, command))
+            return (True, "ok")
+
+        with mock.patch.object(adb_manager, "adb_shell", fake_shell):
+            ok, output = sources._shell("SER123", "id -u")
+
+        self.assertTrue(ok)
+        self.assertEqual(output, "ok")
+        self.assertEqual(calls, [("SER123", "id -u")])
+
+    def test_list_partitions_works_without_an_injected_shell(self):
+        from desktop.core import adb_manager
+
+        def fake_shell(serial, command, timeout=20):
+            if command.startswith("ls -la /dev/block/by-name"):
+                return (True, FakeShell.LS)
+            return (False, "")
+
+        with mock.patch.object(adb_manager, "adb_shell", fake_shell):
+            partitions = sources.list_partitions("SER123")
+
+        self.assertEqual([p.name for p in partitions], ["boot_a", "protect_f", "userdata"])
+        self.assertTrue([p for p in partitions if p.name == "boot_a"][0].readable)
+
+    def test_open_partition_reader_resolves_adb_and_builds_the_command(self):
+        from desktop.core import adb_manager
+
+        captured = {}
+
+        class FakeProcess:
+            stdout = io.BytesIO(b"")
+
+            def poll(self):
+                return 0
+
+            def terminate(self):  # pragma: no cover - already exited
+                pass
+
+            def wait(self, timeout=None):  # pragma: no cover
+                return 0
+
+        def fake_popen(argv, **kwargs):
+            captured["argv"] = argv
+            captured["kwargs"] = kwargs
+            return FakeProcess()
+
+        with mock.patch.object(adb_manager, "find_adb", lambda: "C:/sdk/adb.exe"), \
+                mock.patch.object(sources.subprocess, "Popen", fake_popen):
+            reader = sources.open_partition_reader("SER123", "/dev/block/sda21", size=4096)
+
+        self.assertEqual(reader.size, 4096)
+        self.assertEqual(captured["argv"][0], "C:/sdk/adb.exe")
+        self.assertEqual(captured["argv"][1:3], ["-s", "SER123"])
+        self.assertEqual(
+            captured["argv"][-1], "sh -c 'dd if=/dev/block/sda21 bs=1048576 2>/dev/null'")
+        self.assertEqual(captured["kwargs"]["stdout"], sources.subprocess.PIPE)
 
 
 if __name__ == "__main__":

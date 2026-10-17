@@ -72,7 +72,7 @@ def _human(size: int) -> str:
 
 
 def _shell(serial: str, command: str, timeout: int = 20) -> tuple:
-    from . import adb_manager as adb  # local import keeps this module import-cheap
+    from .. import adb_manager as adb  # local import keeps this module import-cheap
     return adb.adb_shell(serial, command, timeout=timeout)
 
 
@@ -215,7 +215,7 @@ def open_partition_reader(serial: str, block: str, rooted: bool = False,
                           adb_path=None, size: int = 0) -> ProcessReader:
     """Open a streaming reader for a device block device."""
     if adb_path is None:
-        from . import adb_manager as adb
+        from .. import adb_manager as adb
         adb_path = adb.find_adb()
     return ProcessReader(partition_stream_argv(adb_path, serial, block, rooted), size=size)
 
