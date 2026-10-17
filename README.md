@@ -294,6 +294,13 @@ and surfaced, never silently dropped:
 `whatsapp` · `telegram` · `instagram` · `snapchat` · `tiktok` · `facebook` ·
 `transactions` · `browser` · `wifi_passwords` · `deleted`
 
+`whatsapp` carries a second and separate caveat. Extracting WhatsApp data was
+within this project's planned scope, but the work was never completed or
+validated, so the loader is surfaced as unavailable rather than presented as
+working. It stands as future work; any implementation should stay within
+authorised forensic work and documented lawful exports. *(Recorded by
+te7mina1 in `c6d2998`.)*
+
 `is_device_rooted()` and `device_root_summary()` in `adb_manager.py` perform
 root detection so the tool knows its own ceiling before interpreting results.
 
