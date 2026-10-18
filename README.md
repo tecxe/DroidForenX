@@ -418,10 +418,11 @@ python -m unittest `
   desktop.tests.test_image_registry `
   desktop.tests.test_create_image_dialog `
   desktop.tests.test_theme `
+  desktop.tests.test_main_window `
   desktop.tests.test_ui_export -v
 ```
 
-115 tests, no device required. They cover the properties that matter:
+134 tests, no device required. They cover the properties that matter:
 
 - an acquired artifact survives being read (the original bug was that 11
   loaders deleted evidence after parsing)
@@ -489,6 +490,14 @@ and AFF4), that the built request is one the writers accept, that an invalid bas
 name is rejected before anything is written, and that an unreadable partition is
 refused rather than dispatched. No ADB call is made.
 
+They also pin the dialog's own geometry, which is where it used to go wrong on a
+720 px screen: the requested size is capped to the available desktop, the action
+row sits outside the scroll area so it cannot be scrolled away from, and the
+window clamp works from the *frame* rectangle rather than the client one. That
+last distinction is the difference between a window whose geometry computes as
+fitting and one that actually fits — the title bar is 30 px of the window that a
+client-only sum leaves out.
+
 The theme tests (`test_theme.py`) pin the light/dark switch:
 
 - the central one is a coverage guard. Every hex literal under `desktop/ui` must
@@ -504,6 +513,19 @@ The theme tests (`test_theme.py`) pin the light/dark switch:
   re-translated each time, so nothing is darkened twice
 - a widget built after a switch is themed immediately, and one built before it is
   re-themed on change
+
+The main-window test (`test_main_window.py`) measures the sidebar's chrome instead
+of trusting it:
+
+- every label in the sidebar must be given at least as much content height as the
+  font it draws. The product name and the device status footer both had a
+  text box of a few pixels, which is not visible in any reading of the style
+  rules — a selector-less `padding` is inherited by children, and `QFrame`
+  matches `QLabel` children because `QLabel` derives from `QFrame`
+- the sidebar's natural height must fit what a 1280x720 desktop leaves it, since
+  a sidebar that asks for more is squeezed and its labels are the first casualties
+- the Seizure nav caption keeps its literal ampersand: a lone `&` is a Qt
+  mnemonic and silently consumes a character
 
 `desktop/tests/` also contains `test_quick.py`, `test_deep.py`,
 `test_full_adb.py` and `test_integration.py`. These require a connected device
