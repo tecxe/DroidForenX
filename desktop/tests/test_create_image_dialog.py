@@ -27,7 +27,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 try:
-    from PyQt6.QtCore import QRect, QSize
+    from PyQt6.QtCore import QPoint, QRect, QSize
     from PyQt6.QtWidgets import QApplication
     _QT_IMPORT = True
 except Exception:  # pragma: no cover - depends on the environment
@@ -35,7 +35,7 @@ except Exception:  # pragma: no cover - depends on the environment
 
 from desktop.core.imaging import create_image, sources
 from desktop.ui.dialogs.create_image_dialog import (
-    MIN_HEIGHT, MIN_WIDTH, CreateImageDialog, fit_size,
+    MIN_HEIGHT, MIN_WIDTH, CreateImageDialog, clamp_to_screen, fit_size,
 )
 
 
@@ -198,6 +198,57 @@ class DialogFitsOnScreenTest(unittest.TestCase):
             self.assertGreaterEqual(dialog.y(), available.top())
         finally:
             dialog.close()
+
+    def test_a_dialog_placed_past_the_bottom_edge_is_pulled_back(self):
+        """Qt centres a dialog on its parent, which on a short desktop can land
+        the Create Image button below the screen edge."""
+        dialog = CreateImageDialog(serial="")
+        try:
+            desktop = QRect(0, 0, 1280, 720)
+            dialog.resize(800, 680)
+            dialog.move(270, 105)  # where parent-centred placement lands
+            dialog._keep_on_screen(desktop)
+            self.assertEqual(dialog.y(), 40)
+            self.assertLessEqual(dialog.y() + dialog.height() - 1, desktop.bottom())
+        finally:
+            dialog.close()
+
+    def test_a_dialog_that_is_already_inside_the_desktop_is_not_moved(self):
+        dialog = CreateImageDialog(serial="")
+        try:
+            desktop = QRect(0, 0, 1280, 720)
+            dialog.resize(800, 500)
+            dialog.move(100, 100)
+            dialog._keep_on_screen(desktop)
+            self.assertEqual((dialog.x(), dialog.y()), (100, 100))
+        finally:
+            dialog.close()
+
+    def test_the_title_bar_is_part_of_what_has_to_fit(self):
+        """The frame, not the client area, is what the window manager places.
+
+        Measured from the running app on a 720 px desktop: the dialog's client
+        area was 720x680 at y=70, while its frame was 710 px tall starting at
+        y=40. Clamping the client rectangle computed 40 and declared success
+        while the frame ran 30 px off the bottom of the screen.
+        """
+        available = QRect(0, 0, 1280, 720)
+        frame = QRect(270, 40, 720, 710)
+        self.assertEqual(clamp_to_screen(frame, available), QPoint(270, 10))
+
+        # What the client-only clamp used to compute for the same window.
+        client_only = min(max(40, available.top()), available.bottom() - 680 + 1)
+        self.assertEqual(client_only, 40)
+
+    def test_a_frame_that_already_fits_is_left_where_it_is(self):
+        available = QRect(0, 0, 1280, 720)
+        self.assertEqual(clamp_to_screen(QRect(100, 100, 800, 500), available),
+                         QPoint(100, 100))
+
+    def test_a_frame_taller_than_the_desktop_pins_to_the_top_edge(self):
+        available = QRect(0, 0, 1280, 720)
+        self.assertEqual(clamp_to_screen(QRect(0, 300, 800, 900), available).y(),
+                         available.top())
 
     def test_revealing_the_console_keeps_the_buttons_on_screen(self):
         dialog = CreateImageDialog(serial="")

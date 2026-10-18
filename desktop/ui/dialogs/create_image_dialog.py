@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import QSize, Qt, QThread, pyqtSignal
+from PyQt6.QtCore import QPoint, QRect, QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame,
     QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
@@ -71,6 +71,29 @@ def fit_size(desired: QSize, available) -> QSize:
     return QSize(
         min(max(desired.width(), MIN_WIDTH), max_w),
         min(max(desired.height(), MIN_HEIGHT), max_h),
+    )
+
+
+def clamp_to_screen(frame: QRect, available: QRect) -> QPoint:
+    """Position that keeps ``frame`` inside ``available``.
+
+    ``frame`` must be a *frame* rectangle - what ``frameGeometry()`` returns,
+    including the title bar - because the frame is the rectangle the window
+    manager positions. Clamping the client rectangle instead measures the top of
+    the title bar against the height of the client area, so a window that
+    computes as fitting still hangs below the bottom edge by exactly the height
+    of its title bar. On a 720 px desktop that is how the Create Image button
+    came to sit 28 px under the screen while the geometry looked fine.
+
+    A frame larger than the desktop cannot be placed wholly inside, and the top
+    is then pinned rather than the bottom: a reachable title bar beats a
+    reachable status line.
+    """
+    max_x = max(available.left(), available.right() - frame.width() + 1)
+    max_y = max(available.top(), available.bottom() - frame.height() + 1)
+    return QPoint(
+        min(max(frame.x(), available.left()), max_x),
+        min(max(frame.y(), available.top()), max_y),
     )
 
 
@@ -224,6 +247,19 @@ class CreateImageDialog(QDialog):
         if not self._fitted:
             self._fitted = True
             self._fit_to_screen()
+            # Qt centres a dialog on its parent as it is shown, and that
+            # placement lands after this event - so the position clamped below
+            # is not the position the window keeps. On a 720 px desktop the
+            # parent-centred spot put the Create Image button 28 px below the
+            # bottom edge of the screen. Clamp again once the event loop is
+            # running and the window manager has finished placing the dialog.
+            QTimer.singleShot(0, self._settle_on_screen)
+
+    def _settle_on_screen(self):
+        """Clamp the position again, after the window manager has placed us."""
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            self._keep_on_screen(screen.availableGeometry())
 
     def _fit_to_screen(self):
         """Size to the content, capped to the desktop that is actually present."""
@@ -241,16 +277,19 @@ class CreateImageDialog(QDialog):
         self._keep_on_screen(available)
 
     def _keep_on_screen(self, available):
-        """Nudge the window back inside the desktop after a resize.
+        """Nudge the window back inside the desktop after it settles.
 
-        The window manager positions the dialog for the size it had when it was
-        mapped, so growing it later - which happens when the console appears -
-        pushes the bottom edge back under the taskbar.
+        Qt reports a top-level window's position through ``pos()``/``y()`` as the
+        top of its *frame*, while ``height()`` is the client height. Comparing
+        those two directly leaves the title bar unaccounted for, so the frame is
+        what gets clamped here, and the move is applied as a delta.
         """
-        x = min(max(self.x(), available.left()), available.right() - self.width() + 1)
-        y = min(max(self.y(), available.top()), available.bottom() - self.height() + 1)
-        if (x, y) != (self.x(), self.y()):
-            self.move(x, y)
+        frame = self.frameGeometry()
+        target = clamp_to_screen(frame, available)
+        dx = target.x() - frame.x()
+        dy = target.y() - frame.y()
+        if dx or dy:
+            self.move(self.x() + dx, self.y() + dy)
 
     # ------------------------------------------------------------------ build
 
