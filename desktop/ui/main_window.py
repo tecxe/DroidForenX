@@ -105,17 +105,28 @@ class MainWindow(QMainWindow):
         sidebar_layout.setSpacing(0)
 
         # Logo
+        # The padding belongs to the frame alone. A selector-less rule is
+        # inherited by every child, and #sidebar QLabel already carries the
+        # section-header padding, so the two labels ended up with 32 px of
+        # vertical padding inside a 34 px box: a 2 px text slot, and the
+        # product name rendered as slivers. Padding declared on the labels
+        # themselves outranks both sources.
         logo_frame = QWidget()
-        logo_frame.setStyleSheet("padding: 16px; border-bottom: 1px solid #1e293b;")
+        logo_frame.setObjectName("logoFrame")
+        logo_frame.setStyleSheet("#logoFrame { padding: 16px; border-bottom: 1px solid #1e293b; }")
         logo_layout = QVBoxLayout(logo_frame)
         logo_layout.setSpacing(4)
 
         logo_text = QLabel("DROIDFORENX")
-        logo_text.setStyleSheet("font-size: 16px; font-weight: 800; color: #f59e0b; letter-spacing: 2px; border: none;")
+        logo_text.setStyleSheet(
+            "font-size: 16px; font-weight: 800; color: #f59e0b; letter-spacing: 2px; "
+            "border: none; padding: 0; background: transparent;")
         logo_layout.addWidget(logo_text)
 
-        version = QLabel("v2.0.12 Professional")
-        version.setStyleSheet("font-size: 10px; color: #475569; letter-spacing: 1px; border: none;")
+        version = QLabel("v2.0.14 Professional")
+        version.setStyleSheet(
+            "font-size: 10px; color: #475569; letter-spacing: 1px; "
+            "border: none; padding: 0; background: transparent;")
         logo_layout.addWidget(version)
 
         sidebar_layout.addWidget(logo_frame)
@@ -128,7 +139,7 @@ class MainWindow(QMainWindow):
                 ("  Device Connection", 2),
             ]),
             ("FORENSIC STAGES", [
-                ("  1. Seizure & Isolation", 3),
+                ("  1. Seizure && Isolation", 3),
                 ("  2. Identification", 4),
                 ("  3. Acquisition", 5),
                 ("  4. Examination", 6),
@@ -154,18 +165,27 @@ class MainWindow(QMainWindow):
         sidebar_layout.addStretch()
 
         # Device status footer
+        # Same trap as the logo: "QFrame { padding: 12px; }" also matches the
+        # QLabel children, because QLabel derives from QFrame. Combined with the
+        # #sidebar QLabel header padding that is 44 px on a 24 px label, so the
+        # status dot and the device name painted into nothing at all.
         self.device_footer = QFrame()
-        self.device_footer.setStyleSheet("QFrame { border-top: 1px solid #1e293b; padding: 12px; }")
+        self.device_footer.setObjectName("deviceFooter")
+        self.device_footer.setStyleSheet("#deviceFooter { border-top: 1px solid #1e293b; padding: 12px; }")
         footer_layout = QVBoxLayout(self.device_footer)
         footer_layout.setSpacing(4)
         self.footer_icon = QLabel("●")
-        self.footer_icon.setStyleSheet("font-size: 10px; color: #ef4444; border: none;")
+        self.footer_icon.setStyleSheet(
+            "font-size: 10px; color: #ef4444; border: none; padding: 0; background: transparent;")
         footer_layout.addWidget(self.footer_icon)
         self.footer_status = QLabel("No device connected")
-        self.footer_status.setStyleSheet("font-size: 11px; color: #64748b; border: none;")
+        self.footer_status.setStyleSheet(
+            "font-size: 11px; color: #64748b; border: none; padding: 0; background: transparent;")
         footer_layout.addWidget(self.footer_status)
         self.footer_model = QLabel("")
-        self.footer_model.setStyleSheet("font-size: 10px; color: #475569; font-family: 'Cascadia Code', monospace; border: none;")
+        self.footer_model.setStyleSheet(
+            "font-size: 10px; color: #475569; font-family: 'Cascadia Code', monospace; "
+            "border: none; padding: 0; background: transparent;")
         footer_layout.addWidget(self.footer_model)
         sidebar_layout.addWidget(self.device_footer)
 
@@ -201,7 +221,7 @@ class MainWindow(QMainWindow):
 
         # Status bar
         self.statusBar().setStyleSheet("background: #111827; color: #64748b; border-top: 1px solid #1e293b; font-size: 11px;")
-        self.statusBar().showMessage("Ready — DroidForenX v2.0.12 Professional")
+        self.statusBar().showMessage("Ready — DroidForenX v2.0.14 Professional")
 
         self._navigate_to(0)
 
@@ -424,7 +444,7 @@ class MainWindow(QMainWindow):
 
     def _show_about(self):
         QMessageBox.about(self, "About DroidForenX",
-            "<h2>DroidForenX v2.0.12</h2>"
+            "<h2>DroidForenX v2.0.14</h2>"
             "<p>Professional Digital Forensics</p>"
             "<p>Standalone mobile device forensic tool for law enforcement "
             "and forensic investigators.</p>"
