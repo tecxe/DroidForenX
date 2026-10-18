@@ -14,11 +14,12 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QGridLayout, QGroupBox,
-    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton,
-    QTabWidget, QTextEdit, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame,
+    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+    QProgressBar, QPushButton, QScrollArea, QTabWidget, QTextEdit, QVBoxLayout,
+    QWidget,
 )
 
 from ...core import evidence_store
@@ -47,6 +48,30 @@ COMPRESSION_CHOICES = (
     ("Best (slower)", "best"),
     ("None (store)", "none"),
 )
+
+#: Narrowest the form is allowed to get, and the floor its height may shrink to
+#: when the desktop is shorter than the content.
+MIN_WIDTH = 720
+MIN_HEIGHT = 420
+
+#: Gap kept between the window and the edge of the available desktop.
+SCREEN_MARGIN = 40
+
+
+def fit_size(desired: QSize, available) -> QSize:
+    """Clamp a window size so the whole window fits inside ``available``.
+
+    A QDialog takes its size from the layout's ``sizeHint`` and QWidget does not
+    shrink itself to fit the desktop. This form is taller than a 720 px screen,
+    so it opened with its bottom edge - the Examiner fields and both buttons -
+    below the taskbar. The height is capped rather than trusted.
+    """
+    max_w = max(MIN_WIDTH, available.width() - SCREEN_MARGIN)
+    max_h = max(MIN_HEIGHT, available.height() - SCREEN_MARGIN)
+    return QSize(
+        min(max(desired.width(), MIN_WIDTH), max_w),
+        min(max(desired.height(), MIN_HEIGHT), max_h),
+    )
 
 
 class PartitionLoader(QThread):
@@ -143,21 +168,43 @@ class CreateImageDialog(QDialog):
     def __init__(self, parent=None, serial: str = "", case_id: str = "", session_id: str = ""):
         super().__init__(parent)
         self.setWindowTitle("Create Image")
-        self.setMinimumWidth(720)
+        self.setMinimumWidth(MIN_WIDTH)
+        self.setSizeGripEnabled(True)
         self._serial = serial or ""
         self._case_id = case_id or ""
         self._session_id = session_id or ""
         self._partitions = []
         self._loader = None
         self._worker = None
+        self._fitted = False
+
+        # Everything except the action row scrolls. The buttons are the one part
+        # that must not be reachable only by scrolling: on a short display they
+        # were the part that fell off the bottom of the screen.
+        self._body = QWidget()
+        body_layout = QVBoxLayout(self._body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(12)
+        body_layout.addWidget(self._build_source_group())
+        body_layout.addWidget(self._build_output_group())
+        body_layout.addWidget(self._build_metadata_group())
+        self.progress_group = self._build_progress_group()
+        body_layout.addWidget(self.progress_group)
+        body_layout.addStretch(1)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setWidget(self._body)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
-        layout.addWidget(self._build_source_group())
-        layout.addWidget(self._build_output_group())
-        layout.addWidget(self._build_metadata_group())
-        layout.addWidget(self._build_progress_group())
+        layout.addWidget(self.scroll, 1)
         layout.addLayout(self._build_buttons())
+
+        # Nothing has been written yet, so an empty console is only height.
+        self.progress_group.setVisible(False)
 
         # Connected only once every widget exists: adding the first tab emits
         # currentChanged, and the handler needs the format combo to be there.
@@ -171,6 +218,39 @@ class CreateImageDialog(QDialog):
         else:
             self.source_tabs.setTabEnabled(0, False)
             self.source_tabs.setCurrentIndex(1)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._fitted:
+            self._fitted = True
+            self._fit_to_screen()
+
+    def _fit_to_screen(self):
+        """Size to the content, capped to the desktop that is actually present."""
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:  # pragma: no cover - no display at all
+            return
+        content = self._body.sizeHint()
+        footer = self.btn_start.sizeHint().height() + 3 * 12
+        desired = QSize(
+            max(content.width() + 2 * 16, MIN_WIDTH),
+            content.height() + footer + 2 * 16,
+        )
+        available = screen.availableGeometry()
+        self.resize(fit_size(desired, available))
+        self._keep_on_screen(available)
+
+    def _keep_on_screen(self, available):
+        """Nudge the window back inside the desktop after a resize.
+
+        The window manager positions the dialog for the size it had when it was
+        mapped, so growing it later - which happens when the console appears -
+        pushes the bottom edge back under the taskbar.
+        """
+        x = min(max(self.x(), available.left()), available.right() - self.width() + 1)
+        y = min(max(self.y(), available.top()), available.bottom() - self.height() + 1)
+        if (x, y) != (self.x(), self.y()):
+            self.move(x, y)
 
     # ------------------------------------------------------------------ build
 
@@ -455,6 +535,12 @@ class CreateImageDialog(QDialog):
         if self.source_kind == "folder" and not Path(request.source_label).is_dir():
             QMessageBox.warning(self, "Cannot create image", "Choose a folder to image first.")
             return
+
+        # The console only becomes useful once bytes are moving, and revealing it
+        # here keeps the form itself short enough to fit a small desktop.
+        self.progress_group.setVisible(True)
+        self._body.adjustSize()
+        self.scroll.ensureWidgetVisible(self.progress_group)
 
         self.console.clear()
         self.btn_start.setEnabled(False)

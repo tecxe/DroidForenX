@@ -27,13 +27,16 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 try:
+    from PyQt6.QtCore import QRect, QSize
     from PyQt6.QtWidgets import QApplication
     _QT_IMPORT = True
 except Exception:  # pragma: no cover - depends on the environment
     _QT_IMPORT = False
 
 from desktop.core.imaging import create_image, sources
-from desktop.ui.dialogs.create_image_dialog import CreateImageDialog
+from desktop.ui.dialogs.create_image_dialog import (
+    MIN_HEIGHT, MIN_WIDTH, CreateImageDialog, fit_size,
+)
 
 
 def _make_qapp():
@@ -139,6 +142,81 @@ class CreateImageDialogTest(unittest.TestCase):
         self.assertTrue(result.verified)
         self.assertEqual(result.primary.name, "evidence.zip")
         self.assertTrue((self.dest / "evidence.zip.sha256").exists())
+
+
+@unittest.skipUnless(_QT_IMPORT, "PyQt6 is not available")
+class DialogFitsOnScreenTest(unittest.TestCase):
+    """The dialog must never open larger than the desktop it opens on.
+
+    It used to build a 798 px tall form regardless of the screen: on a 720 px
+    desktop the Examiner fields and both buttons sat below the taskbar, so the
+    operator could fill the form and still have nowhere to press Create Image.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._app = _make_qapp()
+
+    def test_height_is_capped_to_the_desktop(self):
+        capped = fit_size(QSize(MIN_WIDTH, 798), QRect(0, 0, 1280, 720))
+        self.assertLessEqual(capped.height(), 720)
+        self.assertGreaterEqual(capped.height(), MIN_HEIGHT)
+
+    def test_a_dialog_that_already_fits_is_left_alone(self):
+        desired = QSize(760, 500)
+        self.assertEqual(fit_size(desired, QRect(0, 0, 1280, 720)), desired)
+
+    def test_width_never_drops_below_the_usable_minimum(self):
+        shrunk = fit_size(QSize(100, 100), QRect(0, 0, 1280, 720))
+        self.assertEqual(shrunk.width(), MIN_WIDTH)
+
+    def test_the_action_buttons_are_outside_the_scrolling_area(self):
+        dialog = CreateImageDialog(serial="")
+        try:
+            self.assertFalse(dialog.scroll.isAncestorOf(dialog.btn_start))
+            self.assertFalse(dialog.scroll.isAncestorOf(dialog.btn_cancel))
+            # the form itself is what scrolls
+            self.assertTrue(dialog.scroll.isAncestorOf(dialog.format_combo))
+        finally:
+            dialog.close()
+
+    def test_the_console_stays_hidden_until_an_image_is_started(self):
+        dialog = CreateImageDialog(serial="")
+        try:
+            self.assertFalse(dialog.progress_group.isVisibleTo(dialog))
+        finally:
+            dialog.close()
+
+    def test_an_opened_dialog_lands_inside_the_desktop(self):
+        dialog = CreateImageDialog(serial="")
+        try:
+            dialog.show()
+            self._app.processEvents()
+            available = dialog.screen().availableGeometry()
+            self.assertLessEqual(dialog.y() + dialog.height() - 1, available.bottom())
+            self.assertLessEqual(dialog.x() + dialog.width() - 1, available.right())
+            self.assertGreaterEqual(dialog.y(), available.top())
+        finally:
+            dialog.close()
+
+    def test_revealing_the_console_keeps_the_buttons_on_screen(self):
+        dialog = CreateImageDialog(serial="")
+        try:
+            dialog.show()
+            self._app.processEvents()
+            dialog.progress_group.setVisible(True)
+            dialog._body.adjustSize()
+            dialog._fit_to_screen()
+            self._app.processEvents()
+
+            available = dialog.screen().availableGeometry()
+            self.assertLessEqual(dialog.y() + dialog.height() - 1, available.bottom())
+            self.assertTrue(dialog.btn_start.isVisibleTo(dialog))
+            self.assertGreater(dialog.btn_start.y(), 0)
+            self.assertLessEqual(dialog.btn_start.y() + dialog.btn_start.height(),
+                                 dialog.height())
+        finally:
+            dialog.close()
 
 
 if __name__ == "__main__":
