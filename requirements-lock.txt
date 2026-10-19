@@ -1,0 +1,27 @@
+# DroidForenX build lock - exact pins for reproducible builds.
+#
+# Installing requirements.txt gives you a range, which means two people
+# building the same commit can get different PyQt6 and PyInstaller and end
+# up with executables of different sizes. This file removes that freedom.
+#
+#     python -m pip install -r requirements-lock.txt
+#     python build.py
+#
+# Verified with CPython 3.14.6 on win32. PyInstaller normalises embedded
+# timestamps when SOURCE_DATE_EPOCH is set, which build.py does, so the same
+# commit on the same Python produces a byte-identical executable.
+
+# --- Direct dependencies (mirrors requirements.txt, pinned) ---
+PyQt6==6.11.0
+fpdf2==2.8.8
+openpyxl==3.1.5
+pillow==12.3.0
+pyinstaller==6.22.2
+
+# --- Transitive dependencies (pinned so the graph cannot drift) ---
+PyQt6-Qt6==6.11.2
+PyQt6_sip==13.12.0
+altgraph==0.17.5
+pefile==2024.8.26
+pywin32-ctypes==0.2.3
+setuptools==84.0.0
