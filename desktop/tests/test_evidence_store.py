@@ -214,11 +214,18 @@ class EvidenceStoreTest(unittest.TestCase):
 
     def test_device_verified_tier_accepted_with_evidence(self):
         evidence_store.open_case(self.case_id)
+        artifact = self._make_artifact("sms.db", b"message rows")
+        record = evidence_store.record_acquired(
+            self.case_id, "/data/sms.db", artifact, loader="sms_mms")
+        assert record is not None
         entry = evidence_store.record_verification(
             self.case_id, "sms_mms", VerificationTier.T1_DEVICE_VERIFIED,
             "Tecno Spark 30, Android 14, serial ABC123, 2026-10-14",
+            artifact_id=record.artifact_id,
         )
         self.assertEqual(entry["tier"], VerificationTier.T1_DEVICE_VERIFIED)
+        self.assertEqual(entry["basis"], "artifact")
+        self.assertEqual(entry["artifact_id"], record.artifact_id)
         self.assertEqual(
             evidence_store.get_verification_tier(self.case_id, "sms_mms"),
             VerificationTier.T1_DEVICE_VERIFIED,
@@ -227,12 +234,97 @@ class EvidenceStoreTest(unittest.TestCase):
         actions = [e["action"] for e in evidence_store.read_custody(self.case_id)]
         self.assertIn("VERIFY", actions)
 
+    def test_device_verified_tier_requires_a_backing_artifact(self):
+        """Evidence text alone is an assertion; the claim must point at a file."""
+        evidence_store.open_case(self.case_id)
+        with self.assertRaises(ValueError) as ctx:
+            evidence_store.record_verification(
+                self.case_id, "sms_mms", VerificationTier.T1_DEVICE_VERIFIED,
+                "Tecno Spark 30, serial ABC123, 2026-10-14",
+            )
+        self.assertIn("artifact_id", str(ctx.exception))
+
+    def test_device_verified_tier_rejects_unknown_artifact(self):
+        """A claim cannot name an artifact the case does not hold."""
+        evidence_store.open_case(self.case_id)
+        with self.assertRaises(ValueError) as ctx:
+            evidence_store.record_verification(
+                self.case_id, "sms_mms", VerificationTier.T1_DEVICE_VERIFIED,
+                "serial ABC123", artifact_id="ART-doesnotexist",
+            )
+        self.assertIn("not recorded in this case", str(ctx.exception))
+
+    def test_capability_only_claim_is_labelled(self):
+        """A reachability probe must not look like preserved evidence."""
+        evidence_store.open_case(self.case_id)
+        entry = evidence_store.record_verification(
+            self.case_id, "gps", VerificationTier.T1_DEVICE_VERIFIED,
+            "serial ABC123; dumpsys location responded", capability_only=True,
+        )
+        self.assertEqual(entry["basis"], "capability")
+        self.assertIsNone(entry["artifact_id"])
+
+        audit = evidence_store.audit_claims(self.case_id)
+        self.assertIn("gps", audit["capability"])
+        self.assertNotIn("gps", audit["backed"])
+        self.assertNotIn("gps", audit["unbacked"])
+
+    def test_audit_claims_separates_backed_from_unbacked(self):
+        evidence_store.open_case(self.case_id)
+        artifact = self._make_artifact("calls.db", b"call rows")
+        record = evidence_store.record_acquired(
+            self.case_id, "/data/calls.db", artifact, loader="call_log")
+        assert record is not None
+        evidence_store.record_verification(
+            self.case_id, "call_log", VerificationTier.T1_DEVICE_VERIFIED,
+            "serial ABC123", artifact_id=record.artifact_id)
+        evidence_store.record_verification(
+            self.case_id, "gps", VerificationTier.T1_DEVICE_VERIFIED,
+            "serial ABC123; responded", capability_only=True)
+
+        # a legacy record written before the artifact requirement existed
+        import json
+        legacy = {
+            "timestamp": "2026-10-14T20:55:27Z", "case_id": self.case_id,
+            "loader": "notes", "tier": VerificationTier.T1_DEVICE_VERIFIED,
+            "evidence": "serial ABC123; /sdcard listed",
+        }
+        path = evidence_store.manifest_dir(self.case_id) / "verification.jsonl"
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(legacy) + "\n")
+
+        audit = evidence_store.audit_claims(self.case_id)
+        self.assertEqual(audit["backed"], ["call_log"])
+        self.assertEqual(audit["capability"], ["gps"])
+        self.assertEqual(audit["unbacked"], ["notes"])
+
+        result = evidence_store.verify(self.case_id)
+        self.assertEqual(result["unbacked_claims"], ["notes"])
+        self.assertEqual(result["verdict"], "VERIFIED",
+                         "file integrity and claim integrity are separate verdicts")
+
+    def test_verify_catches_a_single_flipped_byte(self):
+        """One byte is enough, and it must be caught without re-reading twice."""
+        evidence_store.open_case(self.case_id)
+        artifact = self._make_artifact("big.db", b"A" * 4096)
+        evidence_store.record_acquired(self.case_id, "/data/big.db", artifact, loader="test")
+        self.assertEqual(evidence_store.verify(self.case_id)["verdict"], "VERIFIED")
+
+        blob = bytearray(artifact.read_bytes())
+        blob[2048] ^= 0x01
+        artifact.write_bytes(bytes(blob))
+
+        result = evidence_store.verify(self.case_id)
+        self.assertEqual(result["verdict"], "INTEGRITY_FAILURE")
+        self.assertEqual(len(result["mismatched"]), 1)
+
     def test_highest_earned_tier_wins(self):
         evidence_store.open_case(self.case_id)
         evidence_store.record_verification(self.case_id, "gps",
                                             VerificationTier.T2_FIXTURE_VERIFIED, "fixture")
         evidence_store.record_verification(self.case_id, "gps",
-                                            VerificationTier.T1_DEVICE_VERIFIED, "serial X")
+                                            VerificationTier.T1_DEVICE_VERIFIED, "serial X",
+                                            capability_only=True)
         self.assertEqual(
             evidence_store.get_verification_tier(self.case_id, "gps"),
             VerificationTier.T1_DEVICE_VERIFIED,

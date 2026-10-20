@@ -148,7 +148,9 @@ def _read_jsonl(path: Path) -> List[dict]:
 
 
 def record_verification(case_id: str, loader: str, tier: str,
-                        evidence: str = "") -> dict:
+                        evidence: str = "",
+                        artifact_id: Optional[str] = None,
+                        capability_only: bool = False) -> dict:
     """
     Record that a loader has earned a verification tier.
 
@@ -156,19 +158,55 @@ def record_verification(case_id: str, loader: str, tier: str,
     evidence for the claim is stored next to the claim so the claim itself is
     auditable. A loader with no entry in verification.jsonl is T3_UNTESTED,
     always. Declaring a tier is how a forensics tool starts lying.
+
+    A T1 claim also has to say what it is standing on, because "verified on a
+    device" can mean two very different things:
+
+    * ``artifact_id`` - this case holds the evidence. The id must already exist
+      in the case's artifact log, so the claim points at a file whose SHA-256 is
+      in the manifest. This is the normal case.
+    * ``capability_only=True`` - the run proved the loader could reach the
+      source but deliberately preserved nothing (``record_baseline.py`` does
+      exactly this). The entry is stored with ``basis="capability"`` so no later
+      reader mistakes reachability for preserved evidence.
+
+    Passing neither is rejected: a bare device claim with free text and no
+    artifact is an assertion, not a record.
     """
     if tier not in VerificationTier.ALL:
         raise ValueError(f"unknown verification tier: {tier!r}")
-    if tier == VerificationTier.T1_DEVICE_VERIFIED and not evidence.strip():
-        raise ValueError(
-            "T1_DEVICE_VERIFIED requires evidence (device serial, OS build, "
-            "date) - a device claim with no record is an unsupported assertion"
-        )
+
+    basis = None
+    if tier == VerificationTier.T1_DEVICE_VERIFIED:
+        if not evidence.strip():
+            raise ValueError(
+                "T1_DEVICE_VERIFIED requires evidence (device serial, OS build, "
+                "date) - a device claim with no record is an unsupported assertion"
+            )
+        if artifact_id:
+            known = {row.get("artifact_id") for row in read_artifacts(case_id)}
+            if artifact_id not in known:
+                raise ValueError(
+                    f"artifact {artifact_id!r} is not recorded in this case - a "
+                    "device claim must point at evidence the case actually holds"
+                )
+            basis = "artifact"
+        elif capability_only:
+            basis = "capability"
+        else:
+            raise ValueError(
+                "T1_DEVICE_VERIFIED requires artifact_id from this case, or "
+                "capability_only=True when the run proved reachability without "
+                "preserving content - an unbacked device claim is an assertion"
+            )
+
     entry = {
         "timestamp": _utc_now(),
         "case_id": case_id,
         "loader": loader,
         "tier": tier,
+        "basis": basis,
+        "artifact_id": artifact_id,
         "evidence": evidence,
     }
     path = manifest_dir(case_id) / "verification.jsonl"
@@ -177,8 +215,9 @@ def record_verification(case_id: str, loader: str, tier: str,
         handle.write(json.dumps(entry) + "\n")
         handle.flush()
         os.fsync(handle.fileno())
+    stance = f", basis={basis}" if basis else ""
     log_custody(case_id, "VERIFY", "droidforenx",
-                f"{loader} claimed {tier} ({evidence or 'no evidence given'})")
+                f"{loader} claimed {tier} ({evidence or 'no evidence given'}{stance})")
     return entry
 
 
@@ -199,6 +238,40 @@ def get_verification_tier(case_id: str, loader: str) -> str:
 
 def read_verification(case_id: str) -> List[dict]:
     return _read_jsonl(manifest_dir(case_id) / "verification.jsonl")
+
+
+def audit_claims(case_id: str) -> dict:
+    """
+    Cross-check every T1 claim against the artifacts the case actually holds.
+
+    A case can be marked device-verified and still contain no evidence - the
+    baseline case did exactly that. This function makes the difference visible
+    instead of leaving it for a reader to notice.
+
+    Returns three lists of loader names:
+
+    * ``backed``     - the claim names an artifact_id that exists in this case
+    * ``capability`` - the claim declared basis="capability" (reachability only)
+    * ``unbacked``   - the claim names no artifact and no basis (legacy or bad)
+    """
+    known_ids = {row.get("artifact_id") for row in read_artifacts(case_id)}
+    backed, capability, unbacked = [], [], []
+    for entry in read_verification(case_id):
+        if entry.get("tier") != VerificationTier.T1_DEVICE_VERIFIED:
+            continue
+        loader = entry.get("loader")
+        artifact_id = entry.get("artifact_id")
+        if artifact_id and artifact_id in known_ids:
+            backed.append(loader)
+        elif entry.get("basis") == "capability":
+            capability.append(loader)
+        else:
+            unbacked.append(loader)
+    return {
+        "backed": sorted(set(backed)),
+        "capability": sorted(set(capability)),
+        "unbacked": sorted(set(unbacked)),
+    }
 
 
 def hash_file(path: str | Path) -> str:
@@ -533,11 +606,22 @@ def verify(case_id: str) -> dict:
     Re-hash every acquired artifact and compare against the manifest.
     This is the tamper-detection step an examiner or a defence would run.
     The run is recorded in the chain of custody.
+
+    The result also carries ``claims`` from :func:`audit_claims`, so a case that
+    holds T1 claims with nothing behind them says so in the same report that
+    says the files are intact. File integrity and claim integrity are different
+    questions and both are answered here.
     """
     result = compute_integrity(case_id)
-    log_custody(case_id, "VERIFY", TOOL_NAME,
-                f"{result['verdict']}: {result['ok']} ok, "
-                f"{len(result['mismatched'])} mismatched, {len(result['missing'])} missing")
+    claims = audit_claims(case_id)
+    result["claims"] = claims
+    result["unbacked_claims"] = claims["unbacked"]
+
+    detail = (f"{result['verdict']}: {result['ok']} ok, "
+              f"{len(result['mismatched'])} mismatched, {len(result['missing'])} missing")
+    if claims["unbacked"]:
+        detail += f"; {len(claims['unbacked'])} T1 claims hold no artifact"
+    log_custody(case_id, "VERIFY", TOOL_NAME, detail)
     return result
 
 

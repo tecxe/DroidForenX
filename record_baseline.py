@@ -5,13 +5,19 @@ Two things happen here, and deliberately not a third:
 
   1. Verification tiers are EARNED - each loader that answered a live query on
      this phone gets T1_DEVICE_VERIFIED with the device serial, Android build
-     and date recorded as the evidence for that claim.
+     and date recorded as the evidence for that claim. These are recorded with
+     capability_only=True, so the entry says basis="capability": the loader
+     reached the source, but this run preserved no artifact for it.
   2. A case is opened and per-loader statuses are recorded from the probe.
 
 What does NOT happen: no personal content is pulled. No SMS bodies, no
 contacts, no call details. The baseline proves the acquisition chain works and
 records what the device will and will not yield. Reading the examiner's own
 messages is neither necessary nor appropriate to demonstrate that.
+
+Because nothing is preserved, these claims are deliberately NOT the kind of T1
+that points at an artifact. evidence_store.audit_claims() lists them under
+"capability", so "the query answered" is never mistaken for "evidence kept".
 """
 
 import json
@@ -78,6 +84,7 @@ def main():
         evidence_store.record_verification(
             CASE_ID, loader, VerificationTier.T1_DEVICE_VERIFIED,
             f"{evidence}; observed {obs}",
+            capability_only=True,
         )
     print(f"  earned T1_DEVICE_VERIFIED : {len(T1_LOADERS)} loaders")
 

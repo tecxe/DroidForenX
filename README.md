@@ -24,9 +24,15 @@ copy, and records an append-only chain of custody for every action.
 > **not rooted**, FBE `encrypted`, bootloader `green`.
 >
 > Every T1 claim above is stored in the case's `verification.jsonl` with that
-> serial, build fingerprint, date and observed row count as its evidence. Nothing
-> is marked verified without a record — `record_verification()` rejects a
-> `T1_DEVICE_VERIFIED` claim that carries no evidence.
+> serial, build fingerprint, date and observed row count as its evidence. A
+> `T1_DEVICE_VERIFIED` claim must now also say what it stands on:
+> `record_verification()` takes an `artifact_id` that must already exist in the
+> case's artifact log, or `capability_only=True` for a probe that proved the
+> loader could reach the source without preserving anything. Claims of the
+> second kind are stored with `basis="capability"`, and
+> `audit_claims()` lists them separately so reachability is never read as
+> preserved evidence. The baseline case above is of that kind — it pulls no
+> content by design, and `verify()` reports its 14 claims as unbacked.
 >
 > `README.md` in earlier revisions of this repository described a Django +
 > PostgreSQL platform with 16 phases and ~138 tests. **That software does not
@@ -439,7 +445,7 @@ can be reproduced by anyone. `test_reproducible_build.py` compares the installed
 environment against the lock, and the full two-build byte comparison runs only
 with `DROIDFORENX_SLOW_TESTS=1`.
 
-165 tests, no device required. They cover the properties that matter:
+170 tests, no device required. They cover the properties that matter:
 
 - an acquired artifact survives being read (the original bug was that 11
   loaders deleted evidence after parsing)

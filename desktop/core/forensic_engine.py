@@ -938,9 +938,10 @@ ROOT_REQUIRED_MODULES = frozenset({
 # Verification tiers are NOT declared here. A tier is a claim that a loader
 # works, so it is earned and recorded with its evidence in the case's
 # verification.jsonl via evidence_store.record_verification(). A loader with no
-# such record is T3_UNTESTED - which, today, is all of them. The old hardcoded
-# table claimed T1_DEVICE_VERIFIED for fourteen loaders with no device ever
-# connected; that was a fabricated claim and it is gone.
+# such record is T3_UNTESTED. The old hardcoded table claimed T1_DEVICE_VERIFIED
+# for fourteen loaders with no device ever connected; that was a fabricated
+# claim and it is gone. Whether any loader currently holds a tier depends on the
+# case being examined, not on this file - ask evidence_store.audit_claims().
 
 
 def run_examination(serial, modules=None):
