@@ -11,6 +11,7 @@ satisfy that, which is what makes this module testable without hardware.
 """
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -37,6 +38,25 @@ class RawImageWriter(ImageWriter):
 
         multi = request.segment_size > 0
         total_size = int(getattr(source, "size", 0) or 0)
+
+        # Never overwrite a previous image: an evidence file that silently
+        # replaces another one destroys the chain of custody, so refuse instead
+        # of opening it with "wb".
+        first_name = f"{request.base_name}.001" if multi else f"{request.base_name}.dd"
+        first_path = request.dest_dir / first_name
+        if first_path.exists():
+            raise ValueError(
+                f"{first_name} already exists in {request.dest_dir}; choose a "
+                "different base name so the existing image is not overwritten")
+
+        # Fail before moving bytes when the destination cannot hold the image.
+        # Only possible for sources whose size is known (a physical partition).
+        if total_size:
+            free = shutil.disk_usage(request.dest_dir).free
+            if free < total_size:
+                raise ValueError(
+                    f"not enough free space in {request.dest_dir}: the source is "
+                    f"{total_size / 1024 ** 3:.1f} GiB, only {free / 1024 ** 3:.1f} GiB free")
 
         image_digest = new_hash(request.hash_algo)
         segments: list[Path] = []

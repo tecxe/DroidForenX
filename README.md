@@ -294,6 +294,7 @@ dialog picks a source, an output format, and the parameters for it.
 | Format | Source | Output |
 |---|---|---|
 | **Raw (dd)** | a device partition | `evidence.001`, `evidence.002` … (or one `evidence.dd`), plus `.md5`/`.sha1`/`.sha256` sidecars and an `.imageinfo.txt` |
+| **Raw (dd), logical** | the device's `/sdcard` | the same RAW container, holding a POSIX tar archive of user storage streamed over `adb exec-out` |
 | **ZIP** | a case folder | `evidence.zip` with a `MANIFEST.json` inventory, plus a hash sidecar |
 | **AFF4-L** | a case folder | `evidence.aff4`, a ZIP64 container with the AFF4 root segments and a Turtle metadata graph |
 
@@ -301,6 +302,12 @@ Source and format are gated against each other: a block device can only be
 written as RAW, and a folder only as ZIP or AFF4. Segment size (default 2 GiB,
 or a single file), compression and hash algorithm are selectable, and the image
 is re-read and re-hashed after writing unless verification is turned off.
+
+The **Logical (/sdcard)** tab is the imaging path that works on an unrooted
+handset: the ADB shell cannot open block devices there, but it can read
+`/sdcard`, so user storage is streamed as a tar archive and written through the
+RAW writer with the same hashing, verification and recording. It is a logical
+capture — deleted files and app-private data are not in it.
 
 Every finished image is recorded: a `disk_images` row, an `ACQUIRED` custody
 event, and one `record_acquired` artifact per segment, so it appears in the
@@ -388,12 +395,13 @@ State these in any report; they are properties of Android, not bugs to be
 - **Logical acquisition is not a full image.** Files not written to accessible
   storage are not recovered. A full flash image is a separate procedure with
   its own legal authorisation requirement.
-- **Device imaging stops at readable partitions.** *Create Image* can capture
-  `boot`, `recovery` and any partition the ADB shell can open — usually nothing
-  else. Whole-disk and `userdata` capture needs root, and the TECNO KL6 used for
-  verification is unrooted with file-based encryption, so those are listed as
-  `needs root` rather than attempted. Partition metadata
-  (`/dev/block/by-name`, sizes) is readable without root; the data is not.
+- **Physical imaging needs root — often for every partition, `boot` included.**
+  *Create Image* probes each partition with a one-sector read before offering
+  it. On the unrooted TECNO used for verification the shell user is denied every
+  block device (65 of 65, `boot` included), so the dialog reports `0 of 65
+  readable` and marks them `needs root` rather than attempting a doomed stream.
+  The **Logical (/sdcard)** tab is the supported unrooted path; `userdata` and
+  whole-disk capture require a rooted device or an authorised physical procedure.
 - **AFF4 interop is unvalidated.** The AFF4-L writer is standard-library only
   and its container is checked structurally — ZIP64 integrity, the required root
   segments in order, the volume URN in `container.description` and the archive

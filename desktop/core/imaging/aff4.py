@@ -65,40 +65,51 @@ class Aff4ImageWriter(ImageWriter):
 
         request.dest_dir.mkdir(parents=True, exist_ok=True)
         dest = request.dest_dir / f"{request.base_name}.{self.extension}"
+        if dest.exists():
+            raise ValueError(
+                f"{dest.name} already exists in {request.dest_dir}; choose a "
+                "different base name so the existing image is not overwritten")
         volume_urn = f"aff4://{uuid.uuid4()}"
 
         method = zipfile.ZIP_STORED if request.compression == "none" else zipfile.ZIP_DEFLATED
         level = {"none": None, "fast": 1, "best": 9}[request.compression]
 
-        files = sorted(p for p in source.rglob("*") if p.is_file())
+        resolved_dest = dest.resolve()
+        files = sorted(
+            p for p in source.rglob("*")
+            if p.is_file() and p.resolve() != resolved_dest)
         total_size = sum(p.stat().st_size for p in files)
 
         entries = []
         written = 0
-        with zipfile.ZipFile(dest, "w", compression=method, compresslevel=level, allowZip64=True) as archive:
-            # container.description MUST be the first member of an AFF4 volume.
-            archive.writestr("container.description", volume_urn)
-            archive.writestr("version.txt", "1.0")
+        try:
+            with zipfile.ZipFile(dest, "w", compression=method, compresslevel=level, allowZip64=True) as archive:
+                # container.description MUST be the first member of an AFF4 volume.
+                archive.writestr("container.description", volume_urn)
+                archive.writestr("version.txt", "1.0")
 
-            for index, path in enumerate(files):
-                arcname = path.relative_to(source).as_posix()
-                if arcname in RESERVED_ROOT:
-                    arcname = f"data/{arcname}"
-                archive.write(path, arcname)
-                size = path.stat().st_size
-                entries.append({
-                    "urn": f"{volume_urn}/{index:08d}",
-                    "segment": arcname,
-                    "original": path.relative_to(source).as_posix(),
-                    "size": size,
-                    "hash": hash_file(path, request.hash_algo),
-                })
-                written += size
-                emit(progress, written, total_size, f"packing {arcname}")
+                for index, path in enumerate(files):
+                    arcname = path.relative_to(source).as_posix()
+                    if arcname in RESERVED_ROOT:
+                        arcname = f"data/{arcname}"
+                    archive.write(path, arcname)
+                    size = path.stat().st_size
+                    entries.append({
+                        "urn": f"{volume_urn}/{index:08d}",
+                        "segment": arcname,
+                        "original": path.relative_to(source).as_posix(),
+                        "size": size,
+                        "hash": hash_file(path, request.hash_algo),
+                    })
+                    written += size
+                    emit(progress, written, total_size, f"packing {arcname}")
 
-            archive.writestr("information.turtle", self._turtle(request, volume_urn, entries))
-            # The volume URN is also the ZIP archive comment, per the standard.
-            archive.comment = volume_urn.encode("utf-8")
+                archive.writestr("information.turtle", self._turtle(request, volume_urn, entries))
+                # The volume URN is also the ZIP archive comment, per the standard.
+                archive.comment = volume_urn.encode("utf-8")
+        except BaseException:
+            dest.unlink(missing_ok=True)
+            raise
 
         digest = hash_file(dest, request.hash_algo)
         result = ImageResult(

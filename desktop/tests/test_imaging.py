@@ -187,6 +187,104 @@ class RequestValidationTest(ImagingTestCase):
             writer_for("ewf")
 
 
+class OverwriteProtectionTest(ImagingTestCase):
+    """A finished image is evidence: a new run must never replace it silently."""
+
+    def test_raw_refuses_to_overwrite_a_previous_image(self):
+        self.dest.mkdir(parents=True)
+        (self.dest / "evidence.dd").write_bytes(b"old image")
+        with self.assertRaises(ValueError):
+            RawImageWriter().write(Reader(b"new bytes"), self.request(segment_size=0))
+        self.assertEqual((self.dest / "evidence.dd").read_bytes(), b"old image")
+
+    def test_raw_refuses_to_overwrite_a_previous_segment_chain(self):
+        self.dest.mkdir(parents=True)
+        (self.dest / "evidence.001").write_bytes(b"old segment")
+        with self.assertRaises(ValueError):
+            RawImageWriter().write(Reader(b"x" * MIB), self.request(segment_size=MIB))
+        self.assertEqual((self.dest / "evidence.001").read_bytes(), b"old segment")
+
+    def test_zip_refuses_to_overwrite_a_previous_image(self):
+        source = self.folder({"a.txt": b"alpha"})
+        self.dest.mkdir(parents=True)
+        (self.dest / "evidence.zip").write_bytes(b"old container")
+        with self.assertRaises(ValueError):
+            ZipImageWriter().write(source, self.request(image_format="zip"))
+        self.assertEqual((self.dest / "evidence.zip").read_bytes(), b"old container")
+
+    def test_aff4_refuses_to_overwrite_a_previous_image(self):
+        source = self.folder({"a.txt": b"alpha"})
+        self.dest.mkdir(parents=True)
+        (self.dest / "evidence.aff4").write_bytes(b"old volume")
+        with self.assertRaises(ValueError):
+            Aff4ImageWriter().write(source, self.request(image_format="aff4"))
+        self.assertEqual((self.dest / "evidence.aff4").read_bytes(), b"old volume")
+
+
+class ContainerGuardsTest(ImagingTestCase):
+    def test_a_cancelled_zip_leaves_no_container_behind(self):
+        source = self.folder({"a.txt": b"alpha"})
+
+        class Stop(Exception):
+            pass
+
+        def progress(done, total, stage):
+            raise Stop()
+
+        with self.assertRaises(Stop):
+            ZipImageWriter().write(
+                source, self.request(image_format="zip"), progress=progress)
+        self.assertFalse((self.dest / "evidence.zip").exists())
+
+    def test_raw_refuses_when_the_destination_is_too_small(self):
+        from collections import namedtuple
+        from desktop.core.imaging import raw as raw_module
+
+        usage = namedtuple("usage", "total used free")
+        with mock.patch.object(raw_module.shutil, "disk_usage",
+                              return_value=usage(10, 0, 1)):
+            with self.assertRaises(ValueError):
+                RawImageWriter().write(Reader(b"x" * 4096), self.request(segment_size=0))
+        self.assertFalse((self.dest / "evidence.dd").exists())
+
+    def test_the_zip_is_not_packed_into_itself_when_written_inside_the_source(self):
+        source = self.folder({"a.txt": b"alpha"})
+        result = ZipImageWriter().write(
+            source, self.request(image_format="zip", dest_dir=source))
+        with zipfile.ZipFile(result.primary) as archive:
+            self.assertNotIn("evidence.zip", archive.namelist())
+
+    def test_a_failed_zip_leaves_no_container_behind(self):
+        source = self.folder({"a.txt": b"alpha"})
+        with mock.patch.object(zipfile.ZipFile, "write", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                ZipImageWriter().write(source, self.request(image_format="zip"))
+        self.assertFalse((self.dest / "evidence.zip").exists())
+
+    def test_a_failed_aff4_leaves_no_container_behind(self):
+        source = self.folder({"a.txt": b"alpha"})
+        with mock.patch.object(zipfile.ZipFile, "write", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                Aff4ImageWriter().write(source, self.request(image_format="aff4"))
+        self.assertFalse((self.dest / "evidence.aff4").exists())
+
+
+class BaseNameTest(unittest.TestCase):
+    def test_reserved_windows_device_names_are_rejected(self):
+        from desktop.core.imaging.base import safe_base_name
+
+        for name in ("con", "NUL", "com1", "lpt9.txt", "aux "):
+            with self.assertRaises(ValueError, msg=name):
+                safe_base_name(name)
+
+    def test_a_trailing_dot_is_rejected(self):
+        from desktop.core.imaging.base import safe_base_name
+
+        for name in ("evidence.", "evidence.."):
+            with self.assertRaises(ValueError, msg=name):
+                safe_base_name(name)
+
+
 class ZipWriterTest(ImagingTestCase):
     def test_folder_round_trips_with_a_manifest(self):
         source = self.folder({"a.txt": b"alpha", "sub/b.bin": b"beta" * 10})
@@ -312,11 +410,11 @@ class DeviceSourceTest(unittest.TestCase):
         argv = sources.partition_stream_argv("/usr/bin/adb", "SER", "/dev/block/sda1", rooted=True)
         self.assertEqual(argv[-1], "su 0 sh -c 'dd if=/dev/block/sda1 bs=1048576 2>/dev/null'")
 
-    def test_fast_listing_marks_non_boot_partitions_as_needing_root(self):
+    def test_fast_listing_claims_nothing_readable_without_a_probe(self):
         partitions = sources.list_partitions("SER", shell=FakeShell(), probe=False)
         by_name = {p.name: p for p in partitions}
-        self.assertTrue(by_name["boot_a"].readable)
-        self.assertFalse(by_name["boot_a"].needs_root)
+        self.assertFalse(by_name["boot_a"].readable)
+        self.assertTrue(by_name["boot_a"].needs_root)
         self.assertFalse(by_name["userdata"].readable)
         self.assertTrue(by_name["userdata"].needs_root)
 
@@ -326,6 +424,43 @@ class DeviceSourceTest(unittest.TestCase):
         self.assertEqual(by_name["boot_a"].size_bytes, 131072 * 512)
         self.assertTrue(by_name["userdata"].readable)
         self.assertFalse(by_name["userdata"].needs_root)
+        self.assertFalse(by_name["protect_f"].readable)
+        self.assertTrue(by_name["protect_f"].needs_root)
+
+    def test_probed_listing_on_an_unrooted_device_marks_every_partition(self):
+        class LockedShell(FakeShell):
+            READABLE = {
+                "/dev/block/sde13": False,
+                "/dev/block/sda21": False,
+                "/dev/block/sda12": False,
+            }
+
+        partitions = sources.list_partitions("SER", shell=LockedShell(), probe=True)
+        self.assertTrue(partitions)
+        self.assertTrue(all(not p.readable and p.needs_root for p in partitions))
+
+    def test_probing_uses_one_batched_round_trip(self):
+        class CountingShell(FakeShell):
+            def __init__(self):
+                self.bulk_calls = 0
+
+            def __call__(self, serial, command, timeout=20):
+                if "readlink -f" in command and "by-name/*" in command:
+                    self.bulk_calls += 1
+                    return (True,
+                            "boot_a /dev/block/sde13 131072 512\n"
+                            "userdata /dev/block/sda21 2097152 512\n"
+                            "protect_f /dev/block/sda12 8192 0\n")
+                return super().__call__(serial, command, timeout)
+
+        shell = CountingShell()
+        partitions = sources.list_partitions("SER", shell=shell, probe=True)
+        by_name = {p.name: p for p in partitions}
+
+        self.assertEqual(shell.bulk_calls, 1)
+        self.assertEqual(by_name["boot_a"].size_bytes, 131072 * 512)
+        self.assertTrue(by_name["boot_a"].readable)
+        self.assertTrue(by_name["userdata"].readable)
         self.assertFalse(by_name["protect_f"].readable)
         self.assertTrue(by_name["protect_f"].needs_root)
 
@@ -376,7 +511,7 @@ class DeviceSourceWiringTest(unittest.TestCase):
             partitions = sources.list_partitions("SER123")
 
         self.assertEqual([p.name for p in partitions], ["boot_a", "protect_f", "userdata"])
-        self.assertTrue([p for p in partitions if p.name == "boot_a"][0].readable)
+        self.assertTrue(all(p.needs_root for p in partitions))  # fast path claims nothing
 
     def test_open_partition_reader_resolves_adb_and_builds_the_command(self):
         from desktop.core import adb_manager

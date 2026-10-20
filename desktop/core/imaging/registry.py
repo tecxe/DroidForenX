@@ -16,6 +16,7 @@ import json
 import sqlite3
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from .. import evidence_store
@@ -133,6 +134,7 @@ def record_image(
 
     # Manifest + custody live in the case tree, not the database.
     artifacts = []
+    known = {Path(path): hash for path, hash in result.segment_digests}
     for segment in result.segments:
         record = evidence_store.record_acquired(
             case_id,
@@ -140,6 +142,7 @@ def record_image(
             segment,
             "image",
             detail=f"{result.image_format} image {result.primary.name}",
+            digest=known.get(Path(segment)),
         )
         if record is not None:
             artifacts.append(record.artifact_id)

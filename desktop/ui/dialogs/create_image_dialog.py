@@ -114,6 +114,10 @@ class PartitionLoader(QThread):
             self.failed.emit(str(exc))
 
 
+class _Cancelled(Exception):
+    """Raised from a writer's progress callback to abort a run mid-way."""
+
+
 class ImageWorker(QThread):
     """Write one image, then record it. Never touches widgets from ``run``."""
 
@@ -124,7 +128,8 @@ class ImageWorker(QThread):
     cancelled = pyqtSignal()
 
     def __init__(self, request: ImageRequest, source, source_kind: str, case_id: str,
-                 session_id: str = "", source_factory=None, parent=None):
+                 session_id: str = "", source_factory=None, source_type: str = "",
+                 parent=None):
         super().__init__(parent)
         self._request = request
         self._source = source
@@ -132,6 +137,7 @@ class ImageWorker(QThread):
         self._case_id = case_id
         self._session_id = session_id
         self._source_factory = source_factory
+        self._source_type = source_type
         self._cancelled = False
         self._reader = None
         self._stage = ""
@@ -142,6 +148,12 @@ class ImageWorker(QThread):
             self._reader.close()
 
     def _on_progress(self, done: int, total: int, stage: str):
+        # The writers call this synchronously, so raising here actually stops a
+        # container write -- without it, Cancel did nothing until the whole ZIP
+        # or AFF4 was finished and the operator was told "no image was written"
+        # while one sat on disk.
+        if self._cancelled:
+            raise _Cancelled()
         self.progress.emit(done, total)
         if stage != self._stage:
             self._stage = stage
@@ -181,11 +193,14 @@ class ImageWorker(QThread):
 
             info = registry.record_image(
                 result, self._request, self._case_id,
-                session_id=self._session_id or None, actor="operator")
+                session_id=self._session_id or None, actor="operator",
+                source_type=self._source_type)
             self.log.emit(
                 f"Recorded in case manifest ({len(info['artifacts'])} artifact(s), "
                 f"status={info['status']})", "info")
             self.finished_ok.emit({"result": result, "info": info})
+        except _Cancelled:
+            self.cancelled.emit()
         except Exception as exc:
             if self._cancelled:
                 self.cancelled.emit()
@@ -248,6 +263,7 @@ class CreateImageDialog(QDialog):
             self._load_partitions()
         else:
             self.source_tabs.setTabEnabled(0, False)
+            self.source_tabs.setTabEnabled(2, False)
             self.source_tabs.setCurrentIndex(1)
 
     def showEvent(self, event):
@@ -336,12 +352,26 @@ class CreateImageDialog(QDialog):
         folder_row.addWidget(self.btn_browse_source)
         folder_layout.addLayout(folder_row)
         folder_hint = QLabel(
-            "Folders are the usual unrooted output. Only boot/recovery and readable "
-            "partitions can be captured from a device.")
+            "Image an acquired case directory as a ZIP or AFF4 container. "
+            "This is the usual path for unrooted devices.")
         folder_hint.setWordWrap(True)
         folder_hint.setStyleSheet("color: #64748b;")
         folder_layout.addWidget(folder_hint)
         self.source_tabs.addTab(folder, "Case folder")
+
+        logical = QWidget()
+        logical_layout = QVBoxLayout(logical)
+        logical_hint = QLabel(
+            "Streams the device's user storage (/sdcard) as a POSIX tar archive "
+            "and writes it as a RAW (dd) image with hash sidecars. Works without "
+            "root -- this is the imaging path for unrooted handsets. Expect the "
+            "image to be about as large as the storage in use, and the verify "
+            "step at the end to take a while.")
+        logical_hint.setWordWrap(True)
+        logical_hint.setStyleSheet("color: #64748b;")
+        logical_layout.addWidget(logical_hint)
+        logical_layout.addStretch(1)
+        self.source_tabs.addTab(logical, "Logical (/sdcard)")
 
         outer.addWidget(self.source_tabs)
         return group
@@ -442,7 +472,14 @@ class CreateImageDialog(QDialog):
 
     @property
     def source_kind(self) -> str:
-        return "stream" if self.source_tabs.currentIndex() == 0 else "folder"
+        # Case folder (index 1) is the only folder source; the device picker and
+        # the logical /sdcard stream both feed the streaming RAW writer.
+        return "folder" if self.source_tabs.currentIndex() == 1 else "stream"
+
+    @property
+    def stream_kind(self) -> str:
+        """``"logical"`` for the /sdcard tar stream, else ``"partition"``."""
+        return "logical" if self.source_tabs.currentIndex() == 2 else "partition"
 
     def available_formats(self) -> list:
         """Formats that the current source can actually be written as."""
@@ -463,7 +500,10 @@ class CreateImageDialog(QDialog):
         self._sync_segment_toggle()
 
     def _sync_segment_toggle(self):
-        self.segment_combo.setEnabled(self.format_combo.currentData() == "raw")
+        is_raw = self.format_combo.currentData() == "raw"
+        self.segment_combo.setEnabled(is_raw)
+        # RAW stores bytes as they arrive; only the container writers compress.
+        self.compression_combo.setEnabled(not is_raw)
 
     def _log(self, message: str, level: str = "info"):
         self.console.append(message)
@@ -473,6 +513,10 @@ class CreateImageDialog(QDialog):
     def _load_partitions(self):
         if not self._serial:
             self.partition_hint.setText("No device connected. Attach a device and refresh.")
+            return
+        if self._loader is not None and self._loader.isRunning():
+            # Replacing the reference would let the running QThread be garbage
+            # collected mid-run, which aborts the process.
             return
         self.btn_refresh.setEnabled(False)
         self.partition_hint.setText("Reading the partition table...")
@@ -494,9 +538,22 @@ class CreateImageDialog(QDialog):
                 "/dev/block/by-name may not be readable.")
             return
         usable = [p for p in partitions if p.readable]
-        self.partition_hint.setText(
-            f"{len(usable)} of {len(partitions)} partitions are readable without root. "
-            "Partitions marked 'needs root' cannot be captured on this device.")
+        if not usable:
+            # Typical for an unrooted modern device: the shell user cannot open
+            # a single block device, boot included. Physical imaging is not
+            # possible here, and the operator should be told that once, plainly,
+            # instead of watching streams fail one partition at a time.
+            self.partition_hint.setText(
+                f"0 of {len(partitions)} partitions can be read on this device: "
+                "it is not rooted, so the shell user is denied every block "
+                "device (boot included). Physical imaging requires a rooted "
+                "device; on an unrooted handset take a logical image on the "
+                "'Logical (/sdcard)' tab, or run a logical acquisition and image "
+                "the case folder here as ZIP or AFF4.")
+        else:
+            self.partition_hint.setText(
+                f"{len(usable)} of {len(partitions)} partitions are readable without root. "
+                "Partitions marked 'needs root' cannot be captured on this device.")
         if previous in partitions:
             self.partition_combo.setCurrentIndex(partitions.index(previous))
         elif usable:
@@ -531,8 +588,11 @@ class CreateImageDialog(QDialog):
         metadata = {key: value for key, value in metadata.items() if value}
 
         if self.source_kind == "stream":
-            partition = self.partition_combo.currentData()
-            source_label = partition.block if partition else ""
+            if self.stream_kind == "logical":
+                source_label = f"{sources.LOGICAL_ROOT} (tar over ADB from {self._serial or 'device'})"
+            else:
+                partition = self.partition_combo.currentData()
+                source_label = partition.block if partition else ""
         else:
             source_label = self.folder_edit.text().strip()
 
@@ -549,14 +609,29 @@ class CreateImageDialog(QDialog):
         )
 
     def resolve_source(self):
-        """Return ``(source, reader_factory)``; a reader factory only for devices."""
+        """Return ``(source, reader_factory)``; a reader factory only for streams."""
         if self.source_kind == "stream":
+            if self.stream_kind == "logical":
+                if not self._serial:
+                    raise ValueError(
+                        "No device is connected. Attach the device to take a "
+                        "logical image of its storage.")
+                serial = self._serial
+
+                def factory():
+                    return sources.open_logical_reader(serial)
+
+                return None, factory
+
             partition = self.partition_combo.currentData()
             if partition is None:
                 raise ValueError("Select a partition to image.")
             if not partition.readable:
                 raise ValueError(
-                    f"'{partition.name}' is not readable without root on this device.")
+                    f"'{partition.name}' is not readable without root on this device. "
+                    "Physical imaging needs a rooted device; to capture an "
+                    "unrooted handset, use a logical acquisition and image the "
+                    "case folder instead.")
 
             def factory():
                 # Re-check readability at stream time: the partition list was
@@ -606,7 +681,9 @@ class CreateImageDialog(QDialog):
                   f"in {request.dest_dir}", "info")
 
         self._worker = ImageWorker(request, source, self.source_kind, self._case_id,
-                                   self._session_id, source_factory=factory, parent=self)
+                                   self._session_id, source_factory=factory,
+                                   source_type="logical" if self.stream_kind == "logical" else "",
+                                   parent=self)
         self._worker.log.connect(self._log)
         self._worker.progress.connect(self._on_progress)
         self._worker.finished_ok.connect(self._on_finished)
@@ -624,12 +701,21 @@ class CreateImageDialog(QDialog):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
         self.btn_start.setEnabled(True)
+        info = payload["info"]
+        if info["verification_status"] == "failed":
+            self._log("Verification FAILED -- do not rely on this image.", "error")
+            QMessageBox.warning(
+                self, "Verification failed",
+                f"{payload['result'].primary}\n\n"
+                "The re-read hash does not match the hash computed while "
+                "writing. The image is recorded as failed; treat it as suspect.")
+            return
         self._log("Image created and recorded.", "success")
         QMessageBox.information(
             self, "Image created",
             f"{payload['result'].primary}\n\n"
-            f"Verification: {payload['info']['verification_status']}\n"
-            f"Recorded status: {payload['info']['status']}")
+            f"Verification: {info['verification_status']}\n"
+            f"Recorded status: {info['status']}")
 
     def _on_failed(self, message):
         self.progress_bar.setRange(0, 100)
@@ -650,7 +736,21 @@ class CreateImageDialog(QDialog):
         self.reject()
 
     def closeEvent(self, event):
+        if self._loader is not None and self._loader.isRunning():
+            if not self._loader.wait(10000):
+                QMessageBox.warning(
+                    self, "Still reading",
+                    "The partition table is still being read. Try closing again in a moment.")
+                event.ignore()
+                return
         if self._worker is not None and self._worker.isRunning():
             self._worker.cancel()
-            self._worker.wait(5000)
+            if not self._worker.wait(10000):
+                # Destroying a running QThread aborts the process; refuse the
+                # close and let the stream finish tearing down instead.
+                QMessageBox.warning(
+                    self, "Still stopping",
+                    "The stream is still shutting down. Try closing again in a moment.")
+                event.ignore()
+                return
         super().closeEvent(event)

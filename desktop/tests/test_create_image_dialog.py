@@ -33,9 +33,10 @@ try:
 except Exception:  # pragma: no cover - depends on the environment
     _QT_IMPORT = False
 
-from desktop.core.imaging import create_image, sources
+from desktop.core.imaging import ImageRequest, create_image, sources
 from desktop.ui.dialogs.create_image_dialog import (
-    MIN_HEIGHT, MIN_WIDTH, CreateImageDialog, clamp_to_screen, fit_size,
+    MIN_HEIGHT, MIN_WIDTH, CreateImageDialog, ImageWorker, _Cancelled,
+    clamp_to_screen, fit_size,
 )
 
 
@@ -92,6 +93,47 @@ class CreateImageDialogTest(unittest.TestCase):
             [self.dialog.format_combo.itemData(i)
              for i in range(self.dialog.format_combo.count())],
             ["zip", "aff4"])
+
+    def test_a_cancelled_worker_stops_at_the_next_progress_event(self):
+        request = ImageRequest(dest_dir=Path(self.tmp), base_name="x", image_format="raw")
+        worker = ImageWorker(request, None, "stream", "")
+        worker._cancelled = True
+        with self.assertRaises(_Cancelled):
+            worker._on_progress(1, 2, "writing")
+
+    def test_the_logical_tab_offers_raw_and_needs_no_partition(self):
+        self.dialog.source_tabs.setTabEnabled(2, True)
+        self.dialog.source_tabs.setCurrentIndex(2)
+        self.dialog._serial = "SER123"
+        self.dialog.name_edit.setText("logical")
+
+        self.assertEqual(self.dialog.source_kind, "stream")
+        self.assertEqual(self.dialog.stream_kind, "logical")
+        self.assertEqual(self.dialog.available_formats(), ["raw"])
+
+        source, factory = self.dialog.resolve_source()
+        self.assertIsNone(source)
+        self.assertTrue(callable(factory))
+
+        request = self.dialog.build_request()
+        self.assertIn("/sdcard", request.source_label)
+        self.assertIn("SER123", request.source_label)
+
+    def test_the_logical_tab_is_refused_without_a_device(self):
+        self.dialog.source_tabs.setTabEnabled(2, True)
+        self.dialog.source_tabs.setCurrentIndex(2)
+        with self.assertRaises(ValueError):
+            self.dialog.resolve_source()
+
+    def test_compression_is_disabled_for_raw_and_enabled_for_containers(self):
+        self.use_device_tab([sources.Partition(
+            name="boot_a", block="/dev/block/sde13", readable=True)])
+        self.assertFalse(self.dialog.compression_combo.isEnabled())
+        self.assertTrue(self.dialog.segment_combo.isEnabled())
+
+        self.dialog.source_tabs.setCurrentIndex(1)
+        self.assertTrue(self.dialog.compression_combo.isEnabled())
+        self.assertFalse(self.dialog.segment_combo.isEnabled())
 
     def test_build_request_reflects_the_widgets(self):
         self.dialog.folder_edit.setText(str(self.source))

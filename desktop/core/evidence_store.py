@@ -341,15 +341,22 @@ def record_acquired(
     loader: str,
     status: str = AcquisitionStatus.ACQUIRED,
     detail: str = "",
+    digest: Optional[str] = None,
 ) -> Optional[ArtifactRecord]:
     """
     Hash a freshly acquired file, add it to the SHA-256 manifest, and log a
     custody event. The file itself is left untouched - it is evidence.
+
+    ``digest`` may be supplied when the caller already hashed the file during a
+    verification pass (disk images are re-read to verify; hashing them again
+    here would triple the I/O on a multi-gigabyte image). When omitted the file
+    is hashed now, which is what every acquisition loader does.
     """
     path = Path(local_path)
     try:
         size = path.stat().st_size
-        digest = hash_file(path)
+        if digest is None:
+            digest = hash_file(path)
     except OSError as exc:
         logger.error(f"Cannot hash acquired artifact {path}: {exc}")
         return None
@@ -376,7 +383,15 @@ def record_acquired(
             os.fsync(handle.fileno())
 
         with open(manifest_dir(case_id) / "SHA256SUMS", "a", encoding="utf-8") as handle:
-            handle.write(f"{digest}  acquired/{path.name}\n")
+            # Reference the artifact by its path relative to the case root when
+            # it lives inside it, and by absolute path otherwise. The old
+            # hardcoded "acquired/<name>" claimed images kept outside the case
+            # tree (e.g. a disk image in ~/.droidforenx/images) sat in acquired/.
+            try:
+                reference = path.resolve().relative_to(case_dir(case_id).resolve()).as_posix()
+            except (ValueError, OSError):
+                reference = path.resolve().as_posix()
+            handle.write(f"{digest}  {reference}\n")
             handle.flush()
             os.fsync(handle.fileno())
     except Exception as exc:

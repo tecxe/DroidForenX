@@ -44,26 +44,41 @@ class ZipImageWriter(ImageWriter):
 
         request.dest_dir.mkdir(parents=True, exist_ok=True)
         dest = request.dest_dir / f"{request.base_name}.{self.extension}"
+        if dest.exists():
+            raise ValueError(
+                f"{dest.name} already exists in {request.dest_dir}; choose a "
+                "different base name so the existing image is not overwritten")
         method, level = _COMPRESSION[request.compression]
 
-        files = sorted(p for p in source.rglob("*") if p.is_file())
+        # Never pack the archive into itself when the destination lives inside
+        # the folder being imaged.
+        resolved_dest = dest.resolve()
+        files = sorted(
+            p for p in source.rglob("*")
+            if p.is_file() and p.resolve() != resolved_dest)
         total_size = sum(p.stat().st_size for p in files)
 
         inventory = []
         written = 0
-        with zipfile.ZipFile(dest, "w", compression=method, compresslevel=level, allowZip64=True) as archive:
-            for path in files:
-                arcname = path.relative_to(source).as_posix()
-                archive.write(path, arcname)
-                size = path.stat().st_size
-                inventory.append({
-                    "path": arcname,
-                    "size": size,
-                    request.hash_algo: hash_file(path, request.hash_algo),
-                })
-                written += size
-                emit(progress, written, total_size, f"packing {arcname}")
-            archive.writestr("MANIFEST.json", self._manifest(request, source, inventory))
+        try:
+            with zipfile.ZipFile(dest, "w", compression=method, compresslevel=level, allowZip64=True) as archive:
+                for path in files:
+                    arcname = path.relative_to(source).as_posix()
+                    archive.write(path, arcname)
+                    size = path.stat().st_size
+                    inventory.append({
+                        "path": arcname,
+                        "size": size,
+                        request.hash_algo: hash_file(path, request.hash_algo),
+                    })
+                    written += size
+                    emit(progress, written, total_size, f"packing {arcname}")
+                archive.writestr("MANIFEST.json", self._manifest(request, source, inventory))
+        except BaseException:
+            # A half-written container is not evidence; remove it so the
+            # destination never holds something that looks complete.
+            dest.unlink(missing_ok=True)
+            raise
 
         digest = hash_file(dest, request.hash_algo)
         result = ImageResult(

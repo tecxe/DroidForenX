@@ -3,9 +3,10 @@
 Two kinds of source exist:
 
 * **device partition** -- a block device on a connected handset, streamed over
-  ``adb exec-out``. Only ``boot``/``recovery`` and partitions the current
-  adbd user can actually open are offered; the rest need root and are marked as
-  such rather than being hidden, so the operator can see why.
+  ``adb exec-out``. Every partition is probed before it is offered: the shell
+  user only ever gets what it can actually open, and on modern (unrooted)
+  Android that is typically *nothing* -- ``boot`` included -- so partitions are
+  marked "needs root" rather than being hidden, so the operator can see why.
 * **case folder** -- an already-acquired ``acq_*/`` directory. Always available,
   no root.
 
@@ -26,8 +27,10 @@ ShellRunner = Callable[..., tuple]
 
 _LINK = re.compile(r"\s(\S+)\s+->\s+(\S+)\s*$")
 
-#: Block-device names in ``/dev/block/by-name`` that are readable without root,
-#: and are the ones an unrooted acquisition can actually capture.
+#: Block-device names in ``/dev/block/by-name`` worth tagging as ``boot`` in the
+#: picker. They are probed like any other partition -- the old assumption that
+#: ``boot`` is readable without root does not hold on modern devices, where the
+#: shell user is typically denied every block device.
 BOOT_PARTITIONS = (
     "boot", "boot_a", "boot_b",
     "init_boot", "init_boot_a", "init_boot_b",
@@ -87,40 +90,95 @@ def is_root(serial: str, shell: Optional[ShellRunner] = None) -> bool:
     return bool(ok and "uid=0" in output)
 
 
+#: One device shell round trip that reports, per partition: name, resolved
+#: block node, size in 512-byte sectors (0 when unreadable) and how many bytes a
+#: one-sector read returned. A shell loop is used because Android 15 denies the
+#: shell user both ``/proc/partitions`` and ``sysfs`` sizes on locked-down
+#: devices; probing per partition costs one round trip each and took 22s on a
+#: 65-partition handset versus ~5s for this.
+_PROBE_LOOP = (
+    "for b in /dev/block/by-name/*; do n=${b##*/}; "
+    "r=$(readlink -f ${b} 2>/dev/null); k=${r##*/}; "
+    "s=$(cat /sys/class/block/${k}/size 2>/dev/null); "
+    "c=$(dd if=${b} bs=512 count=1 2>/dev/null | wc -c); "
+    "echo ${n} ${r} ${s:-0} ${c:-0}; done"
+)
+
+
+def _parse_links(output: str) -> List[Partition]:
+    partitions = []
+    for line in output.splitlines():
+        match = _LINK.search(line)
+        if match:
+            partitions.append(Partition(name=match.group(1), block=match.group(2)))
+    return partitions
+
+
+def _bulk_probe(serial: str, run: ShellRunner):
+    """Probe every partition in one round trip, or ``None`` if unsupported."""
+    ok, output = run(serial, _PROBE_LOOP)
+    if not ok:
+        return None
+    probed = {}
+    for line in output.splitlines():
+        fields = line.split()
+        if len(fields) != 4:
+            continue
+        name, block, sectors, read_bytes = fields
+        try:
+            size = int(sectors) * 512
+            readable = int(read_bytes) > 0
+        except ValueError:
+            continue
+        probed[name] = Partition(name=name, block=block, size_bytes=size,
+                                 readable=readable, needs_root=not readable)
+    return probed or None
+
+
 def list_partitions(serial: str, shell: Optional[ShellRunner] = None, probe: bool = False) -> List[Partition]:
     """Enumerate ``/dev/block/by-name``.
 
     With ``probe=False`` (the default) only the symlink list is read -- one round
-    trip, fast enough for a dialog. With ``probe=True`` each partition's size and
-    readability is queried, which costs a round trip per partition and belongs on
-    a worker thread.
+    trip, fast enough for a dialog. With ``probe=True`` every partition's size and
+    readability is verified, in one batched shell loop where the device supports
+    it, and nothing is claimed readable that was not actually read.
     """
     run = shell or _shell
     ok, output = run(serial, "ls -la /dev/block/by-name/")
     if not ok:
         return []
 
-    rooted = is_root(serial, shell=run) if probe else False
-    partitions: List[Partition] = []
-    for line in output.splitlines():
-        match = _LINK.search(line)
-        if not match:
-            continue
-        name, block = match.group(1), match.group(2)
-        item = Partition(name=name, block=block)
-        if probe:
-            item.size_bytes = partition_size(serial, block, shell=run)
-            if rooted:
-                item.readable = True
-            elif item.is_boot:
-                item.readable = True
-            else:
-                item.readable = probe_readable(serial, block, shell=run)
+    partitions = _parse_links(output)
+    if not probe:
+        # The fast listing verifies nothing, so it claims nothing: even a boot
+        # partition may be denied to the shell user on this device.
+        for item in partitions:
+            item.readable = False
+            item.needs_root = True
+        partitions.sort(key=lambda p: p.name)
+        return partitions
+
+    probed = _bulk_probe(serial, run)
+    if probed is None:
+        # Fallback: one round trip per attribute for shells that cannot run the
+        # loop (some vendor shells mangle command substitution).
+        rooted = is_root(serial, shell=run)
+        for item in partitions:
+            item.size_bytes = partition_size(serial, item.block, shell=run)
+            item.readable = bool(rooted) or probe_readable(serial, item.block, shell=run)
             item.needs_root = not item.readable
-        else:
-            item.readable = item.is_boot
-            item.needs_root = not item.is_boot
-        partitions.append(item)
+    else:
+        for item in partitions:
+            result = probed.get(item.name)
+            if result is not None:
+                item.block = result.block or item.block
+                item.size_bytes = result.size_bytes
+                item.readable = result.readable
+                item.needs_root = result.needs_root
+            else:
+                item.readable = False
+                item.needs_root = True
+
     partitions.sort(key=lambda p: p.name)
     return partitions
 
@@ -236,6 +294,36 @@ def open_partition_reader(serial: str, block: str, rooted: bool = False,
     return ProcessReader(partition_stream_argv(adb_path, serial, block, rooted), size=size)
 
 
+#: Area streamed by the logical source. Fixed on purpose: it is a constant of
+#: the tool, never operator-provided text fed into a shell command.
+LOGICAL_ROOT = "/sdcard"
+
+
+def logical_stream_argv(adb_path, serial: str, root: str = LOGICAL_ROOT) -> list:
+    """The ``adb`` argv that streams a directory as a POSIX tar archive.
+
+    ``toybox tar`` has shipped with Android since 6.0, and ``exec-out`` carries
+    the bytes raw (no CRLF translation). stderr is discarded inside the device
+    shell for the same reason as in :func:`partition_stream_argv` -- a stray
+    warning must never be spliced into an image.
+    """
+    command = f"sh -c 'tar -cf - -C {root} . 2>/dev/null'"
+    return [str(adb_path), "-s", serial, "exec-out", command]
+
+
+def open_logical_reader(serial: str, adb_path=None, root: str = LOGICAL_ROOT) -> ProcessReader:
+    """Open a streaming reader for the device's user storage as a tar archive.
+
+    This is the imaging path that actually works on unrooted devices: the shell
+    user cannot read block devices, but it can read ``/sdcard``, so the logical
+    image is an exact hashed capture of the files the unrooted tool can see.
+    """
+    if adb_path is None:
+        from .. import adb_manager as adb
+        adb_path = adb.find_adb()
+    return ProcessReader(logical_stream_argv(adb_path, serial, root), size=0)
+
+
 def folder_source(path) -> Path:
     """Validate a case folder and return it as a ``Path``."""
     folder = Path(path)
@@ -246,11 +334,14 @@ def folder_source(path) -> Path:
 
 __all__ = [
     "BOOT_PARTITIONS",
+    "LOGICAL_ROOT",
     "Partition",
     "ProcessReader",
     "folder_source",
     "is_root",
     "list_partitions",
+    "logical_stream_argv",
+    "open_logical_reader",
     "open_partition_reader",
     "partition_size",
     "partition_stream_argv",

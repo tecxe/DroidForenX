@@ -32,6 +32,7 @@ Progress = Callable[[int, int, str], None]
 _HASHER = {"md5": hashlib.md5, "sha1": hashlib.sha1, "sha256": hashlib.sha256}
 
 _UNSAFE_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_WINDOWS_RESERVED = re.compile(r"^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$", re.IGNORECASE)
 
 
 def new_hash(algo: str):
@@ -75,6 +76,13 @@ def safe_base_name(name: str) -> str:
         )
     if name in (".", ".."):
         raise ValueError("image base name must not be '.' or '..'")
+    if name != name.rstrip(" ."):
+        # Windows silently strips a trailing dot or space, so the name written
+        # would not be the name hashed into the sidecar files.
+        raise ValueError("image base name must not end with a space or a dot")
+    if _WINDOWS_RESERVED.match(name):
+        raise ValueError(
+            f"image base name {name!r} is a reserved device name on Windows")
     return name
 
 
