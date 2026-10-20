@@ -427,10 +427,19 @@ python -m unittest `
   desktop.tests.test_create_image_dialog `
   desktop.tests.test_theme `
   desktop.tests.test_main_window `
-  desktop.tests.test_ui_export -v
+  desktop.tests.test_ui_export `
+  desktop.tests.test_reproducible_build -v
 ```
 
-134 tests, no device required. They cover the properties that matter:
+A release build should install from `requirements-lock.txt` rather than
+`requirements.txt`. The lock pins every dependency including the transitive ones,
+and `build.py` takes `SOURCE_DATE_EPOCH` from the HEAD commit, so two builds of
+the same commit produce a byte-identical executable and the published SHA-256
+can be reproduced by anyone. `test_reproducible_build.py` compares the installed
+environment against the lock, and the full two-build byte comparison runs only
+with `DROIDFORENX_SLOW_TESTS=1`.
+
+165 tests, no device required. They cover the properties that matter:
 
 - an acquired artifact survives being read (the original bug was that 11
   loaders deleted evidence after parsing)
