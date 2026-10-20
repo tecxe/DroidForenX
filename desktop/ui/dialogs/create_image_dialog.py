@@ -154,6 +154,14 @@ class ImageWorker(QThread):
                 self.log.emit(f"Streaming {self._request.source_label}...", "info")
                 try:
                     result = create_image(self._reader, self._request, progress=self._on_progress)
+                except ValueError as exc:
+                    # adb's stderr used to be discarded, so a stream that died
+                    # instantly reported nothing but "no data was read". Whatever
+                    # adb said about the failure is the only real evidence.
+                    detail = getattr(self._reader, "error_output", lambda: "")()
+                    if detail:
+                        raise ValueError(f"{exc} (adb: {detail})") from None
+                    raise
                 finally:
                     self._reader.close()
             else:
@@ -551,6 +559,15 @@ class CreateImageDialog(QDialog):
                     f"'{partition.name}' is not readable without root on this device.")
 
             def factory():
+                # Re-check readability at stream time: the partition list was
+                # probed when the dialog opened and the device may have been
+                # unplugged, re-authorized or asleep since then. A stale
+                # "readable" used to open a stream that read zero bytes and
+                # died with nothing but a generic message.
+                if not sources.probe_readable(self._serial, partition.block):
+                    raise ValueError(
+                        f"'{partition.name}' cannot be read now: the device may "
+                        "have disconnected, or this partition needs root.")
                 return sources.open_partition_reader(
                     self._serial, partition.block, rooted=False, size=partition.size_bytes)
 

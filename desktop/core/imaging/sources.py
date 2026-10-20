@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional
@@ -182,9 +183,24 @@ class ProcessReader:
     def __init__(self, argv: list, size: int = 0):
         self.argv = list(argv)
         self.size = int(size or 0)
+        self._stderr = bytearray()
         self._process = subprocess.Popen(
-            self.argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            self.argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
+        # A full stderr pipe can deadlock the writer if nobody drains it, so a
+        # small daemon thread collects whatever ``adb`` says while data streams.
+        threading.Thread(target=self._drain_stderr, daemon=True).start()
+
+    def _drain_stderr(self) -> None:
+        try:
+            for block in iter(lambda: self._process.stderr.read(4096), b""):
+                self._stderr.extend(block)
+        except Exception:
+            pass  # the pipe dies when close() tears the process down
+
+    def error_output(self, limit: int = 400) -> str:
+        """Whatever ``adb`` printed on stderr, for failure diagnostics."""
+        return self._stderr.decode("utf-8", errors="replace").strip()[:limit]
 
     @property
     def stdout(self):
@@ -194,9 +210,9 @@ class ProcessReader:
         return self._process.stdout.read(size)
 
     def close(self) -> None:
-        stdout = self._process.stdout
-        if stdout is not None and not stdout.closed:
-            stdout.close()
+        for stream in (self._process.stdout, self._process.stderr):
+            if stream is not None and not stream.closed:
+                stream.close()
         if self._process.poll() is None:
             self._process.terminate()
             try:

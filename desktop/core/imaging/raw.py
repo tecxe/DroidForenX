@@ -44,7 +44,10 @@ class RawImageWriter(ImageWriter):
 
         index = 1
         remaining = request.segment_size if multi else 0
-        path, handle, seg_digest = self._open_segment(request, index, multi)
+        # The first segment is opened lazily, on the first chunk that actually
+        # arrives: an empty source should fail without ever creating -- and then
+        # deleting -- a zero-byte file that looks like evidence.
+        path = handle = seg_digest = None
         total_written = 0
         seg_written = 0
 
@@ -58,6 +61,8 @@ class RawImageWriter(ImageWriter):
                     take = len(chunk) - offset
                     if multi:
                         take = min(remaining, take)
+                    if handle is None:
+                        path, handle, seg_digest = self._open_segment(request, index, multi)
                     piece = chunk[offset:offset + take]
                     handle.write(piece)
                     image_digest.update(piece)
@@ -74,17 +79,17 @@ class RawImageWriter(ImageWriter):
                             segment_digests.append((path, seg_digest.hexdigest()))
                             index += 1
                             remaining = request.segment_size
-                            path, handle, seg_digest = self._open_segment(request, index, multi)
+                            handle = None
                             seg_written = 0
                             emit(progress, total_written, total_size, f"segment {index}")
                 emit(progress, total_written, total_size, "writing")
         except BaseException:
-            if not handle.closed:
+            if handle is not None and not handle.closed:
                 handle.close()
             self._cleanup(segments, path, total_written)
             raise
 
-        if not handle.closed:
+        if handle is not None and not handle.closed:
             handle.close()
 
         if total_written == 0:
@@ -128,11 +133,11 @@ class RawImageWriter(ImageWriter):
         return path, open(path, "wb"), new_hash(request.hash_algo)
 
     @staticmethod
-    def _cleanup(segments: list, current: Path, written: int) -> None:
+    def _cleanup(segments: list, current, written: int) -> None:
         """Remove partial/empty output so a failed run leaves nothing behind."""
         for segment in segments:
             Path(segment).unlink(missing_ok=True)
-        if written == 0:
+        if written == 0 and current is not None:
             Path(current).unlink(missing_ok=True)
 
     @staticmethod

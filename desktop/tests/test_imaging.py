@@ -412,5 +412,48 @@ class DeviceSourceWiringTest(unittest.TestCase):
         self.assertEqual(captured["kwargs"]["stdout"], sources.subprocess.PIPE)
 
 
+class ProcessReaderDiagnosticsTest(unittest.TestCase):
+    """A stream that dies must report what adb said, not swallow it.
+
+    This was the failure behind "no data was read from the source": the reader
+    threw adb's stderr away, so an unauthorized device, a disconnection or a
+    permission error all looked identical to an empty source.
+    """
+
+    def test_stderr_is_captured_for_diagnostics(self):
+        import sys
+        import time
+
+        reader = sources.ProcessReader([
+            sys.executable, "-c",
+            "import sys; sys.stderr.write('boom-diagnostic'); "
+            "sys.stdout.buffer.write(b'bytes'); sys.stdout.flush()",
+        ])
+        try:
+            self.assertEqual(reader.read(5), b"bytes")
+            self.assertEqual(reader.error_output(), "")
+        finally:
+            reader.close()
+
+        deadline = time.monotonic() + 5
+        while "boom-diagnostic" not in reader.error_output() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertIn("boom-diagnostic", reader.error_output())
+
+    def test_a_clean_process_reports_no_error(self):
+        import sys
+        import time
+
+        reader = sources.ProcessReader([
+            sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'ok')",
+        ])
+        try:
+            reader.read(2)
+        finally:
+            reader.close()
+        time.sleep(0.1)  # let the drain thread see EOF
+        self.assertEqual(reader.error_output(), "")
+
+
 if __name__ == "__main__":
     unittest.main()
