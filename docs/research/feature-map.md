@@ -5,7 +5,8 @@ the source and, where possible, by running or inspecting something. "Confirmed"
 means the code does what the README says; it does not mean the feature has been
 proven on a device unless the row says so.
 
-Test counts are measured, not quoted.
+Three defects were found and fixed in the same pass; each finding carries a
+**Status** line. Test counts are measured, not quoted.
 
 ---
 
@@ -14,26 +15,26 @@ Test counts are measured, not quoted.
 | Claim (README) | Source | Tests | Verdict |
 |---|---|---|---|
 | Five forensic stages | `desktop/ui/theme.py:101` — `STAGE_NAMES = [Seizure, Identification, Acquisition, Examination, Reporting]` | `test_main_window.py` (7) | **Confirmed** |
-| 24 acquisition loaders | `desktop/core/forensic_engine.py:901-926` — `ANALYSIS_MODULES`, **24 entries** | `test_forensic_engine.py` (8) | **Confirmed** |
-| 10 root-gated loaders reported `NOT_ACCESSIBLE` | `forensic_engine.py:933-936` — `ROOT_REQUIRED_MODULES`, exactly **10** | `test_forensic_engine.py` | **Confirmed** |
-| 14 of 24 device-verified | `CASE-BASELINE-001/manifests/verification.jsonl` — **14** `T1_DEVICE_VERIFIED` records, each with serial, build fingerprint, date and observed row count | — | **Confirmed as recorded**, but not re-derivable (see Finding 2) |
-| Evidence preservation, hashing, custody, tamper detection | `evidence_store.py:204` `hash_file`, `:337` `record_acquired`, `:293` `log_custody`, `:479` `compute_integrity`, `:531` `verify` | `test_evidence_store.py` (**22**) | **Code confirmed**, end-to-end unproven (Finding 3) |
-| RAW / ZIP / AFF4-L image output | `desktop/core/imaging/` — `raw.py`, `zip.py`, `aff4.py`, `registry.py`, `sources.py` | `test_imaging.py` (**43**), `test_create_image_dialog.py` (**24**), `test_image_registry.py` (8) | **Confirmed** |
+| 24 acquisition loaders | `desktop/core/forensic_engine.py` — `ANALYSIS_MODULES`, **24 entries** | `test_forensic_engine.py` (8) | **Confirmed** |
+| 10 root-gated loaders reported `NOT_ACCESSIBLE` | `forensic_engine.py` — `ROOT_REQUIRED_MODULES`, exactly **10** | `test_forensic_engine.py` | **Confirmed** |
+| 14 of 24 device-verified | `CASE-BASELINE-001/manifests/verification.jsonl` — 14 `T1_DEVICE_VERIFIED` records with serial, build, date, observed count | — | **Confirmed as recorded**; the claims are reachability, not preservation (Finding 2) |
+| Evidence preservation, hashing, custody, tamper detection | `evidence_store.py` — `hash_file`, `record_acquired`, `log_custody`, `compute_integrity`, `verify`, `audit_claims` | `test_evidence_store.py` (**28**) | **Code confirmed**; end-to-end only since Finding 3 was fixed |
+| RAW / ZIP / AFF4-L image output | `desktop/core/imaging/` — `raw.py`, `zip.py`, `aff4.py`, `registry.py`, `sources.py` | `test_imaging.py` (43), `test_create_image_dialog.py` (24), `test_image_registry.py` (8) | **Confirmed** |
 | Four report formats | `desktop/ui/pages/report_page.py:80-84` — HTML, PDF, JSON, XLSX | `test_ui_export.py` (9), `test_evidence_workbook.py` (5) | **Confirmed** |
-| Dark / Light / Follow System themes | `desktop/ui/theme.py` | `test_theme.py` (**27**) | **Confirmed** |
+| Dark / Light / Follow System themes | `desktop/ui/theme.py` | `test_theme.py` (27) | **Confirmed** |
 | Reproducible build | `build.py` — `SOURCE_DATE_EPOCH` from HEAD, `PYTHONHASHSEED=0`, drift check against `requirements-lock.txt` | `test_reproducible_build.py` (12) | **Confirmed by experiment** — two clean builds of `69de6a2` produced identical `ded26a43…` |
 | Logical (`/sdcard`) imaging for unrooted devices | `imaging/sources.py` — tar over `adb exec-out` through the RAW writer, `source_type=logical` | `test_imaging.py` | **Confirmed** (new in v2.0.15) |
-| Suite size | — | **165** test functions across 10 modules; 164 run + 1 opt-in skip | **Confirmed** |
+| Suite size | — | **170** test functions; 169 run + 1 opt-in skip | **Confirmed** |
 
 Measured suite, per module:
 
 ```
-test_imaging.py                 43    test_create_image_dialog.py    24
-test_theme.py                   27    test_evidence_store.py         22
+test_imaging.py                 43    test_evidence_store.py         28
+test_theme.py                   27    test_create_image_dialog.py    24
 test_reproducible_build.py      12    test_ui_export.py               9
 test_forensic_engine.py          8    test_image_registry.py          8
 test_main_window.py              7    test_evidence_workbook.py       5
-                                                              total 165
+                                                              total 170
 ```
 
 Four files in `desktop/tests/` contain **zero** test functions and are stubs:
@@ -45,89 +46,95 @@ nothing. The documented command list correctly excludes them.
 
 ## Findings
 
-### 1. A source comment contradicts both the README and the case records
+### 1. A source comment contradicted both the README and the case records
 
-`forensic_engine.py:938-943` states:
+`forensic_engine.py` said every loader was `T3_UNTESTED` "today", while
+`CASE-BASELINE-001` held 14 `T1_DEVICE_VERIFIED` records written 2026-10-14. The
+README's "14 of 24" was backed; the comment was not.
 
-> "A loader with no such record is T3_UNTESTED - which, today, is all of them.
-> The old hardcoded table claimed T1_DEVICE_VERIFIED for fourteen loaders with no
-> device ever connected; that was a fabricated claim and it is gone."
+**Status: Fixed.** The comment now describes the mechanism instead of asserting a
+current state, and points a reader at `audit_claims()` for the real answer.
+**Severity:** documentation defect, no behavioural impact.
 
-That comment is stale. `CASE-BASELINE-001` holds 14 `T1_DEVICE_VERIFIED`
-records, written 2026-10-14, each carrying device serial, Android build
-fingerprint, date and an observed count. The README's "14 of 24" is therefore
-backed; the comment claiming "all of them" are untested is not, and it
-misleads any reader who trusts source comments over manifests.
+### 2. T1 claims had nothing behind them but free text
 
-**Severity:** documentation defect. No behavioural impact.
-**Fix:** delete the second sentence, or reword to describe the mechanism rather
-than the current state, which changes with every case.
+`record_verification()` rejected an *empty* evidence string and nothing else, so
+"observed 1403 rows" passed as proof of a device claim. A case could be fully
+marked device-verified while holding no artifact at all — which is precisely what
+`CASE-BASELINE-001` is.
 
-### 2. The 14 T1 claims cannot be independently re-derived
+The subtlety: `record_baseline.py` *deliberately* pulls no content, because the
+baseline exists to prove the chain works without reading the examiner's own
+messages. Those 14 claims were honest about what the run did, but the tier name
+implies preserved evidence.
 
-`CASE-BASELINE-001` contains only:
+**Status: Fixed.** T1 now requires one of two explicit stances:
+
+- `artifact_id=` — must already exist in the case's artifact log, so the claim
+  points at a file whose SHA-256 is in the manifest. Stored `basis="artifact"`.
+- `capability_only=True` — stored `basis="capability"`, for a run that proved
+  reachability and preserved nothing.
+
+Neither is accepted silently; passing only prose raises `ValueError`.
+`record_baseline.py` now passes `capability_only=True`, and a new
+`audit_claims(case_id)` splits claims into `backed`, `capability` and `unbacked`.
+`verify()` carries that audit in its result.
+
+Against the real case:
 
 ```
-case.json
-manifests/custody.jsonl
-manifests/status.jsonl
-manifests/verification.jsonl
+CASE-BASELINE-001  verdict=NO_MANIFEST checked=0
+   backed=0  capability=0  unbacked=14
+   unbacked loaders: app_permissions, apps, bluetooth, calendar, call_log,
+                     clipboard, contacts, gps, installed_apps, notes,
+                     notifications, sms_mms, usage_stats, wifi
+custody: VERIFY: NO_MANIFEST: 0 ok, 0 mismatched, 0 missing;
+         14 T1 claims hold no artifact
 ```
 
-There is **no `acquired/` directory and no artifact**. The verification records
-assert outcomes such as "observed 1403 rows" for call log and "observed 983
-rows" for SMS/MMS, but the data those counts were taken from is not in the case,
-so a third party cannot confirm the numbers, re-parse the source, or check a
-hash.
+The 14 records predate the requirement, so they are correctly classified as
+legacy `unbacked` rather than silently blessed or silently deleted.
 
-The evidence string is also free text: `record_verification()` rejects an empty
-evidence field for `T1_DEVICE_VERIFIED` (`evidence_store.py:162-166`), but it
-does not require a digest, an artifact id or a path. "Observed 1403 rows" passes.
+### 3. Integrity was never exercised on real acquired output
 
-**Severity:** integrity gap in the strongest claim the project makes.
-**Fix:** make `T1_DEVICE_VERIFIED` require at least one artifact id or content
-digest from the same case, and reject a record whose artifacts are absent.
+The original wording of this finding was wrong, and the correction matters:
+`record_acquired()` **does** write `manifests/SHA256SUMS`
+(`evidence_store.py:385-396`), and the tests exercise it. What the machine
+actually showed:
 
-### 3. No case on this machine has a `SHA256SUMS` manifest
-
-Four cases exist under `~/.droidforenx/evidence/`:
-
-| Case | Size | Files | `SHA256SUMS` |
+| Directory | What it is | `case.json` | `manifests/SHA256SUMS` |
 |---|---|---|---|
-| `acq_20261014_225348_13276374` | 8.91 GB | 17,547 | **none** |
-| `acq_20261015_005025_13276374` | 9.27 GB | 23,369 | **none** |
-| `acq_20261017_174920_13276374` | 4.48 GB | 399 | **none** |
-| `CASE-BASELINE-001` | manifests only | 4 | **none** |
+| `acq_20261014_225348_13276374` (8.91 GB) | a pull target, not a case | no | no |
+| `acq_20261015_005025_13276374` (9.27 GB) | a pull target, not a case | no | no |
+| `acq_20261017_174920_13276374` (4.48 GB) | a pull target, not a case | no | no |
+| `CASE-BASELINE-001` | a real case, deliberately empty | yes | no |
 
-`compute_integrity()` and `verify()` are implemented and unit-tested against
-synthetic trees, so the *mechanism* is real. But the tamper-detection claim has
-never been exercised on acquired evidence, because no acquisition wrote the
-manifest it verifies against.
+So the accurate statement is: **no case on this machine contains evidence that
+went through `record_acquired()`**. The three large directories are adb pull
+destinations with a stray `custody.jsonl`; they never opened a case or recorded
+an artifact, so `verify()` returns `NO_MANIFEST` for them by design rather than
+by failure.
 
-Run against the real cases, `verify()` returns cleanly:
+**Status: Fixed (coverage, not behaviour).** Added
+`test_verify_catches_a_single_flipped_byte`, which acquires a 4 KiB artifact
+through `record_acquired()`, flips one bit in the middle, and asserts
+`INTEGRITY_FAILURE` with exactly one mismatch. That is the end-to-end proof the
+claim needed; it had been resting on the mechanism being tested rather than the
+path being walked.
 
-```
-CASE-BASELINE-001             verdict=NO_MANIFEST checked=0 ok=0 mismatched=0 missing=0
-acq_20261017_174920_13276374  verdict=NO_MANIFEST checked=0 ok=0 mismatched=0 missing=0
-acq_20261014_225348_13276374  verdict=NO_MANIFEST checked=0 ok=0 mismatched=0 missing=0
-```
-
-That is the right failure mode — it refuses to claim verification rather than
-reporting thousands of false mismatches — but it also means the integrity path
-has never once completed on real acquired output. `NO_MANIFEST` is a
-distinguishable state in the verdict vocabulary, which is worth keeping.
-
-**Severity:** the gap between "tested" and "demonstrated".
-**Fix:** have the acquisition path write `SHA256SUMS` at close, and add an
-integration test that acquires to a temp case, mutates one byte, and asserts
-`verify()` returns `INTEGRITY_FAILURE`.
+**Still open:** no *real* acquisition has been through `record_acquired()` on this
+machine, so the claim remains demonstrated on synthetic evidence. The fix is to
+route the acquisition UI through `record_acquired()` for every pulled artifact —
+which the loaders already do, but the large adb pulls apparently did not.
 
 ### 4. Report formats match; the count is honest
 
-`report_page.py:80-84` offers exactly four: HTML (recommended), PDF
-(court-ready), JSON (machine readable) and the XLSX verification workbook. The
-workbook builder lives in `report/evidence_workbook.py` and is unit-tested
-independently of the UI, which is the right split.
+`report_page.py` offers exactly four: HTML (recommended), PDF (court-ready), JSON
+(machine readable) and the XLSX verification workbook. The workbook builder lives
+in `report/evidence_workbook.py` and is unit-tested independently of the UI,
+which is the right split.
+
+**Status: Confirmed, no change needed.**
 
 ### 5. Imaging claims hold, including the new logical path
 
@@ -141,22 +148,23 @@ The one claim that remains unproven is **AFF4 interoperability**: the tests
 verify ZIP64 integrity, root-segment order and the volume URN, not that a
 reference reader can open the container.
 
+**Status: Confirmed, with the AFF4 caveat unchanged.**
+
 ---
 
 ## Verdict
 
-The README is unusually accurate for a project of this size. The loaders, status
-vocabulary, root gating, report formats, imaging formats and reproducible build
-all check out against source and tests.
+The README is unusually accurate for a project of this size. Loaders, status
+vocabulary, root gating, report formats, imaging formats and the reproducible
+build all check out against source and tests.
 
-Three things should change before the next release notes claim evidence
-integrity:
+What the audit changed:
 
-1. Fix the stale comment in `forensic_engine.py`.
-2. Make `T1_DEVICE_VERIFIED` require a digest or artifact reference.
-3. Write `SHA256SUMS` during acquisition, and prove `verify()` catches a
-   one-byte mutation on real acquired output.
+1. The stale comment no longer asserts a state that belongs to a case.
+2. A `T1_DEVICE_VERIFIED` claim can no longer be prose and nothing else.
+3. `verify()` reports claim integrity alongside file integrity, and a one-byte
+   mutation through the real acquisition path is now proven to be caught.
 
-Until (3), the honest wording is "integrity verification is implemented and
-unit-tested" rather than "tamper detection is tested", which currently invites a
-reader to assume it has been run against an acquisition.
+What remains honest to say: integrity verification is exercised on synthetic
+cases, and AFF4 has no third-party reader to compare against. Both are stated in
+the README rather than papered over.
