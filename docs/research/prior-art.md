@@ -275,7 +275,7 @@ parsers have to be written from the database schemas themselves.
 |---|---|
 | Is our acquisition status model unusual? | No — it is stricter than AndroidQF's three states and far stricter than OpenMF or Autopsy, which have none |
 | Is our hashing adequate? | Yes, and stronger than OpenMF (MD5) and aligned with AndroidQF (SHA-256 over plaintext content) |
-| Do we need a container format? | AndroidQF ships a ZIP; OpenMF ships loose files; Autopsy ingests images. Our ZIP and AFF4-L outputs cover both ends |
+| Do we need a container format? | AndroidQF ships a ZIP; OpenMF ships loose files; Autopsy ingests images. Our ZIP output matches the AndroidQF end, and our RAW writer matches the image end |
 | Where are we behind? | Autopsy's shared artifact schema for parsed rows, and its breadth of app coverage (LINE, Viber, Skype, Signal-adjacent apps) |
 | Where are we ahead? | Per-loader status, verification tiers with mandatory evidence, custody log, tamper detection, gateway-free single binary |
 

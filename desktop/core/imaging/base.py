@@ -1,7 +1,7 @@
 """Shared types and helpers for the disk-image writers.
 
 Nothing here touches a device or ADB. The writers read from a file-like reader
-(``raw``) or a directory (``zip``, ``aff4``) and write to local paths, which
+(``raw``) or a directory (``zip``) and write to local paths, which
 keeps every writer unit-testable in isolation.
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ HASH_ALGOS = ("md5", "sha1", "sha256")
 COMPRESSIONS = ("none", "fast", "best")
 
 #: Image formats this package can write.
-KNOWN_FORMATS = ("raw", "zip", "aff4")
+KNOWN_FORMATS = ("raw", "zip")
 
 #: Read granularity for the streaming writer.
 CHUNK_SIZE = 1024 * 1024

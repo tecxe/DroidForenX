@@ -2,7 +2,7 @@
 Disk-image writer tests.
 
 These run without a device. The writers never talk to ADB -- RAW reads from a
-file-like object and ZIP/AFF4 read a folder -- so everything except the device
+file-like object and ZIP reads a folder -- so everything except the device
 source layer can be exercised here.
 
 What is pinned:
@@ -12,10 +12,8 @@ What is pinned:
      ``.imageinfo.txt`` record that digest.
   2. ``verify()`` catches a modified image instead of trusting the write.
   3. A failed or empty acquisition leaves no half-written image behind.
-  4. ZIP and AFF4 containers round-trip, record per-file hashes, and verify.
-  5. AFF4 keeps its required root segments intact even when a source folder
-     contains a file with the same name.
-  6. The device-source layer builds the right ``adb`` command and refuses to
+  4. ZIP containers round-trip, record per-file hashes, and verify.
+  5. The device-source layer builds the right ``adb`` command and refuses to
      claim an unreadable partition is available.
 
 Run with:  python -m unittest desktop.tests.test_imaging -v
@@ -31,7 +29,6 @@ from pathlib import Path
 from unittest import mock
 
 from desktop.core.imaging import (
-    Aff4ImageWriter,
     ImageRequest,
     RawImageWriter,
     ZipImageWriter,
@@ -212,14 +209,6 @@ class OverwriteProtectionTest(ImagingTestCase):
             ZipImageWriter().write(source, self.request(image_format="zip"))
         self.assertEqual((self.dest / "evidence.zip").read_bytes(), b"old container")
 
-    def test_aff4_refuses_to_overwrite_a_previous_image(self):
-        source = self.folder({"a.txt": b"alpha"})
-        self.dest.mkdir(parents=True)
-        (self.dest / "evidence.aff4").write_bytes(b"old volume")
-        with self.assertRaises(ValueError):
-            Aff4ImageWriter().write(source, self.request(image_format="aff4"))
-        self.assertEqual((self.dest / "evidence.aff4").read_bytes(), b"old volume")
-
 
 class ContainerGuardsTest(ImagingTestCase):
     def test_a_cancelled_zip_leaves_no_container_behind(self):
@@ -260,13 +249,6 @@ class ContainerGuardsTest(ImagingTestCase):
             with self.assertRaises(OSError):
                 ZipImageWriter().write(source, self.request(image_format="zip"))
         self.assertFalse((self.dest / "evidence.zip").exists())
-
-    def test_a_failed_aff4_leaves_no_container_behind(self):
-        source = self.folder({"a.txt": b"alpha"})
-        with mock.patch.object(zipfile.ZipFile, "write", side_effect=OSError("disk full")):
-            with self.assertRaises(OSError):
-                Aff4ImageWriter().write(source, self.request(image_format="aff4"))
-        self.assertFalse((self.dest / "evidence.aff4").exists())
 
 
 class BaseNameTest(unittest.TestCase):
@@ -321,46 +303,6 @@ class ZipWriterTest(ImagingTestCase):
         with self.assertRaises(ValueError):
             ZipImageWriter().write(self.tmp / "missing", self.request(image_format="zip"))
 
-
-class Aff4WriterTest(ImagingTestCase):
-    def test_container_has_the_required_root_segments(self):
-        source = self.folder({"readme.md": b"hello", "nested/data.bin": b"\x01\x02\x03"})
-        result = Aff4ImageWriter().write(source, self.request(image_format="aff4"))
-
-        self.assertTrue(result.verified)
-        with zipfile.ZipFile(result.primary) as archive:
-            names = archive.namelist()
-            self.assertEqual(names[:2], ["container.description", "version.txt"])
-            self.assertIn("information.turtle", names)
-            self.assertEqual(archive.read("version.txt"), b"1.0")
-
-            urn = archive.read("container.description").decode()
-            self.assertTrue(urn.startswith("aff4://"))
-            self.assertEqual(archive.comment.decode(), urn)
-
-            turtle = archive.read("information.turtle").decode()
-            self.assertIn(urn, turtle)
-            self.assertIn("aff4:FileImage", turtle)
-            self.assertIn("readme.md", turtle)
-            self.assertIn(sha256(b"hello"), turtle)
-
-    def test_source_named_like_a_root_segment_does_not_clobber_it(self):
-        source = self.folder({"version.txt": b"not-the-version"})
-        result = Aff4ImageWriter().write(source, self.request(image_format="aff4"))
-
-        with zipfile.ZipFile(result.primary) as archive:
-            self.assertEqual(archive.read("version.txt"), b"1.0")
-            self.assertEqual(archive.read("data/version.txt"), b"not-the-version")
-
-    def test_verify_detects_a_modified_container(self):
-        source = self.folder({"a.txt": b"alpha"})
-        request = self.request(image_format="aff4", verify=False)
-        writer = Aff4ImageWriter()
-        result = writer.write(source, request)
-        self.assertTrue(writer.verify(result, request))
-
-        result.primary.write_bytes(result.primary.read_bytes() + b"\x00" * 32)
-        self.assertFalse(writer.verify(result, request))
 
 
 class CreateImageDispatchTest(ImagingTestCase):

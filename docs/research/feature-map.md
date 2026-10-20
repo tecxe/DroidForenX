@@ -18,23 +18,23 @@ Three defects were found and fixed in the same pass; each finding carries a
 | 24 acquisition loaders | `desktop/core/forensic_engine.py` — `ANALYSIS_MODULES`, **24 entries** | `test_forensic_engine.py` (8) | **Confirmed** |
 | 10 root-gated loaders reported `NOT_ACCESSIBLE` | `forensic_engine.py` — `ROOT_REQUIRED_MODULES`, exactly **10** | `test_forensic_engine.py` | **Confirmed** |
 | 14 of 24 device-verified | `CASE-BASELINE-001/manifests/verification.jsonl` — 14 `T1_DEVICE_VERIFIED` records with serial, build, date, observed count | — | **Confirmed as recorded**; the claims are reachability, not preservation (Finding 2) |
-| Evidence preservation, hashing, custody, tamper detection | `evidence_store.py` — `hash_file`, `record_acquired`, `log_custody`, `compute_integrity`, `verify`, `audit_claims` | `test_evidence_store.py` (**28**) | **Code confirmed**; end-to-end only since Finding 3 was fixed |
-| RAW / ZIP / AFF4-L image output | `desktop/core/imaging/` — `raw.py`, `zip.py`, `aff4.py`, `registry.py`, `sources.py` | `test_imaging.py` (43), `test_create_image_dialog.py` (24), `test_image_registry.py` (8) | **Confirmed** |
+| Evidence preservation, hashing, custody, tamper detection | `evidence_store.py` — `hash_file`, `record_acquired`, `log_custody`, `compute_integrity`, `verify`, `audit_claims` | `test_evidence_store.py` (**27**) | **Code confirmed**; end-to-end only since Finding 3 was fixed |
+| RAW / ZIP image output | `desktop/core/imaging/` — `raw.py`, `zip.py`, `registry.py`, `sources.py` | `test_imaging.py` (38), `test_create_image_dialog.py` (24), `test_image_registry.py` (8) | **Confirmed** |
 | Four report formats | `desktop/ui/pages/report_page.py:80-84` — HTML, PDF, JSON, XLSX | `test_ui_export.py` (9), `test_evidence_workbook.py` (5) | **Confirmed** |
 | Dark / Light / Follow System themes | `desktop/ui/theme.py` | `test_theme.py` (27) | **Confirmed** |
 | Reproducible build | `build.py` — `SOURCE_DATE_EPOCH` from HEAD, `PYTHONHASHSEED=0`, drift check against `requirements-lock.txt` | `test_reproducible_build.py` (12) | **Confirmed by experiment** — two clean builds of `69de6a2` produced identical `ded26a43…` |
 | Logical (`/sdcard`) imaging for unrooted devices | `imaging/sources.py` — tar over `adb exec-out` through the RAW writer, `source_type=logical` | `test_imaging.py` | **Confirmed** (new in v2.0.15) |
-| Suite size | — | **170** test functions; 169 run + 1 opt-in skip | **Confirmed** |
+| Suite size | — | **165** test functions; 164 run + 1 opt-in skip | **Confirmed** |
 
 Measured suite, per module:
 
 ```
-test_imaging.py                 43    test_evidence_store.py         28
+test_imaging.py                 38    test_evidence_store.py         27
 test_theme.py                   27    test_create_image_dialog.py    24
 test_reproducible_build.py      12    test_ui_export.py               9
 test_forensic_engine.py          8    test_image_registry.py          8
 test_main_window.py              7    test_evidence_workbook.py       5
-                                                              total 170
+                                                              total 165
 ```
 
 Four files in `desktop/tests/` contain **zero** test functions and are stubs:
@@ -136,19 +136,23 @@ which is the right split.
 
 **Status: Confirmed, no change needed.**
 
-### 5. Imaging claims hold, including the new logical path
+### 5. Imaging claims hold; the unvalidated container was removed
 
 `imaging/` is standard-library only — no third-party binary, no `libewf`. RAW
 splits into segments with `.md5`/`.sha1`/`.sha256` sidecars and `.imageinfo.txt`;
-ZIP produces a `MANIFEST.json`; AFF4 is a hand-written AFF4-L ZIP64 container.
-Source/format gating is deliberate and tested: a block device can only be written
-as RAW, a folder only as ZIP or AFF4.
+ZIP produces a `MANIFEST.json`. Source/format gating is deliberate and tested: a
+block device can only be written as RAW, a folder only as ZIP.
 
-The one claim that remains unproven is **AFF4 interoperability**: the tests
-verify ZIP64 integrity, root-segment order and the volume URN, not that a
-reference reader can open the container.
+The audit's one caveat was AFF4-L interoperability: its tests verified ZIP64
+integrity, root-segment order and the volume URN, never that a reference reader
+could open the container. Rather than keep shipping a format that could only be
+described as "AFF4-L-shaped", the writer was **removed on 2026-10-20**, along
+with its registry entry, format label, dialog gate, tests and documentation. The
+module is now two writers, `raw.py` and `zip.py`, and the suite dropped from 170
+tests to 165 with nothing left pointing at a missing module.
 
-**Status: Confirmed, with the AFF4 caveat unchanged.**
+**Status: Confirmed for RAW and ZIP. AFF4-L removed, so the unproven claim is
+gone rather than carried.**
 
 ---
 
@@ -166,5 +170,5 @@ What the audit changed:
    mutation through the real acquisition path is now proven to be caught.
 
 What remains honest to say: integrity verification is exercised on synthetic
-cases, and AFF4 has no third-party reader to compare against. Both are stated in
-the README rather than papered over.
+cases, not on a real acquisition that went through `record_acquired()`. That is
+stated in the README rather than papered over.

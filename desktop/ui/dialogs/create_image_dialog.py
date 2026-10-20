@@ -6,7 +6,7 @@ image and records it. Everything the writers need comes from
 :mod:`desktop.core.imaging`; this module is only the front end.
 
 Sources and formats are gated against each other on purpose: a block device can
-only be written as RAW, and a folder can only be written as ZIP or AFF4. Offering
+only be written as RAW, and a folder can only be written as ZIP. Offering
 a combination that the writer would reject is worse than not offering it.
 """
 from __future__ import annotations
@@ -150,7 +150,7 @@ class ImageWorker(QThread):
     def _on_progress(self, done: int, total: int, stage: str):
         # The writers call this synchronously, so raising here actually stops a
         # container write -- without it, Cancel did nothing until the whole ZIP
-        # or AFF4 was finished and the operator was told "no image was written"
+        # was finished and the operator was told "no image was written"
         # while one sat on disk.
         if self._cancelled:
             raise _Cancelled()
@@ -352,7 +352,7 @@ class CreateImageDialog(QDialog):
         folder_row.addWidget(self.btn_browse_source)
         folder_layout.addLayout(folder_row)
         folder_hint = QLabel(
-            "Image an acquired case directory as a ZIP or AFF4 container. "
+            "Image an acquired case directory as a ZIP container. "
             "This is the usual path for unrooted devices.")
         folder_hint.setWordWrap(True)
         folder_hint.setStyleSheet("color: #64748b;")
@@ -549,7 +549,7 @@ class CreateImageDialog(QDialog):
                 "device (boot included). Physical imaging requires a rooted "
                 "device; on an unrooted handset take a logical image on the "
                 "'Logical (/sdcard)' tab, or run a logical acquisition and image "
-                "the case folder here as ZIP or AFF4.")
+                "the case folder here as ZIP.")
         else:
             self.partition_hint.setText(
                 f"{len(usable)} of {len(partitions)} partitions are readable without root. "

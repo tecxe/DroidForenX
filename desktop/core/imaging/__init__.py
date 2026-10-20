@@ -1,16 +1,15 @@
 """Disk-image creation for DroidForenX.
 
 The operator picks an output container and the tool writes it, the way FTK
-Imager's *Create Disk Image* works. Three containers are supported, all with the
+Imager's *Create Disk Image* works. Two containers are supported, both with the
 Python standard library alone -- there is no ``libewf`` or other native
 dependency to bundle:
 
     raw    byte-for-byte segments (``.001``, ``.002`` ...) plus hash sidecars
     zip    a compressed archive of an acquired case folder
-    aff4   an AFF4-L logical container (ZIP64 + AFF4 root segments + Turtle)
 
 Writers never talk to a device. A *stream* writer (RAW) is handed a file-like
-reader, a *folder* writer (ZIP, AFF4) is handed a directory path, and both write
+reader, a *folder* writer (ZIP) is handed a directory path, and both write
 to local paths only. That keeps the whole module testable without ADB; the device
 side lives in :mod:`desktop.core.imaging.sources`.
 """
@@ -19,7 +18,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from . import sources
-from .aff4 import Aff4ImageWriter
 from .base import (
     COMPRESSIONS,
     HASH_ALGOS,
@@ -38,14 +36,12 @@ from .zip import ZipImageWriter
 WRITERS: dict[str, type[ImageWriter]] = {
     RawImageWriter.format_id: RawImageWriter,
     ZipImageWriter.format_id: ZipImageWriter,
-    Aff4ImageWriter.format_id: Aff4ImageWriter,
 }
 
 #: Human labels for the format picker.
 FORMAT_LABELS = {
     "raw": "Raw (dd) - byte-for-byte segments",
     "zip": "ZIP - archived case folder",
-    "aff4": "AFF4-L - logical evidence container",
 }
 
 #: Which source each format accepts, for the UI to grey out the wrong pair.
@@ -67,7 +63,7 @@ def create_image(source, request: ImageRequest, progress=None) -> ImageResult:
     """Write an image of ``source`` per ``request``.
 
     ``source`` is a file-like reader for ``raw`` (``source_kind == "stream"``) or
-    a directory path for ``zip``/``aff4`` (``source_kind == "folder"``).
+    a directory path for ``zip`` (``source_kind == "folder"``).
     """
     writer = writer_for(request.image_format)
     if writer.source_kind == "folder":
@@ -82,7 +78,6 @@ __all__ = [
     "HASH_ALGOS",
     "KNOWN_FORMATS",
     "WRITERS",
-    "Aff4ImageWriter",
     "ImageRequest",
     "ImageResult",
     "ImageWriter",

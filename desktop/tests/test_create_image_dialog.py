@@ -7,7 +7,7 @@ to ``offscreen`` and the module is skipped if PyQt6 cannot start one.
 They pin the parts of the dialog that are easy to get wrong and hard to notice:
 
   1. Source and format are gated against each other -- a device partition offers
-     RAW only, a folder offers ZIP and AFF4 only.
+     RAW only, a folder offers ZIP only.
   2. ``build_request()`` produces a request the writers actually accept, and an
      invalid base name is rejected before anything is written.
   3. ``resolve_source()`` refuses an unreadable partition instead of starting a
@@ -77,12 +77,12 @@ class CreateImageDialogTest(unittest.TestCase):
         self.assertEqual(self.dialog.available_formats(), ["raw"])
         self.assertEqual(self.dialog.format_combo.currentData(), "raw")
 
-    def test_a_folder_offers_zip_and_aff4(self):
+    def test_a_folder_offers_zip_only(self):
         self.assertEqual(self.dialog.source_kind, "folder")
         self.assertEqual(
             [self.dialog.format_combo.itemData(i)
              for i in range(self.dialog.format_combo.count())],
-            ["zip", "aff4"])
+            ["zip"])
 
     def test_switching_source_repopulates_the_format_list(self):
         self.use_device_tab([sources.Partition(name="boot_a", block="/dev/block/sde13", readable=True)])
@@ -92,7 +92,7 @@ class CreateImageDialogTest(unittest.TestCase):
         self.assertEqual(
             [self.dialog.format_combo.itemData(i)
              for i in range(self.dialog.format_combo.count())],
-            ["zip", "aff4"])
+            ["zip"])
 
     def test_a_cancelled_worker_stops_at_the_next_progress_event(self):
         request = ImageRequest(dest_dir=Path(self.tmp), base_name="x", image_format="raw")

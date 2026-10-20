@@ -1809,7 +1809,7 @@ class AcquirePage(QWidget):
         self.btn_create_image = QPushButton("💾 Create Image")
         self.btn_create_image.setFixedHeight(42)
         self.btn_create_image.setToolTip(
-            "Write a RAW, ZIP or AFF4 image of a partition or an acquired folder")
+            "Write a RAW or ZIP image of a partition or an acquired folder")
         self.btn_create_image.clicked.connect(self._open_create_image)
         btn_row.addWidget(self.btn_create_image)
 
