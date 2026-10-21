@@ -243,6 +243,7 @@ class ProcessReader:
         self.size = int(size or 0)
         self._stderr = bytearray()
         self._close_lock = threading.Lock()
+        self._closed = False
         self._process = subprocess.Popen(
             self.argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
@@ -267,10 +268,17 @@ class ProcessReader:
         return self._process.stdout
 
     def read(self, size: int = -1) -> bytes:
-        return self._process.stdout.read(size)
+        data = self._process.stdout.read(size)
+        if not data and self._closed:
+            # A close() during a blocked read surfaces as EOF, which a writer
+            # would otherwise treat as "source finished" and finalise a
+            # truncated image. Report the abort instead.
+            raise ValueError("image stream closed before the source ended")
+        return data
 
     def close(self) -> None:
         with self._close_lock:
+            self._closed = True
             self._close_locked()
 
     def _close_locked(self) -> None:

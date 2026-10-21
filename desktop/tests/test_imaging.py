@@ -144,6 +144,40 @@ class RawWriterTest(ImagingTestCase):
             RawImageWriter().write(Reader(b""), self.request())
         self.assertEqual([p for p in self.dest.iterdir()], [])
 
+    def test_a_stream_that_fails_midway_leaves_no_partial_segment(self):
+        class Broken:
+            size = 0
+
+            def __init__(self):
+                self.calls = 0
+
+            def read(self, size=-1):
+                self.calls += 1
+                if self.calls == 1:
+                    return b"x" * 4096
+                raise ValueError("image stream closed before the source ended")
+
+        with self.assertRaises(ValueError):
+            RawImageWriter().write(Broken(), self.request(segment_size=0))
+        self.assertEqual(list(self.dest.iterdir()), [])
+
+    def test_a_cancelled_segmented_stream_removes_completed_and_partial_segments(self):
+        class Broken:
+            size = 0
+
+            def __init__(self):
+                self.calls = 0
+
+            def read(self, size=-1):
+                self.calls += 1
+                if self.calls <= 2:
+                    return b"x" * MIB
+                raise ValueError("image stream closed before the source ended")
+
+        with self.assertRaises(ValueError):
+            RawImageWriter().write(Broken(), self.request(segment_size=MIB))
+        self.assertEqual(list(self.dest.iterdir()), [])
+
     def test_progress_is_reported_against_the_known_size(self):
         calls = []
         data = b"p" * (2 * MIB)

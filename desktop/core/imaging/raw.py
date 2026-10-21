@@ -106,14 +106,14 @@ class RawImageWriter(ImageWriter):
         except BaseException:
             if handle is not None and not handle.closed:
                 handle.close()
-            self._cleanup(segments, path, total_written)
+            self._cleanup(segments, path)
             raise
 
         if handle is not None and not handle.closed:
             handle.close()
 
         if total_written == 0:
-            self._cleanup(segments, path, 0)
+            self._cleanup(segments, path)
             raise ValueError("no data was read from the source; image not written")
 
         if path not in segments:
@@ -153,11 +153,16 @@ class RawImageWriter(ImageWriter):
         return path, open(path, "wb"), new_hash(request.hash_algo)
 
     @staticmethod
-    def _cleanup(segments: list, current, written: int) -> None:
-        """Remove partial/empty output so a failed run leaves nothing behind."""
+    def _cleanup(segments: list, current) -> None:
+        """Remove every partial output so a failed/cancelled run leaves nothing.
+
+        The in-progress segment is not in ``segments`` until it is closed, so it
+        must be removed explicitly; a cancelled acquisition used to leave one
+        truncated ``.001`` behind that looked like a finished image.
+        """
         for segment in segments:
             Path(segment).unlink(missing_ok=True)
-        if written == 0 and current is not None:
+        if current is not None:
             Path(current).unlink(missing_ok=True)
 
     @staticmethod
