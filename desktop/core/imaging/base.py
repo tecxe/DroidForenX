@@ -20,7 +20,7 @@ HASH_ALGOS = ("md5", "sha1", "sha256")
 COMPRESSIONS = ("none", "fast", "best")
 
 #: Image formats this package can write.
-KNOWN_FORMATS = ("raw", "zip")
+KNOWN_FORMATS = ("raw", "zip", "zipstream")
 
 #: Read granularity for the streaming writer.
 CHUNK_SIZE = 1024 * 1024
@@ -197,6 +197,9 @@ class ImageWriter(ABC):
 
     format_id: str = ""
     source_kind: str = ""
+    #: For stream writers: ``"logical"`` when the stream is a tar of device
+    #: files, ``"partition"`` when it is raw bytes, ``""`` when either works.
+    stream_kind: str = ""
     extension: str = ""
 
     @abstractmethod

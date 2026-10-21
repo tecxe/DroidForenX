@@ -302,17 +302,22 @@ dialog picks a source, an output format, and the parameters for it.
 | **Raw (dd)** | a device partition | `evidence.001`, `evidence.002` … (or one `evidence.dd`), plus `.md5`/`.sha1`/`.sha256` sidecars and an `.imageinfo.txt` |
 | **Raw (dd), logical** | the device's `/sdcard` | the same RAW container, holding a POSIX tar archive of user storage streamed over `adb exec-out` |
 | **ZIP** | a case folder | `evidence.zip` with a `MANIFEST.json` inventory, plus a hash sidecar |
+| **ZIP, logical** | the device's `/sdcard` | `evidence.zip` with every file from the tar repacked into a browsable archive, a per-file hash inventory in `MANIFEST.json`, plus a hash sidecar |
 
 Source and format are gated against each other: a block device can only be
-written as RAW, and a folder only as ZIP. Segment size (default 2 GiB,
-or a single file), compression and hash algorithm are selectable, and the image
-is re-read and re-hashed after writing unless verification is turned off.
+written as RAW, the logical tar stream as RAW or ZIP, and a folder only as ZIP.
+Segment size (default 2 GiB, or a single file), compression and hash algorithm
+are selectable, and the image is re-read and re-hashed after writing unless
+verification is turned off.
 
 The **Logical (/sdcard)** tab is the imaging path that works on an unrooted
 handset: the ADB shell cannot open block devices there, but it can read
 `/sdcard`, so user storage is streamed as a tar archive and written through the
-RAW writer with the same hashing, verification and recording. It is a logical
-capture — deleted files and app-private data are not in it.
+RAW writer — or repacked on the fly into a compressed ZIP — with the same
+hashing, verification and recording. ZIP is worth choosing for documents and
+databases; photos and video are already compressed, so the saving there is
+small. Both are logical captures: deleted files and app-private data are not in
+them, and the ZIP holds files rather than a byte-for-byte stream.
 
 Every finished image is recorded: a `disk_images` row, an `ACQUIRED` custody
 event, and one `record_acquired` artifact per segment, so it appears in the
@@ -326,6 +331,7 @@ native binary, and no third-party dependency to install.
 |---|---|---|
 | RAW | `desktop/core/imaging/raw.py` | a file-like reader |
 | ZIP | `desktop/core/imaging/zip.py` | a folder |
+| ZIP stream | `desktop/core/imaging/zipstream.py` | a file-like tar reader |
 | Device/folder sources | `desktop/core/imaging/sources.py` | — |
 | Recording | `desktop/core/imaging/registry.py` | — |
 
@@ -496,7 +502,8 @@ The registry tests (`test_image_registry.py`) pin the recording half:
 
 The dialog tests (`test_create_image_dialog.py`) run a headless Qt application
 and check the source/format gating (a device offers RAW only, a folder offers ZIP
-only), that the built request is one the writers accept, that an invalid base
+only, the logical tab offers RAW and ZIP), that the built request is one the
+writers accept, that an invalid base
 name is rejected before anything is written, and that an unreadable partition is
 refused rather than dispatched. No ADB call is made.
 

@@ -22,6 +22,7 @@ Run with:  python -m unittest desktop.tests.test_imaging -v
 import io
 import json
 import shutil
+import tarfile
 import tempfile
 import unittest
 import zipfile
@@ -32,12 +33,30 @@ from desktop.core.imaging import (
     ImageRequest,
     RawImageWriter,
     ZipImageWriter,
+    ZipStreamImageWriter,
     create_image,
     writer_for,
 )
 from desktop.core.imaging import sources
 
 MIB = 1024 * 1024
+
+
+def tar_bytes(files: dict, dirs=()) -> bytes:
+    """Build the kind of tar ``adb exec-out tar -cf - -C /sdcard .`` produces."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as tar:
+        for name in dirs:
+            info = tarfile.TarInfo(name)
+            info.type = tarfile.DIRTYPE
+            info.mode = 0o755
+            tar.addfile(info)
+        for name, content in files.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(content)
+            info.mtime = 1_700_000_000
+            tar.addfile(info, io.BytesIO(content))
+    return buffer.getvalue()
 
 
 class Reader:
@@ -337,6 +356,73 @@ class ZipWriterTest(ImagingTestCase):
         with self.assertRaises(ValueError):
             ZipImageWriter().write(self.tmp / "missing", self.request(image_format="zip"))
 
+
+
+class ZipStreamWriterTest(ImagingTestCase):
+    def write_tar(self, files: dict, progress=None, **overrides):
+        options = dict(image_format="zipstream")
+        options.update(overrides)
+        return ZipStreamImageWriter().write(
+            Reader(tar_bytes(files, dirs=("./Documents",))), self.request(**options),
+            progress=progress)
+
+    def test_tar_stream_round_trips_into_a_browsable_archive(self):
+        result = self.write_tar({
+            "./Documents/notes.txt": b"interview notes\n",
+            "./Pictures/photo.jpg": b"\xff\xd8" + b"binary" * 100,
+        })
+
+        self.assertTrue(result.verified)
+        self.assertEqual(result.primary.name, "evidence.zip")
+        self.assertEqual(result.image_format, "zipstream")
+
+        with zipfile.ZipFile(result.primary) as archive:
+            self.assertIsNone(archive.testzip())
+            names = set(archive.namelist())
+            self.assertIn("Documents/notes.txt", names)
+            self.assertIn("Pictures/photo.jpg", names)
+            self.assertEqual(archive.read("Documents/notes.txt"), b"interview notes\n")
+
+            manifest = json.loads(archive.read("MANIFEST.json"))
+            self.assertEqual(manifest["file_count"], 2)
+            self.assertEqual(manifest["source_kind"], "logical")
+            by_path = {entry["path"]: entry for entry in manifest["files"]}
+            self.assertEqual(
+                by_path["Documents/notes.txt"]["sha256"], sha256(b"interview notes\n"))
+
+        self.assertTrue((self.dest / "evidence.zip.sha256").exists())
+
+    def test_cancelled_stream_leaves_no_archive(self):
+        def progress(done, total, stage):
+            if done > 0:
+                raise KeyboardInterrupt("operator cancelled")
+
+        with self.assertRaises(KeyboardInterrupt):
+            self.write_tar({"./Documents/big.bin": b"x" * (2 * MIB)}, progress=progress)
+        self.assertEqual(list(self.dest.iterdir()), [])
+
+    def test_empty_tar_writes_nothing(self):
+        with self.assertRaises(ValueError):
+            ZipStreamImageWriter().write(
+                Reader(tar_bytes({})), self.request(image_format="zipstream"))
+        self.assertEqual(list(self.dest.iterdir()), [])
+
+    def test_refuses_to_overwrite_an_existing_archive(self):
+        self.dest.mkdir(parents=True)
+        (self.dest / "evidence.zip").write_bytes(b"previous")
+        with self.assertRaises(ValueError):
+            self.write_tar({"./Documents/a.txt": b"alpha"})
+        self.assertEqual((self.dest / "evidence.zip").read_bytes(), b"previous")
+
+    def test_names_cannot_escape_the_archive_root(self):
+        result = self.write_tar({"./../../escape.txt": b"nope"})
+        with zipfile.ZipFile(result.primary) as archive:
+            self.assertIn("_unsafe/escape.txt", archive.namelist())
+
+    def test_compression_none_stores_the_members(self):
+        result = self.write_tar({"./Documents/a.txt": b"alpha"}, compression="none")
+        with zipfile.ZipFile(result.primary) as archive:
+            self.assertEqual(archive.getinfo("Documents/a.txt").compress_type, zipfile.ZIP_STORED)
 
 
 class CreateImageDispatchTest(ImagingTestCase):

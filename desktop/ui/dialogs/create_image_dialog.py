@@ -5,9 +5,10 @@ folder), an output format, and the parameters for it; a worker thread writes the
 image and records it. Everything the writers need comes from
 :mod:`desktop.core.imaging`; this module is only the front end.
 
-Sources and formats are gated against each other on purpose: a block device can
-only be written as RAW, and a folder can only be written as ZIP. Offering
-a combination that the writer would reject is worse than not offering it.
+Sources and formats are gated against each other on purpose: a raw block device
+can only be written as RAW, the logical /sdcard tar can be written as RAW or
+repacked as ZIP, and a folder can only be written as ZIP. Offering a combination
+that the writer would reject is worse than not offering it.
 """
 from __future__ import annotations
 
@@ -24,7 +25,8 @@ from PyQt6.QtWidgets import (
 
 from ...core import evidence_store
 from ...core.imaging import (
-    FORMAT_LABELS, FORMAT_SOURCE_KIND, create_image, registry, sources,
+    FORMAT_LABELS, FORMAT_SOURCE_KIND, FORMAT_STREAM_KIND, create_image, registry,
+    sources,
 )
 from ...core.imaging.base import ImageRequest
 
@@ -362,11 +364,13 @@ class CreateImageDialog(QDialog):
         logical = QWidget()
         logical_layout = QVBoxLayout(logical)
         logical_hint = QLabel(
-            "Streams the device's user storage (/sdcard) as a POSIX tar archive "
-            "and writes it as a RAW (dd) image with hash sidecars. Works without "
-            "root -- this is the imaging path for unrooted handsets. Expect the "
-            "image to be about as large as the storage in use, and the verify "
-            "step at the end to take a while.")
+            "Streams the device's user storage (/sdcard) as a POSIX tar archive. "
+            "Write it as RAW (dd) to preserve the stream byte for byte, or as ZIP "
+            "to repack the files into one compressed, browsable archive -- both "
+            "with hash sidecars. Works without root; this is the imaging path for "
+            "unrooted handsets. Expect the image to be about as large as the "
+            "storage in use (ZIP is smaller for documents, barely smaller for "
+            "photos and video), and the verify step at the end to take a while.")
         logical_hint.setWordWrap(True)
         logical_hint.setStyleSheet("color: #64748b;")
         logical_layout.addWidget(logical_hint)
@@ -484,7 +488,18 @@ class CreateImageDialog(QDialog):
     def available_formats(self) -> list:
         """Formats that the current source can actually be written as."""
         kind = self.source_kind
-        return [fmt for fmt, needs in FORMAT_SOURCE_KIND.items() if needs == kind]
+        stream = self.stream_kind if kind == "stream" else ""
+        formats = []
+        for fmt, needs in FORMAT_SOURCE_KIND.items():
+            if needs != kind:
+                continue
+            # A tar repack only makes sense for the logical stream; a raw
+            # partition is not a tar and must not offer it.
+            wants = FORMAT_STREAM_KIND.get(fmt, "")
+            if wants and wants != stream:
+                continue
+            formats.append(fmt)
+        return formats
 
     def _on_source_changed(self):
         """Repopulate the format list so only valid pairings are offered."""
@@ -548,8 +563,7 @@ class CreateImageDialog(QDialog):
                 "it is not rooted, so the shell user is denied every block "
                 "device (boot included). Physical imaging requires a rooted "
                 "device; on an unrooted handset take a logical image on the "
-                "'Logical (/sdcard)' tab, or run a logical acquisition and image "
-                "the case folder here as ZIP.")
+                "'Logical (/sdcard)' tab -- as RAW, or as a compressed ZIP.")
         else:
             self.partition_hint.setText(
                 f"{len(usable)} of {len(partitions)} partitions are readable without root. "
