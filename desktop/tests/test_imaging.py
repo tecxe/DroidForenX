@@ -517,6 +517,32 @@ class ProcessReaderDiagnosticsTest(unittest.TestCase):
             time.sleep(0.05)
         self.assertIn("boom-diagnostic", reader.error_output())
 
+    def test_close_returns_promptly_on_a_live_long_stream(self):
+        """Regression: close() deadlocked on stop of a large /sdcard stream.
+
+        Closing stderr while the drain thread was blocked inside read() waited
+        for a lock that could only be released after close(). A full-storage
+        image stopped/finished and then hung forever; small folders finished
+        before the drain thread mattered.
+        """
+        import sys
+        import time
+
+        script = (
+            "import sys, time\n"
+            "while True:\n"
+            "    sys.stdout.buffer.write(b'x' * 65536)\n"
+            "    sys.stdout.flush()\n"
+            "    time.sleep(0.01)\n"
+        )
+        reader = sources.ProcessReader([sys.executable, "-c", script])
+        self.assertTrue(reader.read(4096))
+
+        started = time.monotonic()
+        reader.close()
+        self.assertLess(time.monotonic() - started, 10)
+        self.assertIsNotNone(reader._process.poll())
+
     def test_a_clean_process_reports_no_error(self):
         import sys
         import time

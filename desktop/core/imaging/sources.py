@@ -242,12 +242,14 @@ class ProcessReader:
         self.argv = list(argv)
         self.size = int(size or 0)
         self._stderr = bytearray()
+        self._close_lock = threading.Lock()
         self._process = subprocess.Popen(
             self.argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         # A full stderr pipe can deadlock the writer if nobody drains it, so a
         # small daemon thread collects whatever ``adb`` says while data streams.
-        threading.Thread(target=self._drain_stderr, daemon=True).start()
+        self._drain = threading.Thread(target=self._drain_stderr, daemon=True)
+        self._drain.start()
 
     def _drain_stderr(self) -> None:
         try:
@@ -268,15 +270,42 @@ class ProcessReader:
         return self._process.stdout.read(size)
 
     def close(self) -> None:
-        for stream in (self._process.stdout, self._process.stderr):
-            if stream is not None and not stream.closed:
-                stream.close()
-        if self._process.poll() is None:
-            self._process.terminate()
+        with self._close_lock:
+            self._close_locked()
+
+    def _close_locked(self) -> None:
+        process = self._process
+        # Kill the child before touching the pipes. The drain thread is blocked
+        # in ``stderr.read()`` holding that stream's lock; closing stderr first
+        # (or closing stdout under a concurrent writer read) deadlocks forever.
+        # This used to hang every cancel/stop of a long /sdcard stream.
+        if process.poll() is None:
             try:
-                self._process.wait(timeout=10)
+                process.terminate()
+            except OSError:  # pragma: no cover - already gone
+                pass
+            try:
+                process.wait(timeout=10)
             except subprocess.TimeoutExpired:  # pragma: no cover - defensive
-                self._process.kill()
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:  # pragma: no cover
+                    pass
+
+        # The child is gone, so the drain thread sees EOF and releases the
+        # stream; only then is it safe to close.
+        if self._drain is not None:
+            self._drain.join(timeout=2)
+        for stream in (process.stdout, process.stderr):
+            if stream is not None and not stream.closed:
+                try:
+                    stream.close()
+                except (OSError, ValueError):  # pragma: no cover
+                    pass
 
     def __enter__(self) -> "ProcessReader":
         return self

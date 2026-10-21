@@ -44,7 +44,7 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("DroidForenX")
     app.setOrganizationName("DroidForenX")
-    app.setApplicationVersion("2.0.16")
+    app.setApplicationVersion("2.0.17")
 
     font = QFont("Segoe UI", 10)
     font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
