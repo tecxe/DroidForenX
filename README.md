@@ -36,7 +36,7 @@ copy, and records an append-only chain of custody for every action.
 >
 > `README.md` in earlier revisions of this repository described a Django +
 > PostgreSQL platform with 16 phases and ~138 tests. **That software does not
-> exist in this repository.** It was removed in commit `f761d7e`. This document
+> exist in this repository.** It was removed in commit `5a29ae2`. This document
 > describes only code that is present.
 
 ---
@@ -418,7 +418,7 @@ within this project's planned scope, but the work was never completed or
 validated, so the loader is surfaced as unavailable rather than presented as
 working. It stands as future work; any implementation should stay within
 authorised forensic work and documented lawful exports. *(Recorded by
-te7mina1 in `c6d2998`.)*
+te7mina1 in `b888c2f`.)*
 
 `is_device_rooted()` and `device_root_summary()` in `adb_manager.py` perform
 root detection so the tool knows its own ceiling before interpreting results.
