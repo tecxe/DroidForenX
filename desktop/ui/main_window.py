@@ -18,6 +18,20 @@ from .pages.browse_page import BrowsePage
 from .pages.artifacts_page import ArtifactsPage
 from ..core.adb_manager import list_devices, get_device_info
 from ..core.database import get_db, init_db, audit_log
+from .. import __version__
+
+
+def _app_version() -> str:
+    """Version shown in the chrome, from the package, never hardcoded.
+
+    The sidebar used to say 2.0.16 long after main.py moved on, so every release
+    shipped a window that advertised the wrong build. ``applicationVersion()``
+    is not used here: Qt seeds it from the executable's version resource, so an
+    embedded Python answers with its own build number until main.py overwrites
+    it, and a window built without main.py (tests, tooling) would label itself
+    3.14.x.
+    """
+    return __version__
 
 
 class MainWindow(QMainWindow):
@@ -123,7 +137,7 @@ class MainWindow(QMainWindow):
             "border: none; padding: 0; background: transparent;")
         logo_layout.addWidget(logo_text)
 
-        version = QLabel("v2.0.16 Professional")
+        version = QLabel(f"v{_app_version()} Professional")
         version.setStyleSheet(
             "font-size: 10px; color: #475569; letter-spacing: 1px; "
             "border: none; padding: 0; background: transparent;")
@@ -221,7 +235,7 @@ class MainWindow(QMainWindow):
 
         # Status bar
         self.statusBar().setStyleSheet("background: #111827; color: #64748b; border-top: 1px solid #1e293b; font-size: 11px;")
-        self.statusBar().showMessage("Ready — DroidForenX v2.0.16 Professional")
+        self.statusBar().showMessage(f"Ready — DroidForenX v{_app_version()} Professional")
 
         self._navigate_to(0)
 
@@ -388,6 +402,7 @@ class MainWindow(QMainWindow):
         self.identify_page.set_device(s)
         self.acquire_page.set_device(s, self._current_case_id, self._current_session_id)
         self.examine_page.set_device(s)
+        self.artifacts_page.set_session(self._current_session_id)
 
     def _on_device_connected(self, device_info: dict):
         self._device_serial = device_info["serial"]
@@ -412,6 +427,9 @@ class MainWindow(QMainWindow):
     def _on_session_created(self, session_id: str):
         self._current_session_id = session_id
         self.report_page.set_session(session_id)
+        # The artifact viewer writes findings into the active session; hand it
+        # the new id as soon as the session exists, not only on next connect.
+        self.artifacts_page.set_session(session_id)
 
     def _refresh_stats(self):
         from ..core.adb_manager import list_devices
@@ -444,7 +462,7 @@ class MainWindow(QMainWindow):
 
     def _show_about(self):
         QMessageBox.about(self, "About DroidForenX",
-            "<h2>DroidForenX v2.0.16</h2>"
+            f"<h2>DroidForenX v{_app_version()}</h2>"
             "<p>Professional Digital Forensics</p>"
             "<p>Standalone mobile device forensic tool for law enforcement "
             "and forensic investigators.</p>"

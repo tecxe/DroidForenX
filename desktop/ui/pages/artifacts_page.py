@@ -2313,8 +2313,14 @@ class ArtifactsPage(QWidget):
         self._contacts = []
         self._conversations = {}
         self._current_app = None
+        #: Active case session; findings are only written to the case when the
+        #: window has one (the artifact rows require a session and a timestamp).
+        self._session_id = ""
         self.setStyleSheet(DARK_STYLE)
         self._setup_ui()
+
+    def set_session(self, session_id: str):
+        self._session_id = session_id or ""
 
     def set_evidence_root(self, path):
         self.evidence_root = Path(path) if path else None
@@ -3825,18 +3831,40 @@ class ArtifactsPage(QWidget):
             self._conversations[address]["messages"].append(msg)
 
     def _persist_artifacts(self, results):
+        """Save what the viewer read into the active case, once.
+
+        These rows used to be inserted with no ``created_at`` and an empty
+        session, so every insert failed the NOT NULL constraint and the
+        exception was swallowed into a log line: the viewer's findings never
+        reached the case. Without a session there is nowhere to put them, so
+        the write is skipped rather than creating orphan rows.
+        """
+        if not self._session_id:
+            return
         import uuid
         try:
             from ...core.database import get_db
             conn = get_db()
+            existing = {
+                (row[0], row[1]) for row in conn.execute(
+                    "SELECT name, source FROM evidence_artifacts WHERE session_id=?",
+                    (self._session_id,))
+            }
+            now = datetime.now(timezone.utc).isoformat()
             for a in results[:5000]:
+                name = (a.get("summary") or "")[:200]
+                source = a.get("source", "")
+                if (name, source) in existing:
+                    continue
+                existing.add((name, source))
                 conn.execute(
-                    "INSERT INTO evidence_artifacts (id, session_id, artifact_id, name, source, category, mime_type, file_size, file_path, sha256_hash, metadata) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                    (str(uuid.uuid4()), "", f"art_{uuid.uuid4().hex[:12]}",
-                     a.get("summary", "")[:200], a.get("source", ""),
-                     a.get("category", ""), a.get("type", ""),
-                     0, a.get("source", ""), "",
-                     json.dumps(a.get("_data", {}), default=str)[:2000])
+                    "INSERT INTO evidence_artifacts (id, session_id, artifact_id, name, source, category,"
+                    " mime_type, file_size, file_path, sha256_hash, metadata, created_at)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (str(uuid.uuid4()), self._session_id, f"art_{uuid.uuid4().hex[:12]}",
+                     name, source, a.get("category", ""), a.get("type", ""),
+                     0, source, "",
+                     json.dumps(a.get("_data", {}), default=str)[:2000], now)
                 )
             conn.commit()
             conn.close()

@@ -41,6 +41,62 @@ copy, and records an append-only chain of custody for every action.
 
 ---
 
+## Screenshots
+
+Every frame below is the running application, not a mock-up, captured on
+**21 October 2026** with a **TECNO KL6** (Tecno Spark 30, Android 14 / API 34,
+unrooted) attached over ADB. The case is a throwaway demonstration case; the
+artifact counts, contacts, messages and calls are read from the phone. Click an
+image to open it at full size.
+
+**Dashboard** — open cases, attached devices, artifact and report totals, and
+where the current case sits in the five-stage workflow.
+
+![DroidForenX dashboard with a connected device and an open case](docs/images/dashboard.png)
+
+**Case management** — every case the operator has opened, with investigator,
+agency and status. A case is the container for sessions, images and reports.
+
+![Case management table showing an open demonstration case](docs/images/case-management.png)
+
+**Device connection** — model, Android version, build fingerprint, serial,
+storage and root state, read over ADB.
+
+![Device connection page showing a TECNO KL6 connected](docs/images/device-connection.png)
+
+**Acquisition** — pick an extraction level and the loaders to run. Level 1 is
+logical (contacts, SMS, calls, calendar, app data, ADB backup); Level 2 adds
+shared storage and carving.
+
+![Acquisition page with the Level 1 logical profile selected](docs/images/acquisition.png)
+
+**Artifact viewer** — what came back, grouped by app and category. This frame
+was taken against the phone: 1005 SMS, 1403 calls and 2249 contacts in one pass.
+
+![Artifact viewer reading messages, calls and contacts from the device](docs/images/artifact-viewer.png)
+
+**Create Image** — logical `/sdcard` capture as a streamed ZIP, which is the
+supported path for an unrooted handset. RAW and E01-style segmented output are
+available for rooted devices and case folders.
+
+![Create Image dialog with the logical ZIP format selected](docs/images/create-image.png)
+
+**Reporting** — a plain-English, court-ready report built from the case's
+preserved artifacts and chain of custody.
+
+![Reporting page preview](docs/images/reporting.png)
+
+**Tests** — the suite that guards acquisition, hashing, custody, imaging and the
+UI. No device is needed to run it:
+
+```powershell
+python -m unittest discover -s desktop/tests -t .
+```
+
+![Test suite finishing with 175 tests passed and one skipped](docs/images/tests.png)
+
+---
+
 ## The honesty guarantee
 
 DroidForenX reports what it actually achieved, per loader, using an eight-state
@@ -544,9 +600,11 @@ of trusting it:
 - the Seizure nav caption keeps its literal ampersand: a lone `&` is a Qt
   mnemonic and silently consumes a character
 
-`desktop/tests/` also contains `test_quick.py`, `test_deep.py`,
-`test_full_adb.py` and `test_integration.py`. These require a connected device
-and are **not** covered by CI.
+`desktop/tests/` also contains `test_quick.py`, `test_deep.py` and
+`test_full_adb.py`. These require a connected device and are **not** covered by
+CI. `integration_smoke.py` is a standalone script that checks imports and files;
+it is deliberately not named `test_*` so unittest discovery does not import a
+module that exits the interpreter.
 
 ---
 

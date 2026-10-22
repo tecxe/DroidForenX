@@ -26,6 +26,8 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt, qInstallMessageHandler
 from PyQt6.QtGui import QFont
 
+from desktop import __version__
+
 from desktop.core.database import init_db, audit_log
 
 qInstallMessageHandler(_qt_message_handler)
@@ -44,7 +46,7 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("DroidForenX")
     app.setOrganizationName("DroidForenX")
-    app.setApplicationVersion("2.0.18")
+    app.setApplicationVersion(__version__)
 
     font = QFont("Segoe UI", 10)
     font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
