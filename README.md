@@ -44,8 +44,8 @@ copy, and records an append-only chain of custody for every action.
 ## Screenshots
 
 Every frame below is the running application, not a mock-up, captured on
-**21 October 2026** with a **TECNO KL6** (Tecno Spark 30, Android 14 / API 34,
-unrooted) attached over ADB. The case is a throwaway demonstration case; the
+**21 October 2026** with a **TECNO KM5** (Android 15 / API 35, unrooted)
+attached over ADB. The case is a throwaway demonstration case; the
 artifact counts, contacts, messages and calls are read from the phone. Click an
 image to open it at full size.
 
@@ -71,15 +71,16 @@ shared storage and carving.
 ![Acquisition page with the Level 1 logical profile selected](docs/images/acquisition.png)
 
 **Artifact viewer** — what came back, grouped by app and category. This frame
-was taken against the phone: 1005 SMS, 1403 calls and 2249 contacts in one pass.
+was taken against the phone: 8165 SMS, 588 calls and 1110 contacts in one pass.
 
 ![Artifact viewer reading messages, calls and contacts from the device](docs/images/artifact-viewer.png)
 
-**Create Image** — logical `/sdcard` capture as a streamed ZIP, which is the
-supported path for an unrooted handset. RAW and E01-style segmented output are
-available for rooted devices and case folders.
+**Create Image** — image a folder that acquisition already produced. The source
+is the preserved case copy, not the live phone, so the archive is made from
+evidence that was hashed when it was acquired. The ZIP gets its own hash and
+sidecar, and the original files are left untouched.
 
-![Create Image dialog with the logical ZIP format selected](docs/images/create-image.png)
+![Create Image dialog archiving an acquired case folder as a ZIP](docs/images/create-image.png)
 
 **Reporting** — a plain-English, court-ready report built from the case's
 preserved artifacts and chain of custody.
