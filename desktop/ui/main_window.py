@@ -16,6 +16,7 @@ from .pages.examine_page import ExaminePage
 from .pages.report_page import ReportPage
 from .pages.browse_page import BrowsePage
 from .pages.artifacts_page import ArtifactsPage
+from .pages.sim_page import SimForensicsPage
 from ..core.adb_manager import list_devices, get_device_info
 from ..core.database import get_db, init_db, audit_log
 from .. import __version__
@@ -55,7 +56,6 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._setup_menu()
         self._connect_signals()
-        self._close_stale_cases()
 
         self._refresh_stats()
         audit_log("application_started", details="DroidForenX desktop launched")
@@ -162,6 +162,7 @@ class MainWindow(QMainWindow):
             ("INVESTIGATION", [
                 ("  File Browser", 8),
                 ("  Artifact Viewer", 9),
+                ("  SIM Forensics", 10),
             ]),
         ]
 
@@ -219,6 +220,7 @@ class MainWindow(QMainWindow):
         self.report_page = ReportPage(get_db)
         self.browse_page = BrowsePage()
         self.artifacts_page = ArtifactsPage()
+        self.sim_page = SimForensicsPage()
 
         self.stack.addWidget(self.home_page)
         self.stack.addWidget(self.case_page)
@@ -230,6 +232,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.report_page)
         self.stack.addWidget(self.browse_page)
         self.stack.addWidget(self.artifacts_page)
+        self.stack.addWidget(self.sim_page)
 
         main_layout.addWidget(self.stack)
 
@@ -352,7 +355,8 @@ class MainWindow(QMainWindow):
 
         page_names = {0: "Dashboard", 1: "Case Management", 2: "Device Connection",
                       3: "Seizure & Isolation", 4: "Identification", 5: "Acquisition",
-                      6: "Examination", 7: "Reporting", 8: "File Browser", 9: "Artifact Viewer"}
+                      6: "Examination", 7: "Reporting", 8: "File Browser", 9: "Artifact Viewer",
+                      10: "SIM Forensics"}
         self.statusBar().showMessage(f"DroidForenX — {page_names.get(index, 'Unknown')}")
 
     def _navigate_by_name(self, name: str):
@@ -403,6 +407,8 @@ class MainWindow(QMainWindow):
         self.acquire_page.set_device(s, self._current_case_id, self._current_session_id)
         self.examine_page.set_device(s)
         self.artifacts_page.set_session(self._current_session_id)
+        self.sim_page.set_device(s)
+        self.sim_page.set_session(self._current_session_id)
 
     def _on_device_connected(self, device_info: dict):
         self._device_serial = device_info["serial"]
@@ -430,6 +436,7 @@ class MainWindow(QMainWindow):
         # The artifact viewer writes findings into the active session; hand it
         # the new id as soon as the session exists, not only on next connect.
         self.artifacts_page.set_session(session_id)
+        self.sim_page.set_session(session_id)
 
     def _refresh_stats(self):
         from ..core.adb_manager import list_devices
@@ -447,18 +454,19 @@ class MainWindow(QMainWindow):
         self.home_page.refresh(case_count=cases, device_count=devices, artifact_count=artifacts, report_count=reports)
 
     def _close_stale_cases(self):
-        conn = get_db()
-        conn.execute("PRAGMA foreign_keys = OFF")
-        conn.execute("UPDATE cases SET status='closed' WHERE status='open'")
-        conn.execute("DELETE FROM evidence_artifacts")
-        conn.execute("DELETE FROM examination_results")
-        conn.execute("DELETE FROM forensic_reports")
-        conn.execute("DELETE FROM isolation_actions")
-        conn.execute("DELETE FROM acquisition_profiles")
-        conn.execute("DELETE FROM forensic_sessions")
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.commit()
-        conn.close()
+        """Retired.
+
+        This used to run on every launch and, despite its name, deleted every
+        artifact, examination result, report, isolation action, acquisition
+        profile and session in the database, then marked all open cases closed.
+        The evidence files on disk survived; the analytical record did not.
+
+        It shipped in v2.0 because a clean slate is convenient while developing,
+        but a forensic tool must never discard the record because the program
+        was restarted, and anything left open by a crash is exactly what an
+        examiner needs to see. Startup now touches nothing.
+        """
+        return None
 
     def _show_about(self):
         QMessageBox.about(self, "About DroidForenX",
@@ -477,3 +485,4 @@ class MainWindow(QMainWindow):
             "<li>Device Isolation & Evidence Preservation</li>"
             "</ul>"
             "<p>© 2026 DroidForenX</p>")
+

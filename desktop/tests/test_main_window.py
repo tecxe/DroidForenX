@@ -19,7 +19,10 @@ Run with:  python -m unittest desktop.tests.test_main_window -v
 """
 
 import os
+import shutil
+import tempfile
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -30,6 +33,32 @@ try:
     _QT_IMPORT = True
 except Exception:  # pragma: no cover - depends on the environment
     _QT_IMPORT = False
+
+
+#: The window opens the operator's real database on construction. Tests must not
+#: write to that store: an earlier revision of MainWindow deleted every report,
+#: session and artifact on startup, so every suite run quietly wiped the
+#: examiner's record. Point the module at a throwaway database for this file.
+_restore_db_path = None
+_tmp_home = None
+
+
+def setUpModule():
+    global _restore_db_path, _tmp_home
+    from desktop.core import database
+
+    _restore_db_path = database.DB_PATH
+    _tmp_home = tempfile.mkdtemp(prefix="dfx-window-")
+    database.DB_PATH = Path(_tmp_home) / "droidforenx.db"
+
+
+def tearDownModule():
+    from desktop.core import database
+
+    if _restore_db_path is not None:
+        database.DB_PATH = _restore_db_path
+    if _tmp_home:
+        shutil.rmtree(_tmp_home, ignore_errors=True)
 
 
 def _make_qapp():
@@ -143,6 +172,84 @@ class SidebarRenderingTest(unittest.TestCase):
         self.assertEqual(checked, [5])
         self.window._navigate_to(0)
         _pump(self._app)
+
+
+@unittest.skipUnless(_QT_IMPORT, "PyQt6 is not available")
+class StartupPreservesTheRecordTest(unittest.TestCase):
+    """Opening the window must never discard what an examiner recorded.
+
+    v2.0 shipped a ``_close_stale_cases`` helper that ran on every launch and,
+    despite its name, deleted every artifact, examination result, report,
+    isolation action, acquisition profile and session, then closed every open
+    case. Restarting the program therefore erased the analytical record; the
+    evidence files on disk were left orphaned with nothing pointing at them.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._app = _make_qapp()
+
+    def _seed(self):
+        import uuid
+        from datetime import datetime, timezone
+
+        from desktop.core.database import get_db, init_db
+
+        init_db()
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        case_id = str(uuid.uuid4())
+        session_id = str(uuid.uuid4())
+        conn = get_db()
+        conn.execute(
+            "INSERT INTO cases (id, case_number, title, investigator, agency, description,"
+            " status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (case_id, "DFX-2026-777", "Restart regression", "ENI", "Lab",
+             "", "open", now, now))
+        conn.execute(
+            "INSERT INTO forensic_sessions (id, case_id, status, current_stage,"
+            " created_at, updated_at) VALUES (?,?,?,?,?,?)",
+            (session_id, case_id, "in_progress", 4, now, now))
+        conn.execute(
+            "INSERT INTO evidence_artifacts (id, session_id, artifact_id, name, source,"
+            " category, created_at) VALUES (?,?,?,?,?,?,?)",
+            (str(uuid.uuid4()), session_id, "sms:1", "A message", "content://sms", "SMS", now))
+        conn.execute(
+            "INSERT INTO forensic_reports (id, session_id, title, format, case_number,"
+            " status, created_at) VALUES (?,?,?,?,?,?,?)",
+            (str(uuid.uuid4()), session_id, "Report", "HTML", "DFX-2026-777", "final", now))
+        conn.commit()
+        conn.close()
+        return case_id
+
+    def _counts(self):
+        from desktop.core.database import get_db
+
+        conn = get_db()
+        counts = {
+            table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("cases", "forensic_sessions", "evidence_artifacts",
+                          "forensic_reports")
+        }
+        status = conn.execute(
+            "SELECT status FROM cases WHERE case_number='DFX-2026-777'").fetchone()
+        conn.close()
+        return counts, (status[0] if status else None)
+
+    def test_launching_the_window_keeps_cases_sessions_artifacts_and_reports(self):
+        self._seed()
+        before, status_before = self._counts()
+
+        window = MainWindow()
+        try:
+            _pump(self._app)
+        finally:
+            window.close()
+            window.deleteLater()
+            _pump(self._app)
+
+        after, status_after = self._counts()
+        self.assertEqual(after, before, "startup discarded the analytical record")
+        self.assertEqual(status_after, "open", "startup closed an open case")
 
 
 if __name__ == "__main__":

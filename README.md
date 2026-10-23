@@ -77,6 +77,15 @@ was taken against the phone: 42,763 artifacts in one pass, including 860 SMS,
 
 ![Artifact viewer reading messages, calls and contacts from the device](docs/images/artifact-viewer.png)
 
+**SIM forensics** — the UICC as the handset will expose it: every slot, its
+state, carrier, network code, ICCID and IMSI, with the Android redaction on
+those identifiers stated instead of hidden. ADN contacts are read per
+subscription (`content://icc/adn/subId/<id>`), so they land on the card they
+actually live on, and subscriptions the device still remembers for cards that
+are no longer inserted are listed separately.
+
+![SIM forensics page showing two present cards and one empty slot](docs/images/sim-forensics.png)
+
 **Create Image** — choose the source (connected device, preserved case folder or
 the logical `/sdcard` view), then the output: byte-for-byte Raw (dd) segments or
 a streamed ZIP, with segment size, hash algorithm and an optional re-read
@@ -269,7 +278,7 @@ desktop/
     database.py               SQLite helper
     doc_metadata.py           document metadata extraction
     email_extractor.py        email artifact extraction
-    sim_forensics.py          SIM / network operator analysis
+    sim_forensics.py          SIM / UICC extraction over ADB
   ui/
     main_window.py            window shell, stage navigation
     theme.py                  palette and typography
