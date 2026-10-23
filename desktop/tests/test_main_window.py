@@ -92,7 +92,7 @@ class SidebarRenderingTest(unittest.TestCase):
         self.assertGreaterEqual(label.contentsRect().height(), label.fontMetrics().height())
 
     def test_the_version_label_is_readable(self):
-        version = [lbl for lbl in self._sidebar_labels() if lbl.text().startswith("v2.0")]
+        version = [lbl for lbl in self._sidebar_labels() if lbl.text().startswith("v1.0")]
         self.assertEqual(len(version), 1)
         self.assertGreaterEqual(version[0].contentsRect().height(),
                                 version[0].fontMetrics().height())

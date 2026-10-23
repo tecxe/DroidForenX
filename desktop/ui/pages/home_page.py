@@ -35,7 +35,7 @@ class HomePage(QWidget):
         title_block = QVBoxLayout()
         title = QLabel("Digital Forensics")
         title.setStyleSheet("font-size: 26px; font-weight: 700; color: #e2e8f0; background: transparent; border: none;")
-        subtitle = QLabel("DroidForenX v2.0 — Professional Mobile Device Forensics")
+        subtitle = QLabel("DroidForenX v1.0 — Professional Mobile Device Forensics")
         subtitle.setStyleSheet("font-size: 13px; color: #64748b; background: transparent; border: none;")
         title_block.addWidget(title)
         title_block.addWidget(subtitle)

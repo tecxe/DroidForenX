@@ -1317,7 +1317,7 @@ class AcquisitionWorker(QThread):
             "acquisition_level": self.level,
             "hash_algorithm": self.hash_algo,
             "acquisition_date": datetime.now(timezone.utc).isoformat(),
-            "tool": "DroidForenX v2.0",
+            "tool": "DroidForenX v1.0",
             "examiner_notes": "",
             "total_files": results["files"],
             "total_bytes": results["bytes"],

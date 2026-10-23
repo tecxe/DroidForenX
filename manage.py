@@ -7,11 +7,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from desktop import __version__ as VERSION
+
 
 def main():
     parser = argparse.ArgumentParser(
         prog="droidforenx",
-        description="DroidForenX Professional Digital Forensics Platform v2.0.18",
+        description=f"DroidForenX Professional Digital Forensics Platform v{VERSION}",
     )
     sub = parser.add_subparsers(dest="command")
 
@@ -24,7 +26,7 @@ def main():
         from desktop.main import main as gui_main
         gui_main()
     elif args.command == "version":
-        print("DroidForenX v2.0.18 — Professional Digital Forensics Platform")
+        print(f"DroidForenX v{VERSION} - Professional Digital Forensics Platform")
     else:
         parser.print_help()
 

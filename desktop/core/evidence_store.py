@@ -35,10 +35,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, List, Optional
 
+from desktop import __version__ as _PACKAGE_VERSION
+
 logger = logging.getLogger(__name__)
 
 TOOL_NAME = "DroidForenX"
-TOOL_VERSION = "2.0.0-p0"
+#: Stamped into every custody event and every report. Derived rather than copied:
+#: this constant still read "2.0.0-p0" while the app was shipping 2.0.19, so the
+#: custody trail was recording a version that never existed.
+TOOL_VERSION = _PACKAGE_VERSION
 
 EVIDENCE_ROOT = Path(os.environ.get("DROIDFORENX_EVIDENCE_ROOT") or (Path.home() / ".droidforenx" / "evidence"))
 
