@@ -123,7 +123,11 @@ class DevicePage(QWidget):
         btn_sim = QPushButton("💳 SIM Forensics")
         btn_sim.setObjectName("btn-outline")
         btn_sim.setFixedHeight(38)
+        # This button shipped with no handler at all: it was drawn, looked
+        # pressable, and did nothing. It now opens the SIM page.
+        btn_sim.clicked.connect(lambda: self.navigate.emit("sim"))
         btn_row.addWidget(btn_sim)
+        self.btn_sim = btn_sim
 
         btn_row.addStretch()
         info_layout.addLayout(btn_row)

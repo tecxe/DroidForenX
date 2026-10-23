@@ -361,7 +361,8 @@ class MainWindow(QMainWindow):
 
     def _navigate_by_name(self, name: str):
         mapping = {"home": 0, "case": 1, "device": 2, "seizure": 3, "identify": 4,
-                    "acquire": 5, "examine": 6, "report": 7, "browse": 8, "artifacts": 9}
+                    "acquire": 5, "examine": 6, "report": 7, "browse": 8, "artifacts": 9,
+                    "sim": 10}
         self._navigate_to(mapping.get(name, 0))
 
     def _auto_scan_devices(self):

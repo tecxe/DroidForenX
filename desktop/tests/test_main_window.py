@@ -252,5 +252,45 @@ class StartupPreservesTheRecordTest(unittest.TestCase):
         self.assertEqual(status_after, "open", "startup closed an open case")
 
 
+@unittest.skipUnless(_QT_IMPORT, "PyQt6 is not available")
+class NavigationRouteTest(unittest.TestCase):
+    """A control that looks pressable must reach a page.
+
+    The Device Connection page shipped a "SIM Forensics" button with no handler
+    at all: drawn, hoverable, inert. Nothing caught it because no test pressed
+    it. These tests press the route and check where it lands.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._app = _make_qapp()
+        cls.window = MainWindow()
+        cls.window.resize(1280, 720)
+        _pump(cls._app)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.window.close()
+        cls.window.deleteLater()
+        _pump(cls._app)
+
+    def test_the_device_page_sim_button_opens_the_sim_page(self):
+        self.window.device_page.btn_sim.click()
+        _pump(self._app)
+        self.assertIs(self.window.stack.currentWidget(), self.window.sim_page)
+
+    def test_every_named_route_reaches_its_own_page(self):
+        routes = ("home", "case", "device", "seizure", "identify", "acquire",
+                  "examine", "report", "browse", "artifacts", "sim")
+        landed = {}
+        for name in routes:
+            self.window._navigate_by_name(name)
+            _pump(self._app)
+            landed[name] = self.window.stack.currentIndex()
+        # An unmapped name falls back to page 0, so a duplicate here means a
+        # route silently sends the operator somewhere they did not ask for.
+        self.assertEqual(sorted(landed.values()), list(range(len(routes))), landed)
+
+
 if __name__ == "__main__":
     unittest.main()
