@@ -119,11 +119,11 @@
 </nav>
 
 <section class="hero">
-    <div class="badge"><span class="dot"></span> v1.0.19 — Latest Release</div>
+    <div class="badge"><span class="dot"></span> v1.0.20 - Latest Release</div>
     <h1>Professional Mobile<br>Digital Forensics</h1>
     <p>Standalone desktop toolkit for Android device forensic analysis. 5-stage forensic workflow, 24 artifact loaders, selectable Raw (dd) / ZIP image output, court-ready reporting. Single .exe, no installation.</p>
     <div class="hero-btns">
-        <a class="btn btn-primary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.19/DroidForenX.exe" download>
+        <a class="btn btn-primary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.20/DroidForenX.exe" download>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Download DroidForenX.exe
         </a>
@@ -165,6 +165,11 @@
             <div class="feature-icon" style="background:rgba(34,197,94,0.15);color:var(--green)">&#128229;</div>
             <h3>Data Acquisition</h3>
             <p>5-stage pipeline: SMS, calls, contacts, social media, deleted files, documents, emails, browser data. Imaging output is selectable - Raw (dd) segments or ZIP - with per-image hashing and verification.</p>
+        </div>
+        <div class="feature">
+            <div class="feature-icon" style="background:rgba(20,184,166,0.15);color:#2dd4bf">&#128179;</div>
+            <h3>SIM Forensics</h3>
+            <p>Reads the UICC through the handset: every slot and its state, carrier and network code, ICCID and IMSI per subscription, and ADN contacts read from the card they live on. Android's redaction of identifier tails is stated in the record, not padded over.</p>
         </div>
         <div class="feature">
             <div class="feature-icon" style="background:rgba(245,158,11,0.15);color:var(--orange)">&#128269;</div>
@@ -239,13 +244,13 @@
             </div>
             <div class="info-card">
                 <div class="label">Version</div>
-                <div class="value">v1.0.19</div>
+                <div class="value">v1.0.20</div>
             </div>
         </div>
 
         <h3 style="margin-bottom:12px">SHA-256 Hash</h3>
         <div class="hash-box">
-            <code id="hash">e395b76898f8d4c1c63168140dfec7dc7524b92d520002702ae0d10eeb64c856</code>
+            <code id="hash">07ac17139335c93cd5348305c6ecf68c203e49022b328623eb25afdbc6230d64</code>
             <button class="copy-btn" onclick="copyHash()">Copy Hash</button>
         </div>
 
@@ -287,11 +292,11 @@
 </section>
 
 <footer>
-    <p>DroidForenX v1.0.19 &middot; Built by <a href="https://github.com/tecxe" target="_blank">tecxe</a> &middot; <a href="https://github.com/tecxe/DroidForenX" target="_blank">Source on GitHub</a></p>
+    <p>DroidForenX v1.0.20 &middot; Built by <a href="https://github.com/tecxe" target="_blank">tecxe</a> &middot; <a href="https://github.com/tecxe/DroidForenX" target="_blank">Source on GitHub</a></p>
 </footer>
 
 <script>
-const EXPECTED_HASH = 'e395b76898f8d4c1c63168140dfec7dc7524b92d520002702ae0d10eeb64c856';
+const EXPECTED_HASH = '07ac17139335c93cd5348305c6ecf68c203e49022b328623eb25afdbc6230d64';
 
 function copyHash() {
     navigator.clipboard.writeText(EXPECTED_HASH).then(() => {

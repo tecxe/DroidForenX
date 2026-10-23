@@ -108,6 +108,9 @@ python -m unittest discover -s desktop/tests -t .
 
 ![Test suite finishing with 175 tests passed and one skipped](docs/images/tests.png)
 
+The run above was captured on v1.0.19. The v1.0.20 suite is 199 tests with one
+skip — the SIM module added 23, the startup regression test added one.
+
 ---
 
 ## The honesty guarantee
