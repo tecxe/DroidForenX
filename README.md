@@ -13,8 +13,8 @@ copy, and records an append-only chain of custody for every action.
 >
 > | Claim | Status |
 > |---|---|
-> | Evidence preservation, hashing, custody, tamper detection | **Tested** — 22 automated tests, no device needed |
-> | RAW / ZIP image output | **Tested** - writers, recording and the Create Image dialog, no device needed |
+> | Evidence preservation, hashing, custody, tamper detection | **Tested** - 27 automated tests, no device needed |
+> | RAW / ZIP image output, including streamed ZIP for logical images | **Tested** - writers, recording and the Create Image dialog, no device needed |
 > | 24 acquisition loaders implemented | **Code complete** |
 > | Device-verified loaders | **14 of 24** |
 > | Root-gated, reported `NOT_ACCESSIBLE` | **10 of 24** |
@@ -497,7 +497,7 @@ can be reproduced by anyone. `test_reproducible_build.py` compares the installed
 environment against the lock, and the full two-build byte comparison runs only
 with `DROIDFORENX_SLOW_TESTS=1`.
 
-165 tests, no device required. They cover the properties that matter:
+175 tests, no device required. They cover the properties that matter:
 
 - an acquired artifact survives being read (the original bug was that 11
   loaders deleted evidence after parsing)
