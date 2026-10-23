@@ -44,7 +44,7 @@ copy, and records an append-only chain of custody for every action.
 ## Screenshots
 
 Every frame below is the running application, not a mock-up, captured on
-**21 October 2026** with a **TECNO KM5** (Android 15 / API 35, unrooted)
+**23 October 2026** with a **TECNO KL6** (Android 14 / API 34, unrooted)
 attached over ADB. The case is a throwaway demonstration case; the
 artifact counts, contacts, messages and calls are read from the phone. Click an
 image to open it at full size.
@@ -59,10 +59,11 @@ agency and status. A case is the container for sessions, images and reports.
 
 ![Case management table showing an open demonstration case](docs/images/case-management.png)
 
-**Device connection** — model, Android version, build fingerprint, serial,
-storage and root state, read over ADB.
+**Device connection** — scan ADB for attached handsets and see each one's model
+and serial before identification; the log underneath keeps the exact command
+that produced the result.
 
-![Device connection page showing a TECNO KM5 connected](docs/images/device-connection.png)
+![Device connection page showing a TECNO KL6 detected](docs/images/device-connection.png)
 
 **Acquisition** — pick an extraction level and the loaders to run. Level 1 is
 logical (contacts, SMS, calls, calendar, app data, ADB backup); Level 2 adds
@@ -71,16 +72,18 @@ shared storage and carving.
 ![Acquisition page with the Level 1 logical profile selected](docs/images/acquisition.png)
 
 **Artifact viewer** — what came back, grouped by app and category. This frame
-was taken against the phone: 8165 SMS, 588 calls and 1110 contacts in one pass.
+was taken against the phone: 42,763 artifacts in one pass, including 860 SMS,
+1,403 calls and 2,249 contacts.
 
 ![Artifact viewer reading messages, calls and contacts from the device](docs/images/artifact-viewer.png)
 
-**Create Image** — image a folder that acquisition already produced. The source
-is the preserved case copy, not the live phone, so the archive is made from
-evidence that was hashed when it was acquired. The ZIP gets its own hash and
-sidecar, and the original files are left untouched.
+**Create Image** — choose the source (connected device, preserved case folder or
+the logical `/sdcard` view), then the output: byte-for-byte Raw (dd) segments or
+a streamed ZIP, with segment size, hash algorithm and an optional re-read
+verification pass. The dialog reads the partition table while you set it up, so
+the device layout is in front of you before anything is committed.
 
-![Create Image dialog archiving an acquired case folder as a ZIP](docs/images/create-image.png)
+![Create Image dialog configured for Raw output from a connected device](docs/images/create-image.png)
 
 **Reporting** — a plain-English, court-ready report built from the case's
 preserved artifacts and chain of custody.
