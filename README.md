@@ -62,7 +62,7 @@ agency and status. A case is the container for sessions, images and reports.
 **Device connection** — model, Android version, build fingerprint, serial,
 storage and root state, read over ADB.
 
-![Device connection page showing a TECNO KL6 connected](docs/images/device-connection.png)
+![Device connection page showing a TECNO KM5 connected](docs/images/device-connection.png)
 
 **Acquisition** — pick an extraction level and the loaders to run. Level 1 is
 logical (contacts, SMS, calls, calendar, app data, ADB backup); Level 2 adds
