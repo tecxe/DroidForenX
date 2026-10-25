@@ -17,6 +17,7 @@ from .pages.report_page import ReportPage
 from .pages.browse_page import BrowsePage
 from .pages.artifacts_page import ArtifactsPage
 from .pages.sim_page import SimForensicsPage
+from .widgets.assistant_drawer import AssistantOverlay
 from ..core.adb_manager import list_devices, get_device_info
 from ..core.database import get_db, init_db, audit_log
 from .. import __version__
@@ -242,6 +243,13 @@ class MainWindow(QMainWindow):
 
         self._navigate_to(0)
 
+        # Floating assistant. A child of the window rather than a page: it has to
+        # be reachable from wherever the examiner already is, and it deliberately
+        # has no sidebar entry, so the navigation still reads as a workflow.
+        self.assistant = AssistantOverlay(self)
+        self.assistant.attach_shortcut(self)
+        self.assistant.set_case_id(self._current_case_id)
+
     def _setup_menu(self):
         menubar = self.menuBar()
         menubar.setStyleSheet("""
@@ -424,6 +432,9 @@ class MainWindow(QMainWindow):
 
     def _on_case_selected(self, case_id: str):
         self._current_case_id = case_id
+        # The assistant's transcript is per case; switching cases switches
+        # notebooks, and it never inherits the previous case's conversation.
+        self.assistant.set_case_id(case_id)
         conn = get_db()
         case = conn.execute("SELECT * FROM cases WHERE id=?", (case_id,)).fetchone()
         conn.close()

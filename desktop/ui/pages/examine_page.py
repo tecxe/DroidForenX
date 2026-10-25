@@ -143,7 +143,11 @@ class ExaminePage(QWidget):
         # Progress
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
-        self.progress_bar.setFixedHeight(8)
+        self.progress_bar.setFixedHeight(14)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("%p%")
         layout.addWidget(self.progress_bar)
 
         self.progress_label = QLabel("")
@@ -204,9 +208,11 @@ class ExaminePage(QWidget):
 
     def _on_progress(self, current, total):
         try:
-            val = int(int(current) / int(total) * 100)
-            self.progress_bar.setValue(val)
-            self.progress_label.setText(f"Module {current}/{total}...")
+            done, steps = int(current), int(total)
+            pct = min(99, int(done / steps * 100)) if steps > 0 else 0
+            self.progress_bar.setValue(pct)
+            self.progress_label.setText(
+                f"{pct}%  \u00b7  module {done} of {steps}")
         except (ValueError, ZeroDivisionError):
             pass
 

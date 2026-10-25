@@ -361,6 +361,119 @@ def open_logical_reader(serial: str, adb_path=None, root: str = LOGICAL_ROOT) ->
     return ProcessReader(logical_stream_argv(adb_path, serial, root), size=0)
 
 
+def _parse_du_bytes(output: str) -> int:
+    """Bytes from ``du -s -k`` output (KiB, first field), or 0.
+
+    Only the summary line is wanted; any per-path warnings have already been
+    discarded by the caller's redirection.
+    """
+    for line in reversed((output or "").splitlines()):
+        parts = line.split()
+        if len(parts) >= 2 and parts[0].isdigit():
+            return int(parts[0]) * 1024
+        if len(parts) == 1 and parts[0].isdigit():
+            return int(parts[0]) * 1024
+    return 0
+
+
+def _parse_stat_f_bytes(output: str) -> int:
+    """Bytes in use from ``stat -f`` output, or 0.
+
+    Toybox and GNU both print the numbers as separate tokens --
+    ``Blocks: Total: 27592696  Free: 4331984`` -- so the key and its value have
+    to be read as a pair. Splitting on ``:`` finds only an empty string, which is
+    what a previous version of this parser did, silently returning 0.
+
+    Used only as a fallback: on Android ``/sdcard`` is a FUSE view of the
+    *userdata* filesystem, so this figure includes every app's private data and
+    is an over-estimate for the tar. It still beats an indeterminate bar.
+    """
+    blocks = free = bsize = 0
+    for line in (output or "").splitlines():
+        low = line.lower()
+        tokens = line.replace("\t", " ").split()
+        if "block size" in low:
+            for token in tokens:
+                if token.isdigit():
+                    bsize = int(token)
+                    break
+            continue
+        # Only the "Blocks:" line carries the block counts. The "Inodes:" line
+        # has the same Total/Free shape and must not overwrite them.
+        if not low.lstrip().startswith("blocks"):
+            continue
+        for index, token in enumerate(tokens):
+            key = token.lower().rstrip(":")
+            if key not in ("total", "free") or index + 1 >= len(tokens):
+                continue
+            try:
+                value = int(tokens[index + 1])
+            except ValueError:
+                continue
+            if key == "total":
+                blocks = value
+            else:
+                free = value
+    if bsize <= 0 or blocks <= 0:
+        return 0
+    return max(0, blocks - free) * bsize
+
+
+def logical_size_estimate(serial: str, shell: Optional[ShellRunner] = None) -> int:
+    """Best-effort byte size of ``/sdcard`` for progress reporting.
+
+    Measurement was the hard part, and both obvious answers are wrong on the
+    TECNO KL6 (Android 14), which is why this function is written the way it is:
+
+    * ``du -s -k /sdcard`` returns ``4`` -- toybox refuses to descend the FUSE
+      root unless the path ends in a slash. ``du -s -k /sdcard/`` returns the
+      real figure (34.9 GiB on that handset).
+    * ``stat -f /sdcard`` describes the *userdata* filesystem, not the emulated
+      storage view, so it reports 95 GiB used. It is kept only as a fallback and
+      is deliberately second.
+
+    Returns 0 when neither works, which the UI renders as an indeterminate bar
+    rather than a fake percentage.
+    """
+    if shell is None:
+        from .. import adb_manager as adb
+        def shell(serial, command, timeout=180):  # noqa: F811 - default runner
+            return adb.adb_shell(serial, command, timeout=timeout)
+    # Walking 34 GiB of files over FUSE takes tens of seconds; the default 30 s
+    # shell timeout aborted the measurement and silently fell back to the
+    # misleading stat -f figure.
+    try:
+        ok, out = shell(serial, "du -s -k /sdcard/ 2>/dev/null", timeout=180)
+    except TypeError:
+        # A caller-supplied runner may not accept the timeout keyword.
+        try:
+            ok, out = shell(serial, "du -s -k /sdcard/ 2>/dev/null")
+        except Exception:
+            ok, out = False, ""
+    except Exception:
+        ok, out = False, ""
+    if out:
+        # du exits non-zero whenever it meets a single permission-denied path
+        # (there is always one on /sdcard/Android/data), and still prints the
+        # correct summary line. Requiring ok here silently discarded the only
+        # measurement that works.
+        total = _parse_du_bytes(out)
+        if total > 0:
+            return total
+    try:
+        ok, out = shell(serial, "stat -f /sdcard", timeout=30)
+    except TypeError:
+        try:
+            ok, out = shell(serial, "stat -f /sdcard")
+        except Exception:
+            return 0
+    except Exception:
+        return 0
+    if not ok or not out:
+        return 0
+    return _parse_stat_f_bytes(out)
+
+
 def folder_source(path) -> Path:
     """Validate a case folder and return it as a ``Path``."""
     folder = Path(path)

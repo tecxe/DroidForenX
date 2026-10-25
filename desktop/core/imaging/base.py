@@ -124,6 +124,11 @@ class ImageRequest:
     segment_size: int = 2 * 1024 ** 3
     #: Re-read the finished image and confirm it hashes to the same value.
     verify: bool = True
+    #: Expected output size in bytes, used only to show a percentage when the
+    #: source cannot report its own size (a tar stream from ``/sdcard``). ``0``
+    #: means unknown, and the caller falls back to an indeterminate bar rather
+    #: than inventing a number.
+    expected_bytes: int = 0
     metadata: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -146,6 +151,8 @@ class ImageRequest:
             )
         if not isinstance(self.segment_size, int) or self.segment_size < 0:
             raise ValueError("segment_size must be a non-negative integer")
+        if not isinstance(self.expected_bytes, int) or self.expected_bytes < 0:
+            raise ValueError("expected_bytes must be a non-negative integer")
         if self.image_format == "raw" and 0 < self.segment_size < CHUNK_SIZE:
             # A segment smaller than the read block would still work, but it
             # means the operator typed something wrong; fail loudly.

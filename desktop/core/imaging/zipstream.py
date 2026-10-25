@@ -113,7 +113,9 @@ class ZipStreamImageWriter(ImageWriter):
                                 digest.update(block)
                                 written += len(block)
                                 total_read += len(block)
-                                emit(progress, total_read, 0, f"packing {member_name}")
+                                emit(progress, total_read,
+                                     int(getattr(request, "expected_bytes", 0) or 0),
+                                     f"packing {member_name}")
                         inventory.append({
                             "path": member_name,
                             "size": written,

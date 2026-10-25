@@ -103,13 +103,31 @@ preserved artifacts and chain of custody.
 UI. No device is needed to run it:
 
 ```powershell
-python -m unittest discover -s desktop/tests -t .
+python -m unittest `
+  desktop.tests.test_evidence_store `
+  desktop.tests.test_evidence_workbook `
+  desktop.tests.test_forensic_engine `
+  desktop.tests.test_imaging `
+  desktop.tests.test_image_registry `
+  desktop.tests.test_create_image_dialog `
+  desktop.tests.test_progress_panel `
+  desktop.tests.test_ai_assistant `
+  desktop.tests.test_assistant_drawer `
+  desktop.tests.test_theme `
+  desktop.tests.test_main_window `
+  desktop.tests.test_ui_export `
+  desktop.tests.test_reproducible_build -v
 ```
+
+`discover` is not used here on purpose: `desktop/tests/` also contains three
+manual device probes (`test_full_adb.py`, `test_quick.py`, `test_deep.py`) that
+run on import and need a connected handset, not a test runner.
 
 ![Test suite finishing with 175 tests passed and one skipped](docs/images/tests.png)
 
-The run above was captured on v1.0.19. The v1.0.20 suite is 199 tests with one
-skip — the SIM module added 23, the startup regression test added one.
+The run above was captured on v1.0.19. The v1.0.21 suite is 260 tests with one
+skip — 18 for percentage progress, 24 for the assistant client, 16 for the
+drawer, and the rest accumulated across v1.0.20 and v1.0.21.
 
 ---
 
@@ -382,6 +400,28 @@ Segment size (default 2 GiB, or a single file), compression and hash algorithm
 are selectable, and the image is re-read and re-hashed after writing unless
 verification is turned off.
 
+#### Progress is a percentage, including on the long path
+
+Every imaging run shows a number: `42%`, the bytes written against the total,
+the current rate and an estimate of what is left. Three details make that
+honest rather than decorative.
+
+The logical stream has no length of its own — a tar on stdout cannot say how big
+it will be — so it is measured first with `du -s -k /sdcard/`. Two other
+measurements look right and are not: `du -s -k /sdcard` answers `4` on a TECNO
+KL6 (toybox resolves the FUSE mount as a single entry without the trailing
+slash), and `stat -f /sdcard` reports the whole *userdata* filesystem — 95 GiB
+where the storage actually holds 35 GiB. The device is asked the question that
+works, and if it cannot be answered the bar says so instead of inventing a
+denominator: it goes indeterminate and reports bytes written.
+
+`du` exits non-zero whenever it meets one unreadable path, and there is always
+one under `/sdcard/Android/data`; the summary line it prints is still correct,
+so a non-zero exit is not treated as failure. The bar never moves backwards when
+a writer retries a chunk, never reads 100% before the writer says it is done, and
+freezes where it stopped on failure or cancellation rather than resetting to
+zero and implying nothing happened.
+
 The **Logical (/sdcard)** tab is the imaging path that works on an unrooted
 handset: the ADB shell cannot open block devices there, but it can read
 `/sdcard`, so user storage is streamed as a tar archive and written through the
@@ -490,29 +530,16 @@ State these in any report; they are properties of Android, not bugs to be
 
 ## Testing
 
-```powershell
-python -m unittest `
-  desktop.tests.test_evidence_store `
-  desktop.tests.test_evidence_workbook `
-  desktop.tests.test_forensic_engine `
-  desktop.tests.test_imaging `
-  desktop.tests.test_image_registry `
-  desktop.tests.test_create_image_dialog `
-  desktop.tests.test_theme `
-  desktop.tests.test_main_window `
-  desktop.tests.test_ui_export `
-  desktop.tests.test_reproducible_build -v
-```
+The module list in [Tests](#tests) above is the full suite. A release build
+should install from `requirements-lock.txt` rather than `requirements.txt`. The
+lock pins every dependency including the transitive ones, and `build.py` takes
+`SOURCE_DATE_EPOCH` from the HEAD commit, so two builds of the same commit
+produce a byte-identical executable and the published SHA-256 can be reproduced
+by anyone. `test_reproducible_build.py` compares the installed environment
+against the lock, and the full two-build byte comparison runs only with
+`DROIDFORENX_SLOW_TESTS=1`.
 
-A release build should install from `requirements-lock.txt` rather than
-`requirements.txt`. The lock pins every dependency including the transitive ones,
-and `build.py` takes `SOURCE_DATE_EPOCH` from the HEAD commit, so two builds of
-the same commit produce a byte-identical executable and the published SHA-256
-can be reproduced by anyone. `test_reproducible_build.py` compares the installed
-environment against the lock, and the full two-build byte comparison runs only
-with `DROIDFORENX_SLOW_TESTS=1`.
-
-175 tests, no device required. They cover the properties that matter:
+260 tests, no device required. They cover the properties that matter:
 
 - an acquired artifact survives being read (the original bug was that 11
   loaders deleted evidence after parsing)
@@ -638,24 +665,42 @@ already read.
 
 ---
 
-## AI Assist — **not implemented**
+## Assistant
 
-`.env.example` contains keys for an optional AI assistance layer
-(`OPENROUTER_API_KEY`, `DROIDFORENX_AI_*`). **None of it is built yet.** There
-is no code in this repository that reads those variables, calls OpenRouter, or
-produces AI output. They are listed so the intended design is on record.
+A floating button in the bottom-right corner (`Ctrl+Shift+A`) opens a drawer that
+asks OpenRouter a question. It is deliberately not in the sidebar: the navigation
+is a workflow — case, device, seizure, acquisition, examination, report — and a
+chat box is not a stage of that workflow. The button is there from every page.
 
-If built, the rules it must follow are fixed in advance:
+Two models, in order: `google/gemma-3-4b-it` and
+`meta-llama/llama-3.1-8b-instruct`. The reply streams into the transcript as it
+is generated, `Stop` abandons it, and a reply that came from the second model is
+**labelled** as the fallback rather than presented as the first model's work.
+Rate limits, upstream errors and timeouts fall through to the next model; a bad
+key (401) and an exhausted balance (402) are raised as themselves, because
+falling back would hide the actual problem behind a second failure.
 
-- AI output is **never** evidence and **never** enters the evidence chain. It
-  lives in a separate store and is excluded from the evidentiary findings.
-- Every AI call records model, prompt hash, parameters, timestamp and the
-  artifact IDs it was given, so any AI-derived statement is traceable to source.
-- PII (numbers, emails, names) is redacted locally before anything leaves the
-  host, and AI features are off by default and opt-out per case.
-- A human examiner confirms anything AI-derived before it appears in a report.
+What leaves the machine is what you type. No case data, artifact row, file path
+or device detail is attached automatically. The assistant's transcript is stored
+per case as JSONL under `%USERPROFILE%\.droidforenx\assistant\<case_id>.jsonl` —
+in the examiner's profile, **not** in the case folder, so it can never be
+mistaken for an exhibit or swept into a disclosure. With no case open the
+conversation goes to `unassigned.jsonl`; selecting a case switches notebooks, and
+`Clear` deletes only the open case's history.
 
-Deleting the `DROIDFORENX_AI_*` lines changes nothing about how the tool works.
+The key is entered once under the drawer's gear icon and stored DPAPI-encrypted
+at `%LOCALAPPDATA%\DroidForenX\assistant.key`, so the file is useless on another
+Windows account or machine. `OPENROUTER_API_KEY` in the environment takes
+precedence when set. The key is never written to the database, the case folder or
+a log, and the settings dialog shows it masked. "Save and test" verifies it
+against OpenRouter and reports the balance.
+
+The transcript carries a permanent footer: *AI-generated. Verify anything before
+it goes into a report or a court statement.* Nothing the assistant says is
+evidence, it is not written into the evidence chain, and it does not appear in
+the findings. The client is standard library only — `urllib` and `json` — so the
+frozen build is unchanged in size and dependencies.
+
 
 ---
 
@@ -663,15 +708,18 @@ Deleting the `DROIDFORENX_AI_*` lines changes nothing about how the tool works.
 
 Optional `.env` (gitignored; see `.env.example`). All acquisition, hashing,
 custody and reporting features work **without** any `.env` file — configuration
-is only needed for optional AI assistance, which is deliberately kept outside the
-evidence chain and does not affect acquisition results.
+is only needed to point at a different database or adb binary, or to hand the
+assistant a key without storing one.
 
 ```powershell
 DROIDFORENX_EVIDENCE_ROOT=evidence
-DROIDFORENX_AI_ENABLED=false
-DROIDFORENX_AI_MODEL=meta-llama/llama-3.1-8b-instruct
-DROIDFORENX_AI_REDACT=true
+# Optional: read by the assistant instead of the encrypted key store.
+OPENROUTER_API_KEY=sk-or-v1-...
 ```
+
+The model chain is fixed in code (`desktop/core/ai_assistant.py`) rather than
+configurable, so a build that answers in a report is always the build that names
+the same two models.
 
 ### Theme
 

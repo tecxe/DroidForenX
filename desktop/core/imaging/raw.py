@@ -37,7 +37,12 @@ class RawImageWriter(ImageWriter):
         request.dest_dir.mkdir(parents=True, exist_ok=True)
 
         multi = request.segment_size > 0
-        total_size = int(getattr(source, "size", 0) or 0)
+        # A reader that knows its own size (a block device) is authoritative. A
+        # tar stream does not, so the operator-facing estimate is used instead --
+        # only ever for the percentage, never for the free-space check unless it
+        # came from the source.
+        source_size = int(getattr(source, "size", 0) or 0)
+        total_size = source_size or int(request.expected_bytes or 0)
 
         # Never overwrite a previous image: an evidence file that silently
         # replaces another one destroys the chain of custody, so refuse instead
@@ -50,12 +55,15 @@ class RawImageWriter(ImageWriter):
                 "different base name so the existing image is not overwritten")
 
         # Fail before moving bytes when the destination cannot hold the image.
-        # Only possible for sources whose size is known (a physical partition).
+        # For a block device this is exact. For a tar stream it is an estimate of
+        # the storage in use, which tar can slightly exceed (per-file headers,
+        # hard-linked files stored twice), so it is a guard rather than a promise.
         if total_size:
             free = shutil.disk_usage(request.dest_dir).free
             if free < total_size:
+                what = "the source is" if source_size else "the source is estimated at"
                 raise ValueError(
-                    f"not enough free space in {request.dest_dir}: the source is "
+                    f"not enough free space in {request.dest_dir}: {what} "
                     f"{total_size / 1024 ** 3:.1f} GiB, only {free / 1024 ** 3:.1f} GiB free")
 
         image_digest = new_hash(request.hash_algo)

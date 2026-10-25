@@ -456,6 +456,10 @@ SWATCH = {
     "#94a3b8": "#475569",
     "#64748b": "#55657a",
     "#475569": "#94a3b8",
+    # speaker labels in the assistant transcript: light blue for the operator,
+    # green for the model, both darkened until they hold on a white panel
+    "#93c5fd": "#1d4ed8",
+    "#34d399": "#047857",
     # accents, each darkened one step so it holds up on white
     "#2563eb": "#2563eb",  # primary already clears AA on white; kept identical
     "#3b82f6": "#2563eb",

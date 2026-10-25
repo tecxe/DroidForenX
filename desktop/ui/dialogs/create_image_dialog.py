@@ -29,6 +29,7 @@ from ...core.imaging import (
     sources,
 )
 from ...core.imaging.base import ImageRequest
+from ...ui.widgets.progress_panel import ProgressPanel
 
 #: Segment sizes offered in the dialog, ``(label, bytes)``.
 SEGMENT_CHOICES = (
@@ -124,14 +125,14 @@ class ImageWorker(QThread):
     """Write one image, then record it. Never touches widgets from ``run``."""
 
     log = pyqtSignal(str, str)
-    progress = pyqtSignal(int, int)
+    progress = pyqtSignal(int, int, str)
     finished_ok = pyqtSignal(object)
     failed = pyqtSignal(str)
     cancelled = pyqtSignal()
 
     def __init__(self, request: ImageRequest, source, source_kind: str, case_id: str,
                  session_id: str = "", source_factory=None, source_type: str = "",
-                 parent=None):
+                 serial: str = "", parent=None):
         super().__init__(parent)
         self._request = request
         self._source = source
@@ -140,9 +141,11 @@ class ImageWorker(QThread):
         self._session_id = session_id
         self._source_factory = source_factory
         self._source_type = source_type
+        self._serial = serial
         self._cancelled = False
         self._reader = None
         self._stage = ""
+        self._expected_total = 0
 
     def cancel(self):
         self._cancelled = True
@@ -156,7 +159,7 @@ class ImageWorker(QThread):
         # while one sat on disk.
         if self._cancelled:
             raise _Cancelled()
-        self.progress.emit(done, total)
+        self.progress.emit(done, total, stage)
         if stage != self._stage:
             self._stage = stage
             self.log.emit(f"  {stage}", "info")
@@ -164,6 +167,31 @@ class ImageWorker(QThread):
     def run(self):
         try:
             if self._source_kind == "stream":
+                if self._source_type == "logical":
+                    # A tar stream cannot report its own length, so it is
+                    # measured before the first byte moves. This is what turns
+                    # the forty-minute logical image from a spinning bar into a
+                    # percentage. When the probe fails the count stays 0 and the
+                    # bar honestly stays indeterminate.
+                    self.log.emit("Sizing source (du /sdcard/)...", "info")
+                    self.progress.emit(0, 0, "Sizing source...")
+                    est = 0
+                    try:
+                        if self._serial:
+                            est = sources.logical_size_estimate(self._serial)
+                    except Exception:
+                        est = 0
+                    self._expected_total = est
+                    if est > 0:
+                        self._request.expected_bytes = est
+                        self.log.emit(
+                            f"Source size estimate: {est:,} bytes "
+                            f"({est / 1024 ** 3:.2f} GiB)", "info")
+                        self.progress.emit(0, est, "Streaming /sdcard")
+                    else:
+                        self.log.emit(
+                            "Could not size the source; progress will show bytes "
+                            "written without a percentage.", "warning")
                 self._reader = self._source_factory()
                 self.log.emit(f"Streaming {self._request.source_label}...", "info")
                 try:
@@ -443,8 +471,8 @@ class CreateImageDialog(QDialog):
     def _build_progress_group(self) -> QGroupBox:
         group = QGroupBox("Progress")
         layout = QVBoxLayout(group)
-        self.progress_bar = QProgressBar()
-        layout.addWidget(self.progress_bar)
+        self.progress_panel = ProgressPanel()
+        layout.addWidget(self.progress_panel)
         self.console = QTextEdit()
         self.console.setReadOnly(True)
         self.console.setMinimumHeight(150)
@@ -689,15 +717,15 @@ class CreateImageDialog(QDialog):
 
         self.console.clear()
         self.btn_start.setEnabled(False)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
+        self.progress_panel.reset()
+        self.progress_panel.set_indeterminate("Preparing")
         self._log(f"Creating {request.image_format} image '{request.base_name}' "
                   f"in {request.dest_dir}", "info")
 
         self._worker = ImageWorker(request, source, self.source_kind, self._case_id,
                                    self._session_id, source_factory=factory,
                                    source_type="logical" if self.stream_kind == "logical" else "",
-                                   parent=self)
+                                   serial=self._serial, parent=self)
         self._worker.log.connect(self._log)
         self._worker.progress.connect(self._on_progress)
         self._worker.finished_ok.connect(self._on_finished)
@@ -705,15 +733,11 @@ class CreateImageDialog(QDialog):
         self._worker.cancelled.connect(self._on_cancelled)
         self._worker.start()
 
-    def _on_progress(self, done: int, total: int):
-        if total > 0:
-            self.progress_bar.setValue(min(int(done / total * 100), 100))
-        else:
-            self.progress_bar.setRange(0, 0)
+    def _on_progress(self, done: int, total: int, stage: str = ""):
+        self.progress_panel.set_progress(done, total, stage)
 
     def _on_finished(self, payload):
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(100)
+        self.progress_panel.finish()
         self.btn_start.setEnabled(True)
         info = payload["info"]
         if info["verification_status"] == "failed":
@@ -732,13 +756,13 @@ class CreateImageDialog(QDialog):
             f"Recorded status: {info['status']}")
 
     def _on_failed(self, message):
-        self.progress_bar.setRange(0, 100)
+        self.progress_panel.stop_with("Failed")
         self.btn_start.setEnabled(True)
         self._log(f"Failed: {message}", "error")
         QMessageBox.critical(self, "Image failed", message)
 
     def _on_cancelled(self):
-        self.progress_bar.setRange(0, 100)
+        self.progress_panel.stop_with("Cancelled")
         self.btn_start.setEnabled(True)
         self._log("Cancelled. No image was written.", "warning")
 

@@ -1825,12 +1825,23 @@ class AcquirePage(QWidget):
         # Progress
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
-        self.progress_bar.setFixedHeight(10)
+        self.progress_bar.setFixedHeight(14)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("%p%")
         layout.addWidget(self.progress_bar)
 
         self.progress_label = QLabel("")
         self.progress_label.setStyleSheet("font-size: 12px; color: #64748b; background: transparent; border: none;")
         layout.addWidget(self.progress_label)
+
+        # The acquisition runs a fixed list of phases; tracking the index is what
+        # lets one bar describe the whole job instead of each phase separately.
+        self._phase_total = 9
+        self._phase_index = 0
+        self._phase_name = ""
+        self._phase_started = False
 
         # Results
         self.results_frame = QFrame()
@@ -1900,6 +1911,9 @@ class AcquirePage(QWidget):
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         self.progress_label.setText("Starting acquisition...")
+        self._phase_index = 0
+        self._phase_name = ""
+        self._phase_started = False
         self.results_frame.setVisible(False)
         self.console.clear()
 
@@ -1918,14 +1932,28 @@ class AcquirePage(QWidget):
 
     def _on_progress(self, current, total):
         try:
-            val = int(int(current) / int(total) * 100)
-            self.progress_bar.setValue(min(val, 99))
-            self.progress_label.setText(f"Processing {current} of {total}...")
+            done, steps = int(current), int(total)
+            # One percentage for the whole acquisition, not one per phase: the
+            # operator asked "how far through the job", and nine phase-local
+            # bars that each restart at zero answer a different question.
+            within = (done / steps) if steps > 0 else 0.0
+            overall = ((max(0, self._phase_index - 1) + within) / self._phase_total) * 100
+            self.progress_bar.setValue(min(99, int(overall)))
+            self.progress_label.setText(
+                f"{int(overall)}%  \u00b7  phase {self._phase_index} of "
+                f"{self._phase_total}  \u00b7  {self._phase_name} "
+                f"({done} of {steps})")
         except (ValueError, ZeroDivisionError):
             pass
 
     def _on_phase(self, phase: str):
-        self.progress_label.setText(f"Phase: {phase}...")
+        self._phase_index = min(self._phase_index + 1, self._phase_total)
+        self._phase_name = phase
+        self._phase_started = True
+        pct = int((self._phase_index - 1) / self._phase_total * 100)
+        self.progress_bar.setValue(pct)
+        self.progress_label.setText(
+            f"{pct}%  \u00b7  phase {self._phase_index} of {self._phase_total}  \u00b7  {phase}")
 
     def _on_file(self, name, size):
         self.console.log(f"  ✓ {name} ({size:,} bytes)", "success")
