@@ -125,9 +125,9 @@ run on import and need a connected handset, not a test runner.
 
 ![Test suite finishing with 175 tests passed and one skipped](docs/images/tests.png)
 
-The run above was captured on v1.0.19. The v1.0.21 suite is 260 tests with one
+The run above was captured on v1.0.19. The v1.0.22 suite is 269 tests with one
 skip — 18 for percentage progress, 24 for the assistant client, 16 for the
-drawer, and the rest accumulated across v1.0.20 and v1.0.21.
+drawer, 9 for the sidebar, and the rest accumulated across v1.0.20 and v1.0.21.
 
 ---
 
@@ -539,7 +539,7 @@ by anyone. `test_reproducible_build.py` compares the installed environment
 against the lock, and the full two-build byte comparison runs only with
 `DROIDFORENX_SLOW_TESTS=1`.
 
-260 tests, no device required. They cover the properties that matter:
+269 tests, no device required. They cover the properties that matter:
 
 - an acquired artifact survives being read (the original bug was that 11
   loaders deleted evidence after parsing)
@@ -720,6 +720,22 @@ OPENROUTER_API_KEY=sk-or-v1-...
 The model chain is fixed in code (`desktop/core/ai_assistant.py`) rather than
 configurable, so a build that answers in a report is always the build that names
 the same two models.
+
+### Sidebar
+
+The navigation column folds away from `View ▸ Sidebar`, with `Ctrl+B`, or with
+the 12 px grip that sits between the column and the content. The grip stays on
+screen in both states and points at where the column will go, so a hidden sidebar
+never leaves the operator without a way back; a status message on the first hide
+says the same. The choice is stored in `QSettings` under `ui/sidebar_visible` and
+is restored on the next launch.
+
+The navigation list lives in a scroll area. Eleven entries and three section
+headers do not fit an 800 px window, and the previous layout paid for that by
+squeezing the device footer until its text was sliced in half at the bottom edge.
+Scrolling the list keeps the footer intact; the footer labels also carry
+`padding: 0` in their own style rules now, because an inherited section-header
+padding turned an 11 px line into a 31 px box.
 
 ### Theme
 

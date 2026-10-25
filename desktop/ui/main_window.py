@@ -1,8 +1,9 @@
 """Main application window — professional Cellebrite-style sidebar + page stack."""
 from PyQt6.QtWidgets import (QMainWindow, QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-                              QLabel, QPushButton, QStackedWidget, QFrame, QSplitter,
-                              QStatusBar, QMenuBar, QMenu, QMessageBox, QFileDialog)
-from PyQt6.QtCore import Qt, QSize
+                               QLabel, QPushButton, QStackedWidget, QFrame, QSplitter,
+                               QStatusBar, QMenuBar, QMenu, QMessageBox, QFileDialog,
+                               QScrollArea, QToolButton, QSizePolicy)
+from PyQt6.QtCore import Qt, QSize, QSettings
 from PyQt6.QtGui import QIcon, QFont, QAction, QActionGroup
 
 from .theme import MAIN_STYLESHEET, theme
@@ -53,10 +54,13 @@ class MainWindow(QMainWindow):
         self._device_info = None
         self._current_case_id = ""
         self._current_session_id = ""
+        self._settings = None
+        self._sidebar_restored = False
 
         self._setup_ui()
         self._setup_menu()
         self._connect_signals()
+        self._restore_sidebar_state()
 
         self._refresh_stats()
         audit_log("application_started", details="DroidForenX desktop launched")
@@ -113,7 +117,11 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(0)
 
         # ── Sidebar ──
-        sidebar = QWidget()
+        # Stored on self so the View menu can hide it. The navigation lives in a
+        # scroll area: eleven entries plus three section headers overrun a 800 px
+        # window, and the layout used to pay for that by squeezing the device
+        # footer until its text was sliced in half at the bottom edge.
+        self.sidebar = sidebar = QWidget()
         sidebar.setObjectName("sidebar")
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
@@ -130,6 +138,7 @@ class MainWindow(QMainWindow):
         logo_frame.setObjectName("logoFrame")
         logo_frame.setStyleSheet("#logoFrame { padding: 16px; border-bottom: 1px solid #1e293b; }")
         logo_layout = QVBoxLayout(logo_frame)
+        logo_layout.setContentsMargins(16, 14, 16, 12)
         logo_layout.setSpacing(4)
 
         logo_text = QLabel("DROIDFORENX")
@@ -167,18 +176,36 @@ class MainWindow(QMainWindow):
             ]),
         ]
 
+        self.nav_scroll = QScrollArea()
+        self.nav_scroll.setObjectName("navScroll")
+        self.nav_scroll.setWidgetResizable(True)
+        self.nav_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.nav_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.nav_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.nav_scroll.setStyleSheet(
+            "QScrollArea#navScroll { background: transparent; border: none; }"
+            "QScrollArea#navScroll > QWidget > QWidget { background: transparent; }")
+
+        nav_host = QWidget()
+        nav_host.setObjectName("navHost")
+        nav_layout = QVBoxLayout(nav_host)
+        nav_layout.setContentsMargins(0, 0, 0, 0)
+        nav_layout.setSpacing(0)
+
         self.nav_buttons = []
         for section_title, items in nav_items:
             section_label = QLabel(section_title)
-            sidebar_layout.addWidget(section_label)
+            nav_layout.addWidget(section_label)
             for text, index in items:
                 btn = QPushButton(text)
                 btn.setCheckable(True)
                 btn.clicked.connect(lambda checked, idx=index: self._navigate_to(idx))
-                sidebar_layout.addWidget(btn)
+                nav_layout.addWidget(btn)
                 self.nav_buttons.append((btn, index))
 
-        sidebar_layout.addStretch()
+        nav_layout.addStretch()
+        self.nav_scroll.setWidget(nav_host)
+        sidebar_layout.addWidget(self.nav_scroll, 1)
 
         # Device status footer
         # Same trap as the logo: "QFrame { padding: 12px; }" also matches the
@@ -206,6 +233,20 @@ class MainWindow(QMainWindow):
         sidebar_layout.addWidget(self.device_footer)
 
         main_layout.addWidget(sidebar)
+
+        # A 12 px grip between the column and the content is the one element
+        # that stays on screen in both states, so folding the sidebar away can
+        # never leave the operator without a way to bring it back.
+        self.sidebar_grip = QToolButton()
+        self.sidebar_grip.setObjectName("sidebarGrip")
+        self.sidebar_grip.setText("\u2039")
+        self.sidebar_grip.setToolTip("Hide the sidebar (Ctrl+B)")
+        self.sidebar_grip.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.sidebar_grip.setFixedWidth(12)
+        self.sidebar_grip.setSizePolicy(QSizePolicy.Policy.Fixed,
+                                        QSizePolicy.Policy.Expanding)
+        self.sidebar_grip.clicked.connect(self._toggle_sidebar)
+        main_layout.addWidget(self.sidebar_grip)
 
         # ── Content Area ──
         self.stack = QStackedWidget()
@@ -321,6 +362,20 @@ class MainWindow(QMainWindow):
 
         theme.changed.connect(self._sync_theme_actions)
 
+        view_menu.addSeparator()
+
+        # The sidebar is 220 px of navigation over a workflow the examiner
+        # already knows after a day with the tool. Being able to fold it away is
+        # the difference between a 1366-wide laptop that shows a table and one
+        # that shows half of it.
+        self.sidebar_action = QAction("Sidebar", self)
+        self.sidebar_action.setCheckable(True)
+        self.sidebar_action.setChecked(True)
+        self.sidebar_action.setShortcut("Ctrl+B")
+        self.sidebar_action.setStatusTip("Show or hide the navigation sidebar")
+        self.sidebar_action.toggled.connect(self._set_sidebar_visible)
+        view_menu.addAction(self.sidebar_action)
+
         help_menu = menubar.addMenu("Help")
         about_action = QAction("About DroidForenX", self)
         about_action.triggered.connect(self._show_about)
@@ -334,6 +389,106 @@ class MainWindow(QMainWindow):
         """
         for key, action in getattr(self, "_theme_actions", {}).items():
             action.setChecked(theme.mode == key)
+
+    # -- sidebar ------------------------------------------------------------
+
+    def _set_sidebar_visible(self, visible: bool = True) -> None:
+        """Show or hide the navigation column, and remember the choice.
+
+        ``blockSignals`` around the checkbox keeps the menu tick and the button
+        that called this from chasing each other, and the tick is always derived
+        from the column's real state rather than from whichever control was
+        clicked.
+        """
+        visible = bool(visible)
+        self.sidebar.setVisible(visible)
+
+        action = getattr(self, "sidebar_action", None)
+        if action is not None:
+            action.blockSignals(True)
+            action.setChecked(visible)
+            action.blockSignals(False)
+            action.setText("Sidebar" if visible else "Sidebar  (hidden)")
+
+        toggle = getattr(self, "sidebar_grip", None)
+        if toggle is not None:
+            # The arrow always points at where the column will go.
+            toggle.setText("\u2039" if visible else "\u203a")
+            toggle.setToolTip("Hide the sidebar (Ctrl+B)" if visible
+                              else "Show the sidebar (Ctrl+B)")
+
+        settings = self._ui_settings()
+        if settings is not None:
+            try:
+                settings.setValue("ui/sidebar_visible", visible)
+                # Flush now: the value is a UI preference, and losing it because
+                # the process was killed before QSettings' own flush would be a
+                # silly way to reopen with the wrong layout.
+                settings.sync()
+                if settings.status() != QSettings.Status.NoError:
+                    # The store went away underneath us (a cleared key, a policy
+                    # change). Drop the handle so the next call builds a fresh
+                    # one instead of failing silently forever.
+                    self._settings = None
+            except Exception:
+                pass
+
+        # Without this line a hidden sidebar looks like a bug: there is no
+        # button left on screen to bring it back, only a menu the operator has
+        # no reason to open.
+        if not visible:
+            self.statusBar().showMessage(
+                "Sidebar hidden \u2014 Ctrl+B, or View \u25b8 Sidebar, to bring it back.",
+                6000)
+
+    def _toggle_sidebar(self) -> None:
+        self._set_sidebar_visible(not self.sidebar.isVisible())
+
+    #: Complete style strings, not fragments. ``setStyleSheet`` *replaces* the
+    #: previous rule set, so the trimmed versions used to silently drop
+    #: ``padding: 0`` and let the labels fall back to ``#sidebar QLabel``'s
+    #: 16 px/4 px header padding -- a 31 px box for an 11 px line, which is what
+    #: pushed the footer out of the sidebar and sliced the text in half.
+    _FOOTER_DOT_STYLE = ("font-size: 10px; border: none; padding: 0; "
+                         "background: transparent; color: {color};")
+    _FOOTER_TEXT_STYLE = ("font-size: 11px; border: none; padding: 0; "
+                          "background: transparent; color: {color};")
+
+    def _set_footer_state(self, connected: bool, detail: str = "") -> None:
+        self.footer_icon.setStyleSheet(
+            self._FOOTER_DOT_STYLE.format(color="#10b981" if connected else "#ef4444"))
+        self.footer_status.setStyleSheet(
+            self._FOOTER_TEXT_STYLE.format(color="#10b981" if connected else "#64748b"))
+        self.footer_status.setText("Connected" if connected else "No device connected")
+        self.footer_model.setText(detail)
+
+    def _ui_settings(self):
+        """``QSettings``, or ``None`` when the platform offers no store.
+
+        Created lazily so a headless test or a locked-down profile cannot stop
+        the window from opening.
+        """
+        if self._settings is None:
+            try:
+                self._settings = QSettings()
+            except Exception:
+                self._settings = False
+        return self._settings or None
+
+    def _restore_sidebar_state(self) -> None:
+        """Apply the remembered visibility, defaulting to shown once."""
+        if self._sidebar_restored:
+            return
+        self._sidebar_restored = True
+        settings = self._ui_settings()
+        visible = True
+        if settings is not None:
+            try:
+                visible = settings.value("ui/sidebar_visible", True, type=bool)
+            except Exception:
+                visible = True
+        if not visible:
+            self._set_sidebar_visible(False)
 
     def _connect_signals(self):
         self.home_page.new_case_requested.connect(lambda: self._navigate_to(1))
@@ -390,20 +545,14 @@ class MainWindow(QMainWindow):
                     self._device_info = get_device_info(serial)
                 except Exception:
                     self._device_info = None
-                self.footer_icon.setStyleSheet("font-size: 10px; color: #10b981; border: none;")
-                self.footer_status.setText("Connected")
-                self.footer_status.setStyleSheet("font-size: 11px; color: #10b981; border: none;")
-                self.footer_model.setText(f"{model} ({serial})")
+                self._set_footer_state(True, f"{model} ({serial})")
                 self.statusBar().showMessage(f"Device: {model} ({serial})")
                 audit_log("device_connected", target=serial, details=model)
         else:
             if self._device_serial:
                 self._device_serial = ""
                 self._device_info = None
-                self.footer_icon.setStyleSheet("font-size: 10px; color: #ef4444; border: none;")
-                self.footer_status.setText("No device connected")
-                self.footer_status.setStyleSheet("font-size: 11px; color: #64748b; border: none;")
-                self.footer_model.setText("")
+                self._set_footer_state(False)
 
         # Push device state to all pages
         self._push_device_to_pages()
@@ -422,10 +571,7 @@ class MainWindow(QMainWindow):
     def _on_device_connected(self, device_info: dict):
         self._device_serial = device_info["serial"]
         model = device_info.get("model", "Unknown")
-        self.footer_icon.setStyleSheet("font-size: 10px; color: #10b981; border: none;")
-        self.footer_status.setText("Connected")
-        self.footer_status.setStyleSheet("font-size: 11px; color: #10b981; border: none;")
-        self.footer_model.setText(f"{model} ({self._device_serial})")
+        self._set_footer_state(True, f"{model} ({self._device_serial})")
         self.statusBar().showMessage(f"Device connected: {model} ({self._device_serial})")
         audit_log("device_connected", target=self._device_serial, details=model)
         self._push_device_to_pages()

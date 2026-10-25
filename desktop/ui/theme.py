@@ -147,6 +147,31 @@ QMainWindow::separator {{
     color: {COLORS['accent']};
     border-left-color: {COLORS['accent']};
 }}
+/* The navigation column scrolls when the window is short, so the device footer
+   is never squeezed to a sliced line at the bottom edge. */
+#navScroll {{
+    background: transparent;
+    border: none;
+}}
+/* The grip that folds the column away. Deliberately colourless so it reads as
+   part of the divider rather than as a control competing with the navigation. */
+#sidebarGrip {{
+    background: {COLORS['bg_card']};
+    border: none;
+    color: {COLORS['text_muted']};
+    font-size: 12px;
+    padding: 0;
+}}
+#sidebarGrip:hover {{
+    background: {COLORS['bg_hover']};
+    color: {COLORS['accent']};
+}}
+/* Footer labels must never inherit the section-header padding. At 16 px top and
+   4 px bottom an 11 px line becomes a 31 px box, which is what pushed the device
+   status past the bottom edge and sliced the glyphs in half. */
+#deviceFooter QLabel {{
+    padding: 0;
+}}
 
 /* ── Cards ── */
 .card {{

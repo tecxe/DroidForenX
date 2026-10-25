@@ -27,6 +27,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 try:
+    from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import QApplication, QLabel, QWidget
 
     from desktop.ui.main_window import MainWindow
@@ -64,7 +65,14 @@ def tearDownModule():
 def _make_qapp():
     if not _QT_IMPORT:
         return None
-    return QApplication.instance() or QApplication([])
+    app = QApplication.instance() or QApplication([])
+    # QSettings is global to the application identity. Without this, the tests
+    # would read and write the operator's real preference store -- including the
+    # new "sidebar visible" key, which would then hide the sidebar on the next
+    # launch after a test toggled it.
+    app.setOrganizationName("DroidForenXTests")
+    app.setApplicationName("DroidForenXTests")
+    return app
 
 
 def _pump(app, rounds=4):
@@ -172,6 +180,163 @@ class SidebarRenderingTest(unittest.TestCase):
         self.assertEqual(checked, [5])
         self.window._navigate_to(0)
         _pump(self._app)
+
+
+@unittest.skipUnless(_QT_IMPORT, "PyQt6 is not available")
+class SidebarVisibilityTest(unittest.TestCase):
+    """Folding the navigation away, and keeping the footer inside the column.
+
+    The footer used to be the casualty of the sidebar's fixed chrome: the nav
+    list plus three section headers overran the window, the layout took the
+    difference out of the bottom widget, and the device status was painted as a
+    sliced line at the edge -- which reads as a rendering fault, not as an
+    overflow. The navigation now scrolls, the footer labels keep their own
+    compact metrics even when a device connects rewrites their style, and the
+    column can be folded away from the View menu, Ctrl+B, or the grip.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._app = _make_qapp()
+        cls.window = MainWindow()
+        cls.window.resize(1280, 720)
+        cls.window.show()
+        _pump(cls._app)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.window._set_sidebar_visible(True)
+        cls.window.close()
+        cls.window.deleteLater()
+        _pump(cls._app)
+
+    def setUp(self):
+        from PyQt6.QtCore import QSettings
+
+        self.window._set_sidebar_visible(True)
+        self.window.resize(1280, 720)
+        _pump(self._app)
+        # Remove the one key rather than clearing the store: clearing deletes the
+        # registry key under QSettings' feet and every later write reports
+        # AccessError, which is not the behaviour under test.
+        settings = QSettings()
+        settings.remove("ui/sidebar_visible")
+        settings.sync()
+
+    tearDown = setUp
+
+    # -- the footer --------------------------------------------------------
+
+    def _footer_bottom(self):
+        footer = self.window.device_footer
+        return footer.y() + footer.height()
+
+    def test_the_device_footer_is_inside_the_sidebar(self):
+        sidebar = self.window.sidebar
+        self.assertLessEqual(
+            self._footer_bottom(), sidebar.height(),
+            "the footer is being pushed past the bottom edge, which is what "
+            "slices its text")
+
+    def test_a_connected_device_keeps_the_footer_compact(self):
+        # This is the path that broke it: the status labels were re-styled with
+        # fragment strings that dropped "padding: 0", so they fell back to the
+        # section-header padding and tripled in height.
+        before = self.window.device_footer.height()
+        self.window._set_footer_state(True, "TECNO_KL6 (13276374A7004073)")
+        _pump(self._app)
+
+        self.assertLessEqual(self.window.device_footer.height(), before + 4)
+        for label in (self.window.footer_icon, self.window.footer_status,
+                      self.window.footer_model):
+            self.assertGreaterEqual(label.contentsRect().height(),
+                                    label.fontMetrics().height(),
+                                    f"{label.text()!r} has no room for its glyphs")
+        self.assertLessEqual(self._footer_bottom(), self.window.sidebar.height())
+
+    def test_the_status_text_is_readable_after_a_connect_and_a_disconnect(self):
+        self.window._set_footer_state(True, "TECNO_KL6 (SERIAL)")
+        _pump(self._app)
+        self.assertEqual(self.window.footer_status.text(), "Connected")
+        self.window._set_footer_state(False)
+        _pump(self._app)
+        self.assertEqual(self.window.footer_status.text(), "No device connected")
+        self.assertGreaterEqual(self.window.footer_status.contentsRect().height(),
+                                self.window.footer_status.fontMetrics().height())
+
+    def test_navigation_lives_in_a_scroll_area(self):
+        # A window shorter than the navigation must scroll, not compress the
+        # widgets around the list.
+        self.assertTrue(self.window.nav_scroll.widgetResizable())
+        self.assertIsNotNone(self.window.nav_scroll.widget())
+        self.assertEqual(
+            self.window.nav_scroll.horizontalScrollBarPolicy(),
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+    def test_every_navigation_button_is_reachable(self):
+        nav = self.window.nav_scroll
+        viewport = nav.viewport().height()
+        content = nav.widget().sizeHint().height()
+        account = content <= viewport or nav.verticalScrollBarPolicy() != \
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        self.assertTrue(account, "the nav list cannot be reached in full")
+
+    # -- hide and show -----------------------------------------------------
+
+    def test_the_sidebar_can_be_hidden_and_shown(self):
+        width_with_sidebar = self.window.stack.width()
+        self.window._toggle_sidebar()
+        _pump(self._app)
+
+        self.assertFalse(self.window.sidebar.isVisible())
+        self.assertGreater(self.window.stack.width(), width_with_sidebar)
+        self.assertFalse(self.window.sidebar_action.isChecked())
+        self.assertIn("hidden", self.window.sidebar_action.text())
+
+        self.window._toggle_sidebar()
+        _pump(self._app)
+        self.assertTrue(self.window.sidebar.isVisible())
+        self.assertEqual(self.window.stack.width(), width_with_sidebar)
+        self.assertTrue(self.window.sidebar_action.isChecked())
+
+    def test_the_menu_action_and_the_grip_stay_in_agreement(self):
+        self.window.sidebar_action.setChecked(False)
+        _pump(self._app)
+
+        self.assertFalse(self.window.sidebar.isVisible())
+        self.assertEqual(self.window.sidebar_grip.text(), "\u203a")
+        self.assertIn("Show", self.window.sidebar_grip.toolTip())
+
+        self.window.sidebar_action.setChecked(True)
+        _pump(self._app)
+        self.assertTrue(self.window.sidebar.isVisible())
+        self.assertEqual(self.window.sidebar_grip.text(), "\u2039")
+
+    def test_a_hidden_sidebar_leaves_a_visible_way_back(self):
+        self.window._set_sidebar_visible(False)
+        _pump(self._app)
+        self.assertTrue(self.window.sidebar_grip.isVisible())
+        self.assertGreater(self.window.sidebar_grip.width(), 0)
+
+    def test_the_choice_is_remembered_for_the_next_window(self):
+        from PyQt6.QtCore import QSettings
+
+        self.window._set_sidebar_visible(False)
+        _pump(self._app)
+        self.assertFalse(QSettings().value("ui/sidebar_visible", True, type=bool))
+
+        other = MainWindow()
+        other.resize(1280, 720)
+        other.show()
+        _pump(self._app)
+        try:
+            self.assertFalse(other.sidebar.isVisible(),
+                             "a hidden sidebar should still be hidden next launch")
+        finally:
+            other._set_sidebar_visible(True)
+            other.close()
+            other.deleteLater()
+            _pump(self._app)
 
 
 @unittest.skipUnless(_QT_IMPORT, "PyQt6 is not available")
