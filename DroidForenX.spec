@@ -64,6 +64,22 @@ else:
         "being on PATH at runtime. Run `python setup_adb.py` to bundle it."
     )
 
+# The wordmark, the window icon and the assistant avatar. Kept at their
+# repository path inside the archive so branding.asset_path() can find them with
+# one rule for both a checkout and a frozen build. The .ico is consumed by
+# PyInstaller itself rather than shipped.
+BRANDING_SRC = ROOT / "desktop" / "assets" / "branding"
+if BRANDING_SRC.exists():
+    for asset in sorted(BRANDING_SRC.glob("*.*")):
+        if asset.suffix.lower() == ".ico":
+            continue
+        datas.append((str(asset), "desktop/assets/branding"))
+else:
+    print(f"[spec] WARNING: {BRANDING_SRC} not found. The build will use text branding.")
+
+ICON_FILE = BRANDING_SRC / "icon.ico"
+ICON = str(ICON_FILE) if IS_WINDOWS and ICON_FILE.exists() else None
+
 a = Analysis(
     [str(ROOT / "desktop" / "main.py")],
     pathex=[str(ROOT)],
@@ -87,6 +103,7 @@ exe = EXE(
     a.datas,
     [],
     name="DroidForenX",
+    icon=ICON,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

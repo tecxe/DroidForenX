@@ -48,6 +48,9 @@ ALLOW_UNMAPPED = {
     "#4caf50", "#c62828", "#e65100",
     # literal white, used as text on coloured buttons in both modes
     "#ffffff",
+    # the plate behind the sidebar wordmark: the artwork is light lettering on
+    # transparency, so it has to sit on a dark surface in light mode too
+    "#0b1220",
 }
 
 

@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, QSize, QSettings
 from PyQt6.QtGui import QIcon, QFont, QAction, QActionGroup
 
 from .theme import MAIN_STYLESHEET, theme
+from . import branding
 from .pages.home_page import HomePage
 from .pages.case_page import CasePage
 from .pages.device_page import DevicePage
@@ -47,6 +48,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         init_db()
         self.setWindowTitle("DroidForenX — Professional Digital Forensics")
+        self.setWindowIcon(branding.app_icon())
         self._fit_to_screen()
         self.setStyleSheet(MAIN_STYLESHEET)
 
@@ -141,11 +143,30 @@ class MainWindow(QMainWindow):
         logo_layout.setContentsMargins(16, 14, 16, 12)
         logo_layout.setSpacing(4)
 
-        logo_text = QLabel("DROIDFORENX")
-        logo_text.setStyleSheet(
-            "font-size: 16px; font-weight: 800; color: #f59e0b; letter-spacing: 2px; "
-            "border: none; padding: 0; background: transparent;")
-        logo_layout.addWidget(logo_text)
+        # The sidebar is 220 px wide with 16 px margins, so the label has 188 px
+        # to work with; 168 plus the plate's 9 px padding on each side leaves the
+        # artwork a little air and keeps the label from forcing the column wider.
+        logo_pixmap = branding.logo(168)
+        if logo_pixmap is not None:
+            self.logo_label = QLabel()
+            self.logo_label.setObjectName("logoMark")
+            self.logo_label.setPixmap(logo_pixmap)
+            # The artwork is light lettering on transparency, so it needs a dark
+            # surface to sit on. A plate behind it reads as a brand badge in both
+            # themes, and keeps the pale cyan legible on the light theme's white
+            # sidebar, where it would otherwise wash out.
+            self.logo_label.setStyleSheet(
+                "border: none; padding: 7px 9px; border-radius: 8px;"
+                " background: #0b1220;")
+            logo_layout.addWidget(self.logo_label)
+        else:
+            # Text fallback: a missing PNG is a packaging fault, not a reason to
+            # ship a sidebar with a hole in it.
+            logo_text = QLabel("DROIDFORENX")
+            logo_text.setStyleSheet(
+                "font-size: 16px; font-weight: 800; color: #f59e0b; letter-spacing: 2px; "
+                "border: none; padding: 0; background: transparent;")
+            logo_layout.addWidget(logo_text)
 
         version = QLabel(f"v{_app_version()} Professional")
         version.setStyleSheet(
@@ -627,7 +648,7 @@ class MainWindow(QMainWindow):
         return None
 
     def _show_about(self):
-        QMessageBox.about(self, "About DroidForenX",
+        text = (
             f"<h2>DroidForenX v{_app_version()}</h2>"
             "<p>Professional Digital Forensics</p>"
             "<p>Standalone mobile device forensic tool for law enforcement "
@@ -643,4 +664,11 @@ class MainWindow(QMainWindow):
             "<li>Device Isolation & Evidence Preservation</li>"
             "</ul>"
             "<p>© 2026 DroidForenX</p>")
+        mark = branding.pixmap("icon.png")
+        if mark is None:
+            QMessageBox.about(self, "About DroidForenX", text)
+            return
+        QMessageBox.about(self, "About DroidForenX", text,
+                          mark.scaled(96, 96, Qt.AspectRatioMode.KeepAspectRatio,
+                                      Qt.TransformationMode.SmoothTransformation))
 

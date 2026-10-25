@@ -48,6 +48,11 @@ def main():
     app.setOrganizationName("DroidForenX")
     app.setApplicationVersion(__version__)
 
+    # Set before the first window exists so the taskbar button is branded from
+    # the moment the process starts, not after the main window maps.
+    from desktop.ui import branding
+    app.setWindowIcon(branding.app_icon())
+
     font = QFont("Segoe UI", 10)
     font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
     app.setFont(font)

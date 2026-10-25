@@ -50,3 +50,10 @@ pull_cache/
 # DB local copies
 *.db-shm
 *.db-wal
+
+# Source artwork, kept beside the project while the marks are being iterated.
+# The copies the generator reads are committed under
+# desktop/assets/branding/source/.
+/DroidForenX  logo.png
+/DroidForenX  AI.png
+/DroidForenX-AI.jpeg

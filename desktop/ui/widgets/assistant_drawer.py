@@ -16,7 +16,7 @@ import threading
 from typing import List, Optional
 
 from PyQt6.QtCore import QEvent, QObject, QPoint, QSize, Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QTextCursor
+from PyQt6.QtGui import QIcon, QTextCursor
 from PyQt6.QtWidgets import (
     QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QMessageBox, QPlainTextEdit, QPushButton, QTextBrowser, QToolButton,
@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
 
 from ...core import ai_assistant
 from ...core.ai_assistant import AssistantClient, AssistantError, ChatStore, KeyStore
+from .. import branding
 from .. import theme as _theme
 
 DISCLAIMER = ("AI-generated. Verify anything before it goes into a report or a "
@@ -198,6 +199,17 @@ class AssistantDrawer(QFrame):
         layout.setSpacing(8)
 
         header = QHBoxLayout()
+        header.setSpacing(8)
+
+        avatar = branding.assistant_avatar(24)
+        if avatar is not None:
+            self.avatar_label = QLabel()
+            self.avatar_label.setFixedSize(24, 24)
+            self.avatar_label.setPixmap(avatar)
+            self.avatar_label.setStyleSheet(
+                "background: transparent; border: none; padding: 0;")
+            header.addWidget(self.avatar_label)
+
         title = QLabel("Assistant")
         title.setStyleSheet("font-size: 14px; font-weight: 700; color: #e2e8f0;"
                             " background: transparent; border: none;")
@@ -468,18 +480,36 @@ class AssistantOverlay(QObject):
         self._window = window
 
         self.button = QToolButton(window)
-        self.button.setText("\U0001F916")   # robot
         self.button.setToolTip("Ask the assistant (Ctrl+Shift+A)")
         self.button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.button.setFixedSize(52, 52)
-        self.button.setStyleSheet("""
-            QToolButton {
-                background: #10b981; color: #ffffff; border: none;
-                border-radius: 26px; font-size: 24px;
-            }
-            QToolButton:hover { background: #34d399; }
-            QToolButton:pressed { background: #059669; }
-        """)
+        self.button.setFixedSize(56, 56)
+
+        # The avatar carries its own circular mask and amber ring, so the button
+        # itself stays transparent: painting a green disc behind the artwork was
+        # what made the corner look like a second, unrelated control.
+        avatar = branding.assistant_avatar(52)
+        if avatar is not None:
+            self.button.setIcon(QIcon(avatar))
+            self.button.setIconSize(QSize(52, 52))
+            self.button.setStyleSheet("""
+                QToolButton {
+                    background: transparent; border: none; border-radius: 28px;
+                    padding: 0;
+                }
+                QToolButton:hover { background: rgba(245,158,11,0.16); }
+                QToolButton:pressed { background: rgba(245,158,11,0.30); }
+            """)
+        else:
+            self.button.setText("\U0001F916")   # robot
+            self.button.setFixedSize(52, 52)
+            self.button.setStyleSheet("""
+                QToolButton {
+                    background: #10b981; color: #ffffff; border: none;
+                    border-radius: 26px; font-size: 24px;
+                }
+                QToolButton:hover { background: #34d399; }
+                QToolButton:pressed { background: #059669; }
+            """)
         self.button.clicked.connect(self.toggle)
 
         self.drawer = AssistantDrawer(window)

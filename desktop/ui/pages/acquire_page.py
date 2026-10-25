@@ -1844,9 +1844,16 @@ class AcquirePage(QWidget):
         self._phase_started = False
 
         # Results
+        # The selector is scoped to this card's object name. "QFrame { padding:
+        # 16px }" matched every QFrame descendant too -- including the results
+        # table, which is a QFrame -- so the table's own frame grew to 17 px, its
+        # viewport collapsed to 15 px, and the card rendered as a tall empty box
+        # with a scrollbar and no rows in it.
         self.results_frame = QFrame()
+        self.results_frame.setObjectName("resultsFrame")
         self.results_frame.setStyleSheet(
-            "QFrame { background: #111827; border: 1px solid #1e293b; border-radius: 10px; padding: 16px; }")
+            "#resultsFrame { background: #111827; border: 1px solid #1e293b;"
+            " border-radius: 10px; padding: 16px; }")
         self.results_frame.setVisible(False)
         r_layout = QVBoxLayout(self.results_frame)
         r_layout.setSpacing(12)
@@ -1857,7 +1864,11 @@ class AcquirePage(QWidget):
         r_layout.addWidget(self.results_title)
 
         self.results_table = DataTable(["Category", "Count", "Size"])
-        self.results_table.setMaximumHeight(300)
+        # A table with no explicit height asks for almost nothing, and inside the
+        # page's scroll area that produced a card with a two-line table in it.
+        # The minimum shows the header plus six rows before it starts scrolling.
+        self.results_table.setMinimumHeight(240)
+        self.results_table.setMaximumHeight(320)
         r_layout.addWidget(self.results_table)
 
         layout.addWidget(self.results_frame)

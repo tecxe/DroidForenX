@@ -122,11 +122,24 @@ class SidebarRenderingTest(unittest.TestCase):
         self.assertEqual(self._clipped(), [])
 
     def test_the_product_name_has_room_for_its_glyphs(self):
+        # The name is the shipped wordmark now, not a text label. Either way it
+        # has to fit the column: a text label needs room for its font, and a
+        # pixmap needs room for its pixels.
         logo = [lbl for lbl in self._sidebar_labels()
                 if lbl.text().startswith("DROIDFORENX")]
-        self.assertEqual(len(logo), 1, "the product name should be a single label")
-        label = logo[0]
-        self.assertGreaterEqual(label.contentsRect().height(), label.fontMetrics().height())
+        if logo:
+            self.assertEqual(len(logo), 1, "the product name should be a single label")
+            label = logo[0]
+            self.assertGreaterEqual(label.contentsRect().height(),
+                                    label.fontMetrics().height())
+            return
+
+        mark = self.window.findChild(QLabel, "logoMark")
+        self.assertIsNotNone(mark, "neither a name label nor a wordmark is present")
+        pixmap = mark.pixmap()
+        self.assertIsNotNone(pixmap)
+        self.assertGreater(mark.contentsRect().height(), 0)
+        self.assertGreaterEqual(mark.contentsRect().height(), pixmap.height())
 
     def test_the_version_label_is_readable(self):
         version = [lbl for lbl in self._sidebar_labels() if lbl.text().startswith("v1.0")]
