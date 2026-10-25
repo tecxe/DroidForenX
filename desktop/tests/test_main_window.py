@@ -267,6 +267,22 @@ class SidebarVisibilityTest(unittest.TestCase):
                                     f"{label.text()!r} has no room for its glyphs")
         self.assertLessEqual(self._footer_bottom(), self.window.sidebar.height())
 
+    def test_a_long_serial_is_elided_instead_of_clipped(self):
+        # 24 monospace characters do not fit the 179 px the sidebar leaves the
+        # footer, and the label used to paint the surplus under the window edge.
+        serial = "TECNO_KL6 (13276374A7004073)"
+        self.window._set_footer_state(True, serial)
+        _pump(self._app)
+
+        label = self.window.footer_model
+        self.assertEqual(label.full_text(), serial)
+        self.assertEqual(label.toolTip(), serial)
+        self.assertIn("\u2026", label.text())
+        self.assertLessEqual(
+            label.fontMetrics().horizontalAdvance(label.text()),
+            label.contentsRect().width() + 2,
+            "the elided text still overruns the label")
+
     def test_the_status_text_is_readable_after_a_connect_and_a_disconnect(self):
         self.window._set_footer_state(True, "TECNO_KL6 (SERIAL)")
         _pump(self._app)

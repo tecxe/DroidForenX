@@ -38,6 +38,42 @@ def _app_version() -> str:
     return __version__
 
 
+class _ElidedLabel(QLabel):
+    """A label that shortens itself in the middle instead of clipping.
+
+    The device footer shows ``MODEL (serial)`` in a 179 px column. A TECNO serial
+    is 24 monospace characters, about 192 px, so a plain ``QLabel`` cut the last
+    characters mid-glyph -- which reads as a broken render rather than as an
+    abbreviation. Keeping the full string on the label would elide at whatever
+    width existed before the layout ran (a resize after the fact does not
+    re-elide text), so the text is elided on every resize instead.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._full_text = ""
+
+    def set_full_text(self, text: str) -> None:
+        self._full_text = text or ""
+        self.setToolTip(self._full_text)
+        self._elide()
+
+    def full_text(self) -> str:
+        return self._full_text
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._elide()
+
+    def _elide(self):
+        if not self._full_text:
+            self.setText("")
+            return
+        width = max(self.width() - 2, 40)
+        self.setText(self.fontMetrics().elidedText(
+            self._full_text, Qt.TextElideMode.ElideMiddle, width))
+
+
 class MainWindow(QMainWindow):
     #: Preferred working size. Used as an upper bound, never as a hard floor,
     #: so the window still opens on laptops smaller than this.
@@ -246,7 +282,7 @@ class MainWindow(QMainWindow):
         self.footer_status.setStyleSheet(
             "font-size: 11px; color: #64748b; border: none; padding: 0; background: transparent;")
         footer_layout.addWidget(self.footer_status)
-        self.footer_model = QLabel("")
+        self.footer_model = _ElidedLabel("")
         self.footer_model.setStyleSheet(
             "font-size: 10px; color: #475569; font-family: 'Cascadia Code', monospace; "
             "border: none; padding: 0; background: transparent;")
@@ -481,7 +517,7 @@ class MainWindow(QMainWindow):
         self.footer_status.setStyleSheet(
             self._FOOTER_TEXT_STYLE.format(color="#10b981" if connected else "#64748b"))
         self.footer_status.setText("Connected" if connected else "No device connected")
-        self.footer_model.setText(detail)
+        self.footer_model.set_full_text(detail)
 
     def _ui_settings(self):
         """``QSettings``, or ``None`` when the platform offers no store.

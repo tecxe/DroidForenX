@@ -2,6 +2,7 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                               QFrame, QGridLayout, QScrollArea)
 from PyQt6.QtCore import Qt, pyqtSignal
+from ... import __version__
 from ..widgets.stage_bar import StageBar
 from ..widgets.card import Card
 
@@ -35,7 +36,7 @@ class HomePage(QWidget):
         title_block = QVBoxLayout()
         title = QLabel("Digital Forensics")
         title.setStyleSheet("font-size: 26px; font-weight: 700; color: #e2e8f0; background: transparent; border: none;")
-        subtitle = QLabel("DroidForenX v1.0 — Professional Mobile Device Forensics")
+        subtitle = QLabel(f"DroidForenX v{__version__} - Professional Mobile Device Forensics")
         subtitle.setStyleSheet("font-size: 13px; color: #64748b; background: transparent; border: none;")
         title_block.addWidget(title)
         title_block.addWidget(subtitle)

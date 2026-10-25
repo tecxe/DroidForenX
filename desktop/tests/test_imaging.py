@@ -628,14 +628,17 @@ class ProcessReaderDiagnosticsTest(unittest.TestCase):
         ])
         try:
             self.assertEqual(reader.read(5), b"bytes")
-            self.assertEqual(reader.error_output(), "")
+            # Draining is asynchronous: the child's stderr is picked up by the
+            # reader thread, not by read(). Poll for it while the pipe is still
+            # open -- close() stops the drain, and under a loaded machine that
+            # used to win the race and leave the buffer empty.
+            deadline = time.monotonic() + 5
+            while ("boom-diagnostic" not in reader.error_output()
+                   and time.monotonic() < deadline):
+                time.sleep(0.02)
+            self.assertIn("boom-diagnostic", reader.error_output())
         finally:
             reader.close()
-
-        deadline = time.monotonic() + 5
-        while "boom-diagnostic" not in reader.error_output() and time.monotonic() < deadline:
-            time.sleep(0.05)
-        self.assertIn("boom-diagnostic", reader.error_output())
 
     def test_close_returns_promptly_on_a_live_long_stream(self):
         """Regression: close() deadlocked on stop of a large /sdcard stream.

@@ -166,14 +166,20 @@ class DevicePage(QWidget):
             if not serial:
                 continue
             card = QFrame()
+            card.setObjectName("deviceCard")
+            # Scoped, and the padding moved onto the layout. A bare "QFrame"
+            # selector also matches the labels inside the card -- QLabel is a
+            # QFrame -- so the 16 px padding landed on the model name and the
+            # serial, giving a one-line card a 60 px interior.
             card.setStyleSheet("""
-                QFrame {
+                QFrame#deviceCard {
                     background: #111827; border: 1px solid #1e293b;
-                    border-left: 3px solid #10b981; border-radius: 8px; padding: 16px;
+                    border-left: 3px solid #10b981; border-radius: 8px;
                 }
-                QFrame:hover { border-color: #3b82f6; }
+                QFrame#deviceCard:hover { border-color: #3b82f6; }
             """)
             card_layout = QHBoxLayout(card)
+            card_layout.setContentsMargins(16, 12, 16, 12)
             card_layout.setSpacing(16)
 
             icon = QLabel("📱")

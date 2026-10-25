@@ -44,10 +44,18 @@ copy, and records an append-only chain of custody for every action.
 ## Screenshots
 
 Every frame below is the running application, not a mock-up, captured on
-**23 October 2026** with a **TECNO KL6** (Android 14 / API 34, unrooted)
-attached over ADB. The case is a throwaway demonstration case; the
-artifact counts, contacts, messages and calls are read from the phone. Click an
-image to open it at full size.
+**25 October 2026** with a **TECNO KL6** (Android 14 / API 34, unrooted)
+attached over ADB. The case is a throwaway demonstration case, seeded into a
+temporary database; the artifact counts, contacts, messages and calls are read
+from the phone. Click an image to open it at full size.
+
+`tools/capture_docs.py` takes them: it points `database.DB_PATH` at a temporary
+directory, seeds a case, shows the real window and grabs it with
+`QWidget.grab()`. Two details are deliberate. It does not use
+`QT_QPA_PLATFORM=offscreen`, whose stub font database renders every glyph as a
+box — that is why an earlier set of these images looked like a wireframe. And it
+grabs the client area rather than the desktop, so a window that happens to be on
+top of the application cannot end up in a screenshot.
 
 **Dashboard** — open cases, attached devices, artifact and report totals, and
 where the current case sits in the five-stage workflow.
@@ -113,7 +121,10 @@ python -m unittest `
   desktop.tests.test_progress_panel `
   desktop.tests.test_ai_assistant `
   desktop.tests.test_assistant_drawer `
+  desktop.tests.test_branding `
   desktop.tests.test_theme `
+  desktop.tests.test_device_page `
+  desktop.tests.test_acquire_page `
   desktop.tests.test_main_window `
   desktop.tests.test_ui_export `
   desktop.tests.test_reproducible_build -v
@@ -123,12 +134,12 @@ python -m unittest `
 manual device probes (`test_full_adb.py`, `test_quick.py`, `test_deep.py`) that
 run on import and need a connected handset, not a test runner.
 
-![Test suite finishing with 175 tests passed and one skipped](docs/images/tests.png)
+![Test suite finishing with 291 tests passed and one skipped](docs/images/tests.png)
 
-The run above was captured on v1.0.19. The v1.0.23 suite is 287 tests with one
-skip — 18 for percentage progress, 24 for the assistant client, 16 for the
-drawer, 9 for the sidebar, 15 for branding and the results card, and the rest
-accumulated across v1.0.20 and v1.0.21.
+The run above is v1.0.24: 291 tests with one skip — 18 for percentage progress,
+24 for the assistant client, 16 for the drawer, 9 for the sidebar, 19 for branding,
+the results card, the device card and the footer, and the rest accumulated across
+earlier releases.
 
 ---
 
@@ -540,7 +551,7 @@ by anyone. `test_reproducible_build.py` compares the installed environment
 against the lock, and the full two-build byte comparison runs only with
 `DROIDFORENX_SLOW_TESTS=1`.
 
-287 tests, no device required. They cover the properties that matter:
+291 tests, no device required. They cover the properties that matter:
 
 - an acquired artifact survives being read (the original bug was that 11
   loaders deleted evidence after parsing)
