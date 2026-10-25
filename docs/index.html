@@ -119,11 +119,11 @@
 </nav>
 
 <section class="hero">
-    <div class="badge"><span class="dot"></span> v1.0.20 - Latest Release</div>
+    <div class="badge"><span class="dot"></span> v1.0.21 - Latest Release</div>
     <h1>Professional Mobile<br>Digital Forensics</h1>
     <p>Standalone desktop toolkit for Android device forensic analysis. 5-stage forensic workflow, 24 artifact loaders, selectable Raw (dd) / ZIP image output, court-ready reporting. Single .exe, no installation.</p>
     <div class="hero-btns">
-        <a class="btn btn-primary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.20/DroidForenX.exe" download>
+        <a class="btn btn-primary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.21/DroidForenX.exe" download>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Download DroidForenX.exe
         </a>
@@ -164,7 +164,7 @@
         <div class="feature">
             <div class="feature-icon" style="background:rgba(34,197,94,0.15);color:var(--green)">&#128229;</div>
             <h3>Data Acquisition</h3>
-            <p>5-stage pipeline: SMS, calls, contacts, social media, deleted files, documents, emails, browser data. Imaging output is selectable - Raw (dd) segments or ZIP - with per-image hashing and verification.</p>
+            <p>5-stage pipeline: SMS, calls, contacts, social media, deleted files, documents, emails, browser data. Imaging output is selectable - Raw (dd) segments or ZIP - with per-image hashing and verification, and progress in real percentages with a rate and an ETA on the forty-minute logical capture.</p>
         </div>
         <div class="feature">
             <div class="feature-icon" style="background:rgba(20,184,166,0.15);color:#2dd4bf">&#128179;</div>
@@ -190,6 +190,11 @@
             <div class="feature-icon" style="background:rgba(129,140,248,0.15);color:#818cf8">&#127769;</div>
             <h3>Dark, Light, or System Theme</h3>
             <p>The interface opens dark and switches from the View menu &mdash; light, or follow the operating system as it changes. Your choice is remembered between launches. Exported reports keep their own fixed palette, so a court document never changes appearance because a UI preference did.</p>
+        </div>
+        <div class="feature">
+            <div class="feature-icon" style="background:rgba(16,185,129,0.15);color:var(--green)">&#129302;</div>
+            <h3>Assistant, On Call</h3>
+            <p>A corner button opens a chat drawer backed by OpenRouter: Gemma 3 4B with a Llama 3.1 8B fallback, streamed as it writes. Transcripts are per case and stored outside the case folder, the API key is DPAPI-encrypted, and nothing but what you type ever leaves the machine. AI output is not evidence and says so.</p>
         </div>
     </div>
 
@@ -244,13 +249,13 @@
             </div>
             <div class="info-card">
                 <div class="label">Version</div>
-                <div class="value">v1.0.20</div>
+                <div class="value">v1.0.21</div>
             </div>
         </div>
 
         <h3 style="margin-bottom:12px">SHA-256 Hash</h3>
         <div class="hash-box">
-            <code id="hash">07ac17139335c93cd5348305c6ecf68c203e49022b328623eb25afdbc6230d64</code>
+            <code id="hash">c2b5a80a7b24c3a586ee831f00fa55ef9c7f24c1294f5296effb6a0e8fd2d82c</code>
             <button class="copy-btn" onclick="copyHash()">Copy Hash</button>
         </div>
 
@@ -292,11 +297,11 @@
 </section>
 
 <footer>
-    <p>DroidForenX v1.0.20 &middot; Built by <a href="https://github.com/tecxe" target="_blank">tecxe</a> &middot; <a href="https://github.com/tecxe/DroidForenX" target="_blank">Source on GitHub</a></p>
+    <p>DroidForenX v1.0.21 &middot; Built by <a href="https://github.com/tecxe" target="_blank">tecxe</a> &middot; <a href="https://github.com/tecxe/DroidForenX" target="_blank">Source on GitHub</a></p>
 </footer>
 
 <script>
-const EXPECTED_HASH = '07ac17139335c93cd5348305c6ecf68c203e49022b328623eb25afdbc6230d64';
+const EXPECTED_HASH = 'c2b5a80a7b24c3a586ee831f00fa55ef9c7f24c1294f5296effb6a0e8fd2d82c';
 
 function copyHash() {
     navigator.clipboard.writeText(EXPECTED_HASH).then(() => {
