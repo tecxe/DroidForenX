@@ -119,11 +119,11 @@
 </nav>
 
 <section class="hero">
-    <div class="badge"><span class="dot"></span> v1.0.22 - Latest Release</div>
+    <div class="badge"><span class="dot"></span> v1.0.23 - Latest Release</div>
     <h1>Professional Mobile<br>Digital Forensics</h1>
     <p>Standalone desktop toolkit for Android device forensic analysis. 5-stage forensic workflow, 24 artifact loaders, selectable Raw (dd) / ZIP image output, court-ready reporting. Single .exe, no installation.</p>
     <div class="hero-btns">
-        <a class="btn btn-primary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.22/DroidForenX.exe" download>
+        <a class="btn btn-primary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.23/DroidForenX.exe" download>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Download DroidForenX.exe
         </a>
@@ -196,6 +196,11 @@
             <h3>Assistant, On Call</h3>
             <p>A corner button opens a chat drawer backed by OpenRouter: Gemma 3 4B with a Llama 3.1 8B fallback, streamed as it writes. Transcripts are per case and stored outside the case folder, the API key is DPAPI-encrypted, and nothing but what you type ever leaves the machine. AI output is not evidence and says so.</p>
         </div>
+        <div class="feature">
+            <div class="feature-icon" style="background:rgba(245,158,11,0.15);color:var(--orange)">&#127991;&#65039;</div>
+            <h3>Its Own Mark</h3>
+            <p>The executable carries the DroidForenX emblem in the taskbar and in Explorer, the sidebar carries the wordmark, and the assistant button carries its own avatar. The sidebar also folds away with Ctrl+B when a table needs the width, and a grip stays on screen to bring it back.</p>
+        </div>
     </div>
 
     <div class="requirements">
@@ -249,13 +254,13 @@
             </div>
             <div class="info-card">
                 <div class="label">Version</div>
-                <div class="value">v1.0.22</div>
+                <div class="value">v1.0.23</div>
             </div>
         </div>
 
         <h3 style="margin-bottom:12px">SHA-256 Hash</h3>
         <div class="hash-box">
-            <code id="hash">7267add092465d8e4021ad8b649c57ea5d9e0d3f3773ad2a329ef6fdb3aa1aa6</code>
+            <code id="hash">3c4037f254fad21e404dc987f8d2dd463f349fcd4c55ce091a0b58155a1fb4bf</code>
             <button class="copy-btn" onclick="copyHash()">Copy Hash</button>
         </div>
 
@@ -297,11 +302,11 @@
 </section>
 
 <footer>
-    <p>DroidForenX v1.0.22 &middot; Built by <a href="https://github.com/tecxe" target="_blank">tecxe</a> &middot; <a href="https://github.com/tecxe/DroidForenX" target="_blank">Source on GitHub</a></p>
+    <p>DroidForenX v1.0.23 &middot; Built by <a href="https://github.com/tecxe" target="_blank">tecxe</a> &middot; <a href="https://github.com/tecxe/DroidForenX" target="_blank">Source on GitHub</a></p>
 </footer>
 
 <script>
-const EXPECTED_HASH = '7267add092465d8e4021ad8b649c57ea5d9e0d3f3773ad2a329ef6fdb3aa1aa6';
+const EXPECTED_HASH = '3c4037f254fad21e404dc987f8d2dd463f349fcd4c55ce091a0b58155a1fb4bf';
 
 function copyHash() {
     navigator.clipboard.writeText(EXPECTED_HASH).then(() => {
