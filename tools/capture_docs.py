@@ -157,7 +157,7 @@ def _make_app():
 
     app = QApplication(sys.argv[:1])
     # A distinct application name keeps the capture out of the operator's own
-    # QSettings (sidebar visibility, theme mode, assistant transcripts).
+    # QSettings (sidebar visibility, theme mode).
     app.setApplicationName("DroidForenX-Screenshots")
     app.setOrganizationName("DroidForenX")
     from desktop import __version__

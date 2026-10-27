@@ -51,8 +51,12 @@ EXCLUDES = [
     "PyQt6.QtSql", "PyQt6.QtPdf", "PyQt6.QtPdfWidgets", "PyQt6.QtSpatialAudio",
     "PyQt6.QtTextToSpeech", "PyQt6.QtRemoteObjects", "PyQt6.QtScxml",
     "PyQt6.QtStateMachine", "PyQt6.QtHttpServer",
-    "tkinter", "unittest", "pydoc_data", "test",
+    "tkinter", "pydoc_data", "test",
 ]
+# NOTE: do not exclude "unittest". fpdf.sign imports unittest.mock at module
+# scope, so excluding it turns `import fpdf` into ModuleNotFoundError and the
+# PDF export dies with a stack trace the user never sees. It costs a few
+# hundred kilobytes and buys a working report writer.
 
 datas = []
 if ADB_SRC.exists():
@@ -64,7 +68,7 @@ else:
         "being on PATH at runtime. Run `python setup_adb.py` to bundle it."
     )
 
-# The wordmark, the window icon and the assistant avatar. Kept at their
+# The wordmark and the window icon. Kept at their
 # repository path inside the archive so branding.asset_path() can find them with
 # one rule for both a checkout and a frozen build. The .ico is consumed by
 # PyInstaller itself rather than shipped.

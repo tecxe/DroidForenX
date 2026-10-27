@@ -10,10 +10,8 @@ What it produces, in ``desktop/assets/branding/``:
     logo.png       the wordmark on transparency, for the sidebar
     icon.png       the X emblem on its own plate, for the window and the taskbar
     icon.ico       the same emblem, multi-size, for the executable
-    assistant.png  the head from the AI artwork, cropped to a circle, for the
-                   floating assistant button
 
-All three source images are dark-navy artwork with light lettering, not the other
+The source images are dark-navy artwork with light lettering, not the other
 way round, so the background is keyed out against the sampled corner colour
 rather than against white. The maths is an un-premultiply:
 
@@ -36,7 +34,6 @@ SOURCE = Path.home() / "Desktop" / "DroidForenX"
 OUT = ROOT / "desktop" / "assets" / "branding"
 
 LOGO_SOURCE = SOURCE / "DroidForenX  logo.png"
-AI_SOURCE = SOURCE / "DroidForenX  AI.png"
 
 #: The sidebar logo is 189 px wide at 1x; 2x keeps it sharp on HiDPI.
 LOGO_WIDTH = 560
@@ -171,51 +168,17 @@ def build_icon(emblem: Image.Image) -> None:
     square.save(OUT / "icon.ico", sizes=sizes)
 
 
-def build_assistant() -> None:
-    """Circle-cropped head for the corner button.
-
-    The artwork is a wide banner -- helmeted head over a wordmark. Squeezed whole
-    into a 52 px round button it turns to soup, so the button gets the head on its
-    own, cropped square around the helmet and bitten into a circle. The banner's
-    background is already near-black, which suits both themes.
-    """
-    source = Image.open(AI_SOURCE).convert("RGB")
-    width, height = source.size
-
-    # The helmet sits dead centre, spanning the top two thirds. A side of 32% of
-    # the width clears the ears without catching the wordmark underneath.
-    side = int(width * 0.32)
-    left = (width - side) // 2
-    top = int(height * 0.01)
-    head = source.crop((left, top, left + side, top + side))
-
-    size = 320
-    head = head.resize((size, size), Image.Resampling.LANCZOS).convert("RGBA")
-
-    mask = Image.new("L", (size, size), 0)
-    ImageDraw.Draw(mask).ellipse((1, 1, size - 2, size - 2), fill=255)
-    head.putalpha(mask)
-
-    # A two-pixel amber ring, so the button still reads as a button against a
-    # dark page and against the busy evidence tables.
-    ImageDraw.Draw(head).ellipse((1, 1, size - 2, size - 2),
-                                 outline=(245, 158, 11, 255), width=2)
-    head.save(OUT / "assistant.png")
-
-
 def keep_sources() -> None:
     """Copy the artwork in, so the derived files can be rebuilt by anyone."""
     folder = OUT / "source"
     folder.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(LOGO_SOURCE, folder / "droidforenx-logo.png")
-    shutil.copyfile(AI_SOURCE, folder / "droidforenx-ai.png")
 
 
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     build_logo()
     build_icon(build_emblem())
-    build_assistant()
     keep_sources()
     for path in sorted(OUT.glob("*.*")):
         with Image.open(path) as image:

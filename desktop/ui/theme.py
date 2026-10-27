@@ -481,7 +481,7 @@ SWATCH = {
     "#94a3b8": "#475569",
     "#64748b": "#55657a",
     "#475569": "#94a3b8",
-    # speaker labels in the assistant transcript: light blue for the operator,
+    # a pair of speaker labels that read distinctly from one another:
     # green for the model, both darkened until they hold on a white panel
     "#93c5fd": "#1d4ed8",
     "#34d399": "#047857",
