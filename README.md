@@ -58,7 +58,7 @@ grabs the client area rather than the desktop, so a window that happens to be on
 top of the application cannot end up in a screenshot.
 
 **Dashboard** — open cases, attached devices, artifact and report totals, and
-where the current case sits in the five-stage workflow.
+where the current case sits in the four-stage workflow.
 
 ![DroidForenX dashboard with a connected device and an open case](docs/images/dashboard.png)
 
@@ -81,18 +81,37 @@ shared storage and carving.
 
 **Artifact viewer** — what came back, grouped by app and category. This frame
 was taken against the phone: 42,763 artifacts in one pass, including 860 SMS,
-1,403 calls and 2,249 contacts.
+1,403 calls and 2,249 contacts. The call log is a table, so each row carries its
+direction and whether it was answered instead of being folded into a
+conversation thread. Media categories offer a **thumbnail grid** with three tile
+sizes, pulled in the background and cached for display only, and **Capture
+Screen** takes a PNG of whatever is on the handset over `exec-out screencap`,
+hashes it, and files it as a finding under the Screenshots category.
 
 ![Artifact viewer reading messages, calls and contacts from the device](docs/images/artifact-viewer.png)
 
-**SIM forensics** — the UICC as the handset will expose it: every slot, its
-state, carrier, network code, ICCID and IMSI, with the Android redaction on
-those identifiers stated instead of hidden. ADN contacts are read per
-subscription (`content://icc/adn/subId/<id>`), so they land on the card they
-actually live on, and subscriptions the device still remembers for cards that
-are no longer inserted are listed separately.
+**Media gallery** - the same media categories as a thumbnail grid, at three
+tile sizes, with the pull running in the background so the window stays
+usable while a cache of a few thousand images fills in. Thumbnails land in
+`~/.droidforenx/thumbs/` and are display cache only; opening a tile reads the
+original path, and that is what the report cites.
 
-![SIM forensics page showing two present cards and one empty slot](docs/images/sim-forensics.png)
+![Thumbnail gallery of on-device media](docs/images/media-gallery.png)
+
+**SIM info** — the UICC as the handset will expose it: every slot, its state,
+carrier, network code, ICCID, IMSI and **MSISDN** (the phone number), with the
+Android redaction on those identifiers stated instead of hidden. The subscriber
+number is read from three places in order — `dumpsys isub`, the
+`iphonesubinfo` parcel, and `content://telephony/siminfo` — and a provider value
+that is an ICCID pasted into the number column is rejected rather than reported
+as a phone number. The page states its own limits: a redacted tail means the
+platform refused the value, not that the card is empty, and a card read outside
+the handset needs a PC/SC reader, which this tool does not drive. ADN contacts
+are read per subscription (`content://icc/adn/subId/<id>`), so they land on the
+card they actually live on, and subscriptions the device still remembers for
+cards that are no longer inserted are listed separately.
+
+![SIM info page showing two present cards and one empty slot](docs/images/sim-forensics.png)
 
 **Create Image** — choose the source (connected device, preserved case folder or
 the logical `/sdcard` view), then the output: byte-for-byte Raw (dd) segments or
@@ -119,11 +138,11 @@ python -m unittest `
   desktop.tests.test_image_registry `
   desktop.tests.test_create_image_dialog `
   desktop.tests.test_progress_panel `
-  desktop.tests.test_ai_assistant `
-  desktop.tests.test_assistant_drawer `
+  desktop.tests.test_sim_forensics `
   desktop.tests.test_branding `
   desktop.tests.test_theme `
   desktop.tests.test_device_page `
+  desktop.tests.test_media_gallery `
   desktop.tests.test_acquire_page `
   desktop.tests.test_main_window `
   desktop.tests.test_ui_export `
@@ -134,12 +153,11 @@ python -m unittest `
 manual device probes (`test_full_adb.py`, `test_quick.py`, `test_deep.py`) that
 run on import and need a connected handset, not a test runner.
 
-![Test suite finishing with 291 tests passed and one skipped](docs/images/tests.png)
+![Test suite finishing with 274 tests passed and one skipped](docs/images/tests.png)
 
-The run above is v1.0.24: 291 tests with one skip — 18 for percentage progress,
-24 for the assistant client, 16 for the drawer, 9 for the sidebar, 19 for branding,
-the results card, the device card and the footer, and the rest accumulated across
-earlier releases.
+The run above is v1.0.26: 274 tests with one skip — 18 for percentage progress,
+30 for SIM parsing and storage, 15 for the media gallery, call-log table and
+device card, and the rest accumulated across earlier releases.
 
 ---
 
@@ -315,9 +333,10 @@ desktop/
   ui/
     main_window.py            window shell, stage navigation
     theme.py                  palette and typography
-    pages/                    home, identify, seize, case, acquire,
-                              examine, artifacts, browse, device, report
-    widgets/                  data table, log console, status bar, stage bar
+    pages/                    home, identify, case, acquire, device,
+                              examine, artifacts, browse, report, sim
+    widgets/                  data table, log console, status bar, stage bar,
+                              media gallery
   tests/                      unittest suites
 tools/platform-tools/         bundled ADB
 manage.py                     CLI wrapper (gui | version)
@@ -360,7 +379,7 @@ event, so producing a report cannot alter evidence. Use
 `evidence_store.verify()` when you *want* the verification run recorded in the
 log.
 
-Both outputs are also reachable from the app: on the **Stage 5** report page,
+Both outputs are also reachable from the app: on the **Stage 4** report page,
 pick `Verification Workbook (XLSX)` as the report format and the workbook is
 written alongside the other report artifacts. The workbook is derived from the
 evidence store, so the case number is used as the evidence-store case id; if no
@@ -551,7 +570,7 @@ by anyone. `test_reproducible_build.py` compares the installed environment
 against the lock, and the full two-build byte comparison runs only with
 `DROIDFORENX_SLOW_TESTS=1`.
 
-291 tests, no device required. They cover the properties that matter:
+274 tests, no device required. They cover the properties that matter:
 
 - an acquired artifact survives being read (the original bug was that 11
   loaders deleted evidence after parsing)
@@ -652,8 +671,9 @@ of trusting it:
   matches `QLabel` children because `QLabel` derives from `QFrame`
 - the sidebar's natural height must fit what a 1280x720 desktop leaves it, since
   a sidebar that asks for more is squeezed and its labels are the first casualties
-- the Seizure nav caption keeps its literal ampersand: a lone `&` is a Qt
-  mnemonic and silently consumes a character
+- the workflow advertises four stages, Identification first; Seizure and
+  Isolation was removed, and with it the fifth tile that pointed at a page that
+  no longer exists
 
 `desktop/tests/` also contains `test_quick.py`, `test_deep.py` and
 `test_full_adb.py`. These require a connected device and are **not** covered by
@@ -677,61 +697,17 @@ already read.
 
 ---
 
-## Assistant
-
-A floating button in the bottom-right corner (`Ctrl+Shift+A`) opens a drawer that
-asks OpenRouter a question. It is deliberately not in the sidebar: the navigation
-is a workflow — case, device, seizure, acquisition, examination, report — and a
-chat box is not a stage of that workflow. The button is there from every page.
-
-Two models, in order: `google/gemma-3-4b-it` and
-`meta-llama/llama-3.1-8b-instruct`. The reply streams into the transcript as it
-is generated, `Stop` abandons it, and a reply that came from the second model is
-**labelled** as the fallback rather than presented as the first model's work.
-Rate limits, upstream errors and timeouts fall through to the next model; a bad
-key (401) and an exhausted balance (402) are raised as themselves, because
-falling back would hide the actual problem behind a second failure.
-
-What leaves the machine is what you type. No case data, artifact row, file path
-or device detail is attached automatically. The assistant's transcript is stored
-per case as JSONL under `%USERPROFILE%\.droidforenx\assistant\<case_id>.jsonl` —
-in the examiner's profile, **not** in the case folder, so it can never be
-mistaken for an exhibit or swept into a disclosure. With no case open the
-conversation goes to `unassigned.jsonl`; selecting a case switches notebooks, and
-`Clear` deletes only the open case's history.
-
-The key is entered once under the drawer's gear icon and stored DPAPI-encrypted
-at `%LOCALAPPDATA%\DroidForenX\assistant.key`, so the file is useless on another
-Windows account or machine. `OPENROUTER_API_KEY` in the environment takes
-precedence when set. The key is never written to the database, the case folder or
-a log, and the settings dialog shows it masked. "Save and test" verifies it
-against OpenRouter and reports the balance.
-
-The transcript carries a permanent footer: *AI-generated. Verify anything before
-it goes into a report or a court statement.* Nothing the assistant says is
-evidence, it is not written into the evidence chain, and it does not appear in
-the findings. The client is standard library only — `urllib` and `json` — so the
-frozen build is unchanged in size and dependencies.
-
-
 ---
 
 ## Configuration
 
 Optional `.env` (gitignored; see `.env.example`). All acquisition, hashing,
 custody and reporting features work **without** any `.env` file — configuration
-is only needed to point at a different database or adb binary, or to hand the
-assistant a key without storing one.
+is only needed to point at a different database or adb binary.
 
 ```powershell
 DROIDFORENX_EVIDENCE_ROOT=evidence
-# Optional: read by the assistant instead of the encrypted key store.
-OPENROUTER_API_KEY=sk-or-v1-...
 ```
-
-The model chain is fixed in code (`desktop/core/ai_assistant.py`) rather than
-configurable, so a build that answers in a report is always the build that names
-the same two models.
 
 ### Sidebar
 
@@ -772,15 +748,14 @@ it.
 
 ### Branding
 
-`desktop/assets/branding/` holds the four images the application draws and the
-two originals they are cut from:
+`desktop/assets/branding/` holds the three images the application draws and the
+original the wordmark is cut from:
 
 | File | Used by |
 |---|---|
 | `logo.png` | the sidebar wordmark (transparent, 2x) |
 | `icon.png` | `QApplication.setWindowIcon`, the About dialog, the taskbar |
 | `icon.ico` | the executable's own icon, seven sizes from 16 to 256 |
-| `assistant.png` | the floating assistant button and its drawer header |
 
 They are generated by `tools/make_branding.py` from the artwork in `source/` and
 committed, so a build never depends on Pillow being the right version. The

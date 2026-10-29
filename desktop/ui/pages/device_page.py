@@ -93,9 +93,19 @@ class DevicePage(QWidget):
 
         # Device info panel (hidden initially)
         self.info_panel = QFrame()
-        self.info_panel.setStyleSheet("QFrame { background: #111827; border: 1px solid #1e293b; border-radius: 10px; padding: 20px; }")
+        self.info_panel.setObjectName("infoPanel")
+        # Scoped to the panel itself. A bare "QFrame { padding: 20px; }" also
+        # matches every QLabel inside it -- QLabel derives from QFrame -- so each
+        # specification line was inflated to a 44 px box and the grid was pushed
+        # out of the panel. The header showed; the specifications did not. This is
+        # the same trap that collapsed the acquisition results card and the
+        # sidebar footer, and the padding belongs on the layout, not the selector.
+        self.info_panel.setStyleSheet(
+            "QFrame#infoPanel { background: #111827; border: 1px solid #1e293b;"
+            " border-radius: 10px; }")
         self.info_panel.setVisible(False)
         info_layout = QVBoxLayout(self.info_panel)
+        info_layout.setContentsMargins(20, 20, 20, 20)
         info_layout.setSpacing(12)
 
         self.device_header = QLabel()
@@ -108,19 +118,13 @@ class DevicePage(QWidget):
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
-        btn_isolate = QPushButton("🔒 Isolate Device")
-        btn_isolate.setObjectName("btn-danger")
-        btn_isolate.setFixedHeight(38)
-        btn_isolate.clicked.connect(lambda: self.navigate.emit("seizure"))
-        btn_row.addWidget(btn_isolate)
-
         btn_acquire = QPushButton("📥 Begin Acquisition")
         btn_acquire.setObjectName("btn-success")
         btn_acquire.setFixedHeight(38)
         btn_acquire.clicked.connect(lambda: self.navigate.emit("acquire"))
         btn_row.addWidget(btn_acquire)
 
-        btn_sim = QPushButton("💳 SIM Forensics")
+        btn_sim = QPushButton("💳 SIM Info")
         btn_sim.setObjectName("btn-outline")
         btn_sim.setFixedHeight(38)
         # This button shipped with no handler at all: it was drawn, looked

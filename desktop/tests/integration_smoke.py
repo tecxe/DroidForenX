@@ -63,12 +63,11 @@ def t_import_pages():
     from desktop.ui.pages.home_page import HomePage
     from desktop.ui.pages.case_page import CasePage
     from desktop.ui.pages.device_page import DevicePage
-    from desktop.ui.pages.seizure_page import SeizurePage
     from desktop.ui.pages.identify_page import IdentifyPage
     from desktop.ui.pages.acquire_page import AcquirePage
     from desktop.ui.pages.examine_page import ExaminePage
     from desktop.ui.pages.report_page import ReportPage
-test("all 8 pages import", t_import_pages)
+test("all 7 pages import", t_import_pages)
 
 def t_import_main_window():
     from desktop.ui.main_window import MainWindow
@@ -130,12 +129,12 @@ print("\n[WIDGETS]")
 def t_stage_bar_stages():
     from desktop.ui.widgets.stage_bar import StageBar
     src = inspect.getsource(StageBar)
-    assert "Seizure" in src
+    assert "Seizure" not in src
     assert "Identification" in src
     assert "Acquisition" in src
     assert "Examination" in src
     assert "Reporting" in src
-test("stage bar has 5 forensic stages", t_stage_bar_stages)
+test("stage bar has 4 forensic stages", t_stage_bar_stages)
 
 def t_data_table():
     from desktop.ui.widgets.data_table import DataTable

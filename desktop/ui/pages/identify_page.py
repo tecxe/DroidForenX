@@ -1,4 +1,4 @@
-"""Stage 2: Device Identification page — fingerprint device, enumerate storage."""
+"""Stage 1: Device Identification page — fingerprint device, enumerate storage."""
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                               QFrame, QGridLayout, QGroupBox, QScrollArea, QProgressBar)
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSignal as Signal
@@ -58,7 +58,7 @@ class IdentifyPage(QWidget):
         layout.setContentsMargins(32, 24, 32, 24)
         layout.setSpacing(16)
 
-        title = QLabel("Stage 2 — Device Identification")
+        title = QLabel("Stage 1 - Device Identification")
         title.setStyleSheet("font-size: 22px; font-weight: 700; color: #3b82f6; background: transparent; border: none;")
         layout.addWidget(title)
 

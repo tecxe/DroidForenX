@@ -104,11 +104,11 @@ class HomePage(QWidget):
         actions_grid.setSpacing(10)
         actions = [
             ("📱", "Connect Device", "device"),
-            ("🔒", "Isolate Device", "seizure"),
+            ("🏷️", "Identify Device", "identify"),
             ("📥", "Acquire Data", "acquire"),
             ("🔬", "Examine Evidence", "examine"),
+            ("💳", "SIM Info", "sim"),
             ("📋", "Generate Report", "report"),
-            ("🔍", "Search Artifacts", "examine"),
         ]
         for i, (icon, text, page) in enumerate(actions):
             btn = QPushButton(f"{icon}  {text}")

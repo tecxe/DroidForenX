@@ -119,11 +119,11 @@
 </nav>
 
 <section class="hero">
-    <div class="badge"><span class="dot"></span> v1.0.24 - Latest Release</div>
+    <div class="badge"><span class="dot"></span> v1.0.26 - Latest Release</div>
     <h1>Professional Mobile<br>Digital Forensics</h1>
-    <p>Standalone desktop toolkit for Android device forensic analysis. 5-stage forensic workflow, 24 artifact loaders, selectable Raw (dd) / ZIP image output, court-ready reporting. Single .exe, no installation.</p>
+    <p>Standalone desktop toolkit for Android device forensic analysis. 4-stage forensic workflow, 24 artifact loaders, selectable Raw (dd) / ZIP image output, court-ready reporting. Single .exe, no installation.</p>
     <div class="hero-btns">
-        <a class="btn btn-primary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.24/DroidForenX.exe" download>
+        <a class="btn btn-primary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.26/DroidForenX.exe" download>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Download DroidForenX.exe
         </a>
@@ -136,7 +136,7 @@
 
 <div class="stats">
     <div class="stat"><div class="stat-val">62.9 MB</div><div class="stat-label">File Size</div></div>
-    <div class="stat"><div class="stat-val">5</div><div class="stat-label">Forensic Stages</div></div>
+    <div class="stat"><div class="stat-val">4</div><div class="stat-label">Forensic Stages</div></div>
     <div class="stat"><div class="stat-val">24</div><div class="stat-label">Artifact Loaders</div></div>
     <div class="stat"><div class="stat-val">0</div><div class="stat-label">Dependencies Required</div></div>
 </div>
@@ -152,24 +152,19 @@
 
     <div class="features">
         <div class="feature">
-            <div class="feature-icon" style="background:rgba(59,130,246,0.15);color:var(--accent)">&#128274;</div>
-            <h3>Seizure &amp; Isolation</h3>
-            <p>Disable airplane mode, WiFi, Bluetooth, NFC, mobile data and USB in one pass. Chain-of-custody logging for every action.</p>
-        </div>
-        <div class="feature">
-            <div class="feature-icon" style="background:rgba(168,85,247,0.15);color:var(--purple)">&#128270;</div>
+            <div class="feature-icon" style="background:rgba(59,130,246,0.15);color:var(--accent)">&#128270;</div>
             <h3>Device Identification</h3>
-            <p>Auto-detect device model, Android version, installed packages and storage info over ADB. Works with any Android device with USB debugging enabled.</p>
+            <p>Stage one: make, model, serial, Android version, build fingerprint, storage and installed packages, read over ADB and recorded against the case before anything is acquired.</p>
         </div>
         <div class="feature">
             <div class="feature-icon" style="background:rgba(34,197,94,0.15);color:var(--green)">&#128229;</div>
             <h3>Data Acquisition</h3>
-            <p>5-stage pipeline: SMS, calls, contacts, social media, deleted files, documents, emails, browser data. Imaging output is selectable - Raw (dd) segments or ZIP - with per-image hashing and verification, and progress in real percentages with a rate and an ETA on the forty-minute logical capture.</p>
+            <p>Acquisition pipeline: SMS, calls, contacts, social media, deleted files, documents, emails, browser data. Imaging output is selectable - Raw (dd) segments or ZIP - with per-image hashing and verification, and progress in real percentages with a rate and an ETA on the forty-minute logical capture.</p>
         </div>
         <div class="feature">
             <div class="feature-icon" style="background:rgba(20,184,166,0.15);color:#2dd4bf">&#128179;</div>
-            <h3>SIM Forensics</h3>
-            <p>Reads the UICC through the handset: every slot and its state, carrier and network code, ICCID and IMSI per subscription, and ADN contacts read from the card they live on. Android's redaction of identifier tails is stated in the record, not padded over.</p>
+            <h3>SIM Info</h3>
+            <p>Reads the UICC through the handset: every slot and its state, carrier and network code, ICCID, IMSI and MSISDN per subscription, with the subscriber number pulled from three sources when the platform will part with it. Android's redaction of identifier tails is stated in the record, not padded over, and a page-level note says what the handset cannot give up.</p>
         </div>
         <div class="feature">
             <div class="feature-icon" style="background:rgba(245,158,11,0.15);color:var(--orange)">&#128269;</div>
@@ -192,14 +187,14 @@
             <p>The interface opens dark and switches from the View menu &mdash; light, or follow the operating system as it changes. Your choice is remembered between launches. Exported reports keep their own fixed palette, so a court document never changes appearance because a UI preference did.</p>
         </div>
         <div class="feature">
-            <div class="feature-icon" style="background:rgba(16,185,129,0.15);color:var(--green)">&#129302;</div>
-            <h3>Assistant, On Call</h3>
-            <p>A corner button opens a chat drawer backed by OpenRouter: Gemma 3 4B with a Llama 3.1 8B fallback, streamed as it writes. Transcripts are per case and stored outside the case folder, the API key is DPAPI-encrypted, and nothing but what you type ever leaves the machine. AI output is not evidence and says so.</p>
+            <div class="feature-icon" style="background:rgba(16,185,129,0.15);color:var(--green)">&#128247;</div>
+            <h3>Thumbnail Grid &amp; Screen Capture</h3>
+            <p>Media categories open as a Cellebrite-style thumbnail grid at three tile sizes, pulled in the background and cached for display only. Capture Screen takes a PNG of whatever is on the handset over <code>adb exec-out screencap</code>, hashes it, and files it as a finding &mdash; the way to preserve a conversation the tool cannot read natively.</p>
         </div>
         <div class="feature">
             <div class="feature-icon" style="background:rgba(245,158,11,0.15);color:var(--orange)">&#127991;&#65039;</div>
             <h3>Its Own Mark</h3>
-            <p>The executable carries the DroidForenX emblem in the taskbar and in Explorer, the sidebar carries the wordmark, and the assistant button carries its own avatar. The sidebar also folds away with Ctrl+B when a table needs the width, and a grip stays on screen to bring it back.</p>
+            <p>The executable carries the DroidForenX emblem in the taskbar and in Explorer, and the sidebar carries the wordmark. The sidebar also folds away with Ctrl+B when a table needs the width, and a grip stays on screen to bring it back.</p>
         </div>
     </div>
 
@@ -254,7 +249,7 @@
             </div>
             <div class="info-card">
                 <div class="label">Version</div>
-                <div class="value">v1.0.24</div>
+                <div class="value">v1.0.26</div>
             </div>
         </div>
 
@@ -302,7 +297,7 @@
 </section>
 
 <footer>
-    <p>DroidForenX v1.0.24 &middot; Built by <a href="https://github.com/tecxe" target="_blank">tecxe</a> &middot; <a href="https://github.com/tecxe/DroidForenX" target="_blank">Source on GitHub</a></p>
+    <p>DroidForenX v1.0.26 &middot; Built by <a href="https://github.com/tecxe" target="_blank">tecxe</a> &middot; <a href="https://github.com/tecxe/DroidForenX" target="_blank">Source on GitHub</a></p>
 </footer>
 
 <script>

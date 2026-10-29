@@ -1,4 +1,4 @@
-"""Stage 3: Data Acquisition — full forensic extraction."""
+"""Stage 2: Data Acquisition — full forensic extraction."""
 import uuid
 import hashlib
 import re
@@ -66,6 +66,7 @@ class AcquisitionWorker(QThread):
     finished = Signal(dict)
     file_pulled = Signal(str, int)
     phase_changed = Signal(str)
+    session_created = Signal(str)
 
     def __init__(self, serial, level, case_id, hash_algo="sha256"):
         super().__init__()
@@ -92,6 +93,11 @@ class AcquisitionWorker(QThread):
         evidence_root.mkdir(parents=True, exist_ok=True)
 
         self._create_session()
+        if self._session_id:
+            # Acquisition owns the session now that seizure is gone. The window
+            # needs the id as soon as the row exists, or the artifact viewer,
+            # SIM page and report all stay bound to the previous (empty) id.
+            self.session_created.emit(self._session_id)
         audit_log("acquisition_started", "examiner", self.serial,
                   f"level={self.level}, hash={self.hash_algo}")
 
@@ -247,7 +253,7 @@ class AcquisitionWorker(QThread):
             conn = get_db()
             conn.execute(
                 "INSERT INTO forensic_sessions (id, case_id, status, current_stage, created_at, updated_at) "
-                "VALUES (?, ?, 'acquiring', 3, ?, ?)",
+                "VALUES (?, ?, 'acquiring', 2, ?, ?)",
                 (self._session_id, self.case_id or "unknown",
                  datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()),
             )
@@ -262,7 +268,7 @@ class AcquisitionWorker(QThread):
         try:
             conn = get_db()
             conn.execute(
-                "UPDATE forensic_sessions SET status='completed', current_stage=4, updated_at=? WHERE id=?",
+                "UPDATE forensic_sessions SET status='completed', current_stage=3, updated_at=? WHERE id=?",
                 (datetime.now(timezone.utc).isoformat(), self._session_id),
             )
             conn.execute(
@@ -1710,6 +1716,7 @@ class AcquisitionWorker(QThread):
 
 class AcquirePage(QWidget):
     navigate = pyqtSignal(str)
+    session_created = pyqtSignal(str)
 
     def __init__(self, db_get, parent=None):
         super().__init__(parent)
@@ -1724,7 +1731,7 @@ class AcquirePage(QWidget):
         layout.setContentsMargins(32, 24, 32, 24)
         layout.setSpacing(16)
 
-        title = QLabel("📥 Stage 3 — Data Acquisition")
+        title = QLabel("📥 Stage 2 — Data Acquisition")
         title.setStyleSheet("font-size: 22px; font-weight: 700; color: #10b981; background: transparent; border: none;")
         layout.addWidget(title)
 
@@ -1933,6 +1940,7 @@ class AcquirePage(QWidget):
         self.worker.progress.connect(self._on_progress)
         self.worker.file_pulled.connect(self._on_file)
         self.worker.phase_changed.connect(self._on_phase)
+        self.worker.session_created.connect(self.session_created)
         self.worker.finished.connect(self._on_finished)
         self.worker.start()
 

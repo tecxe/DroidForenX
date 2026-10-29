@@ -13,7 +13,6 @@ conn.close()
 from desktop.ui.pages.acquire_page import AcquirePage, AcquisitionWorker
 from desktop.ui.pages.examine_page import ExaminePage, ExaminationWorker
 from desktop.ui.pages.identify_page import IdentifyPage, IdentificationWorker
-from desktop.ui.pages.seizure_page import SeizurePage, IsolationWorker
 from desktop.ui.pages.device_page import DevicePage, DeviceScanWorker, DeviceInfoWorker
 from desktop.ui.main_window import MainWindow
 print("All imports OK")

@@ -11,7 +11,6 @@ from . import branding
 from .pages.home_page import HomePage
 from .pages.case_page import CasePage
 from .pages.device_page import DevicePage
-from .pages.seizure_page import SeizurePage
 from .pages.identify_page import IdentifyPage
 from .pages.acquire_page import AcquirePage
 from .pages.examine_page import ExaminePage
@@ -19,7 +18,6 @@ from .pages.report_page import ReportPage
 from .pages.browse_page import BrowsePage
 from .pages.artifacts_page import ArtifactsPage
 from .pages.sim_page import SimForensicsPage
-from .widgets.assistant_drawer import AssistantOverlay
 from ..core.adb_manager import list_devices, get_device_info
 from ..core.database import get_db, init_db, audit_log
 from .. import __version__
@@ -220,16 +218,15 @@ class MainWindow(QMainWindow):
                 ("  Device Connection", 2),
             ]),
             ("FORENSIC STAGES", [
-                ("  1. Seizure && Isolation", 3),
-                ("  2. Identification", 4),
-                ("  3. Acquisition", 5),
-                ("  4. Examination", 6),
-                ("  5. Reporting", 7),
+                ("  1. Identification", 3),
+                ("  2. Acquisition", 4),
+                ("  3. Examination", 5),
+                ("  4. Reporting", 6),
             ]),
             ("INVESTIGATION", [
-                ("  File Browser", 8),
-                ("  Artifact Viewer", 9),
-                ("  SIM Forensics", 10),
+                ("  File Browser", 7),
+                ("  Artifact Viewer", 8),
+                ("  SIM Info", 9),
             ]),
         ]
 
@@ -312,7 +309,6 @@ class MainWindow(QMainWindow):
         self.home_page = HomePage()
         self.case_page = CasePage(get_db)
         self.device_page = DevicePage()
-        self.seizure_page = SeizurePage(get_db)
         self.identify_page = IdentifyPage(get_db)
         self.acquire_page = AcquirePage(get_db)
         self.examine_page = ExaminePage()
@@ -324,7 +320,6 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.home_page)
         self.stack.addWidget(self.case_page)
         self.stack.addWidget(self.device_page)
-        self.stack.addWidget(self.seizure_page)
         self.stack.addWidget(self.identify_page)
         self.stack.addWidget(self.acquire_page)
         self.stack.addWidget(self.examine_page)
@@ -340,13 +335,6 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Ready — DroidForenX v{_app_version()} Professional")
 
         self._navigate_to(0)
-
-        # Floating assistant. A child of the window rather than a page: it has to
-        # be reachable from wherever the examiner already is, and it deliberately
-        # has no sidebar entry, so the navigation still reads as a workflow.
-        self.assistant = AssistantOverlay(self)
-        self.assistant.attach_shortcut(self)
-        self.assistant.set_case_id(self._current_case_id)
 
     def _setup_menu(self):
         menubar = self.menuBar()
@@ -390,10 +378,6 @@ class MainWindow(QMainWindow):
         scan_action.setShortcut("Ctrl+D")
         scan_action.triggered.connect(self._auto_scan_devices)
         tools_menu.addAction(scan_action)
-
-        isolate_action = QAction("Isolate Device", self)
-        isolate_action.triggered.connect(lambda: self._navigate_to(3))
-        tools_menu.addAction(isolate_action)
 
         view_menu = menubar.addMenu("View")
 
@@ -557,11 +541,11 @@ class MainWindow(QMainWindow):
         self.device_page.device_connected.connect(self._on_device_connected)
         self.device_page.navigate.connect(self._navigate_by_name)
 
-        self.seizure_page.session_created.connect(self._on_session_created)
-        self.seizure_page.navigate.connect(self._navigate_by_name)
-
         self.identify_page.navigate.connect(self._navigate_by_name)
         self.acquire_page.navigate.connect(self._navigate_by_name)
+        # Acquisition creates the forensic session; earlier it was the seizure
+        # stage that did, so the id has to come from here now.
+        self.acquire_page.session_created.connect(self._on_session_created)
         self.examine_page.navigate.connect(self._navigate_by_name)
         self.report_page.navigate.connect(self._navigate_by_name)
 
@@ -574,15 +558,15 @@ class MainWindow(QMainWindow):
             self._refresh_stats()
 
         page_names = {0: "Dashboard", 1: "Case Management", 2: "Device Connection",
-                      3: "Seizure & Isolation", 4: "Identification", 5: "Acquisition",
-                      6: "Examination", 7: "Reporting", 8: "File Browser", 9: "Artifact Viewer",
-                      10: "SIM Forensics"}
+                      3: "Identification", 4: "Acquisition",
+                      5: "Examination", 6: "Reporting", 7: "File Browser", 8: "Artifact Viewer",
+                      9: "SIM Info"}
         self.statusBar().showMessage(f"DroidForenX — {page_names.get(index, 'Unknown')}")
 
     def _navigate_by_name(self, name: str):
-        mapping = {"home": 0, "case": 1, "device": 2, "seizure": 3, "identify": 4,
-                    "acquire": 5, "examine": 6, "report": 7, "browse": 8, "artifacts": 9,
-                    "sim": 10}
+        mapping = {"home": 0, "case": 1, "device": 2, "identify": 3,
+                   "acquire": 4, "examine": 5, "report": 6, "browse": 7, "artifacts": 8,
+                   "sim": 9}
         self._navigate_to(mapping.get(name, 0))
 
     def _auto_scan_devices(self):
@@ -617,7 +601,6 @@ class MainWindow(QMainWindow):
     def _push_device_to_pages(self):
         """Push current device serial to all forensic pages."""
         s = self._device_serial
-        self.seizure_page.set_device(s)
         self.identify_page.set_device(s)
         self.acquire_page.set_device(s, self._current_case_id, self._current_session_id)
         self.examine_page.set_device(s)
@@ -635,9 +618,6 @@ class MainWindow(QMainWindow):
 
     def _on_case_selected(self, case_id: str):
         self._current_case_id = case_id
-        # The assistant's transcript is per case; switching cases switches
-        # notebooks, and it never inherits the previous case's conversation.
-        self.assistant.set_case_id(case_id)
         conn = get_db()
         case = conn.execute("SELECT * FROM cases WHERE id=?", (case_id,)).fetchone()
         conn.close()
@@ -691,13 +671,12 @@ class MainWindow(QMainWindow):
             "and forensic investigators.</p>"
             "<p><b>Features:</b></p>"
             "<ul>"
-            "<li>5-Stage Forensic Workflow</li>"
+            "<li>4-Stage Forensic Workflow</li>"
             "<li>Logical, File System & Physical Acquisition</li>"
             "<li>11+ Examination Modules</li>"
             "<li>Court-Ready PDF/HTML Reporting</li>"
-            "<li>SIM Card Forensics</li>"
+            "<li>SIM Info</li>"
             "<li>Chain of Custody Documentation</li>"
-            "<li>Device Isolation & Evidence Preservation</li>"
             "</ul>"
             "<p>© 2026 DroidForenX</p>")
         mark = branding.pixmap("icon.png")

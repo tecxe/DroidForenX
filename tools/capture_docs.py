@@ -157,7 +157,7 @@ def _make_app():
 
     app = QApplication(sys.argv[:1])
     # A distinct application name keeps the capture out of the operator's own
-    # QSettings (sidebar visibility, theme mode, assistant transcripts).
+    # QSettings (sidebar visibility, theme mode).
     app.setApplicationName("DroidForenX-Screenshots")
     app.setOrganizationName("DroidForenX")
     from desktop import __version__
@@ -245,7 +245,7 @@ def capture(window, app, wanted: set[str], with_device: bool, tests_log: Path | 
         save(window, "device-connection")
 
     def shot_acquisition():
-        go(5)
+        go(4)
         page = window.acquire_page
         page.level_combo.setCurrentIndex(0)      # Level 1 - logical
         page.hash_combo.setCurrentIndex(0)       # SHA-256
@@ -254,20 +254,35 @@ def capture(window, app, wanted: set[str], with_device: bool, tests_log: Path | 
         save(window, "acquisition")
 
     def shot_artifacts():
-        go(9)
+        go(8)
         page = window.artifacts_page
         wait_for(app, lambda: page.all_artifacts or not page._data_loaded,
-                 timeout=300, label="artifact extraction")
+                 timeout=420, label="artifact extraction")
         pump(app, 1.5)
         save(window, "artifact-viewer")
 
     def shot_sim():
-        go(10)
+        go(9)
         page = window.sim_page
         page._read_sim()
         wait_for(app, lambda: page._result is not None, timeout=180, label="SIM read")
         pump(app, 1.0)
         save(window, "sim-forensics")
+
+    def shot_gallery():
+        go(8)
+        page = window.artifacts_page
+        wait_for(app, lambda: page.all_artifacts or not page._data_loaded,
+                 timeout=420, label="artifact extraction")
+        media = [a for a in page.all_artifacts
+                 if a.get("type") in ("Image", "Photo", "Video", "GIF")]
+        if not media:
+            print("  no media on this device - gallery shot skipped")
+            return
+        page._open_gallery("On-device media", media)
+        # Give the thumbnail puller time to fill the first screen.
+        pump(app, 6.0)
+        save(window, "media-gallery")
 
     def shot_create_image():
         dialog = CreateImageDialog(window.acquire_page, serial=SERIAL,
@@ -302,7 +317,7 @@ def capture(window, app, wanted: set[str], with_device: bool, tests_log: Path | 
         dialog.close()
 
     def shot_report():
-        go(7)
+        go(6)
         page = window.report_page
         page.case_input.setText("CASE-2026-0141")
         page.examiner_input.setText("Naa Adjei")
@@ -318,11 +333,13 @@ def capture(window, app, wanted: set[str], with_device: bool, tests_log: Path | 
         "acquisition": shot_acquisition,
         "artifacts": shot_artifacts,
         "sim": shot_sim,
+        "gallery": shot_gallery,
         "create-image": shot_create_image,
         "report": shot_report,
     })
 
-    needs_device = {"device", "acquisition", "artifacts", "sim", "create-image"}
+    needs_device = {"device", "acquisition", "artifacts", "sim", "gallery",
+                    "create-image"}
     if not with_device:
         for name in needs_device:
             shots.pop(name, None)

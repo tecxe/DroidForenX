@@ -98,7 +98,7 @@ LIGHT = {
 PALETTES = {"dark": COLORS, "light": LIGHT}
 
 STAGE_COLORS = [COLORS["stage_1"], COLORS["stage_2"], COLORS["stage_3"], COLORS["stage_4"], COLORS["stage_5"]]
-STAGE_NAMES = ["Seizure & Isolation", "Identification", "Acquisition", "Examination", "Reporting"]
+STAGE_NAMES = ["Identification", "Acquisition", "Examination", "Reporting"]
 
 MAIN_STYLESHEET = f"""
 QMainWindow, QWidget {{

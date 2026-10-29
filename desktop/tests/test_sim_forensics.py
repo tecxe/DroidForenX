@@ -139,6 +139,46 @@ class AdnParserTest(unittest.TestCase):
         self.assertEqual(sim_forensics.parse_sim_sms("No result found."), [])
 
 
+#: ``content query content://telephony/siminfo`` on the reference handset:
+#: slot 0 carries a real subscriber number, slot 1 has none, and slot 2 is the
+#: ICCID-in-the-number-column case that must not be reported as an MSISDN.
+SIMINFO = (
+    "Row: 0 _id=1, icc_id=8923401000000000001, sim_id=0, "
+    "display_name=TIGO GH, number=+233240000001, carrier_name=TIGO\n"
+    "Row: 1 _id=2, icc_id=8923401000000000002, sim_id=1, "
+    "display_name=, number=null, carrier_name=\n"
+)
+
+class SiminfoParserTest(unittest.TestCase):
+    """The telephony provider row, which is where an MSISDN sometimes survives."""
+
+    ROWS = (
+        'Row: 0 _id=1, icc_id=8923301234567890123, sim_id=0, '
+        'display_name=TIGO GH, number=+233240000001, carrier_name=TIGO\n'
+        'Row: 1 _id=2, icc_id=8923301234567890999, sim_id=1, '
+        'display_name=, number=null, carrier_name=\n'
+        'Row: 2 _id=3, icc_id=, sim_id=2, display_name=MTN, '
+        'number=8923301234567890999, carrier_name=MTN'
+    )
+
+    def test_a_dialable_number_is_kept(self):
+        records = sim_forensics.parse_siminfo(self.ROWS)
+        self.assertEqual(records[0]["msisdn"], "+233240000001")
+        self.assertEqual(records[0]["slot"], 0)
+
+    def test_a_null_number_is_not_a_number(self):
+        self.assertEqual(sim_forensics.parse_siminfo(self.ROWS)[1]["msisdn"], "")
+
+    def test_an_iccid_pasted_into_the_number_column_is_rejected(self):
+        # Android 14 on the reference handset does exactly this, and reporting
+        # it as an MSISDN is the sort of mistake an examiner cannot walk back.
+        self.assertEqual(sim_forensics.parse_siminfo(self.ROWS)[2]["msisdn"], "")
+
+    def test_an_empty_provider_yields_no_records(self):
+        self.assertEqual(sim_forensics.parse_siminfo("No result found."), [])
+        self.assertEqual(sim_forensics.parse_siminfo(""), [])
+
+
 class ReadSimCardsTest(unittest.TestCase):
     """End-to-end read against a scripted ADB, so no handset is needed."""
 
@@ -148,6 +188,8 @@ class ReadSimCardsTest(unittest.TestCase):
             return True, ISUB
         if key.startswith("service call"):
             return True, PARcel_JUNK
+        if key.startswith("content query") and "siminfo" in key:
+            return True, SIMINFO
         return True, PROPS.get(key, "")
 
     def _query(self, serial, uri, sort=""):
@@ -182,6 +224,21 @@ class ReadSimCardsTest(unittest.TestCase):
         result = self._read()
         self.assertEqual(result["sources"]["content://sms/sim"], "empty")
         self.assertEqual(result["sources"]["content://icc/adn"], "ok")
+
+    def test_the_phone_number_is_published_when_the_provider_has_it(self):
+        result = self._read()
+        tigo = next(sim for sim in result["sims"] if sim["carrier"] == "TIGO GH")
+        self.assertEqual(tigo["msisdn"], "+233240000001")
+        self.assertIn("siminfo", tigo["source"])
+
+    def test_a_redacted_number_is_not_invented(self):
+        result = self._read()
+        mtn = next(sim for sim in result["sims"] if sim["carrier"] == "MTN GH")
+        self.assertEqual(mtn["msisdn"], "")
+
+    def test_the_provider_scope_is_reported(self):
+        result = self._read()
+        self.assertEqual(result["sources"]["content://telephony/siminfo"], "ok")
 
     def test_legacy_wrapper_still_returns_a_flat_record(self):
         with mock.patch.object(sim_forensics.adb, "adb_shell", side_effect=self._shell), \

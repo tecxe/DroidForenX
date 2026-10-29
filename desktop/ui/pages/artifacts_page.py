@@ -6,6 +6,7 @@ from pathlib import Path
 import re, logging, json
 from datetime import datetime, timezone
 from ...core import adb_manager as adb
+from ..widgets.media_gallery import MediaGallery, media_kind
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,10 @@ QScrollBar:add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
 QScrollArea { border: none; background: transparent; }
 QScrollArea > QWidget > QWidget { background: transparent; }
 """
+
+#: Artefact types the thumbnail gallery knows how to present.
+MEDIA_TYPES = ("Image", "Photo", "Video", "GIF", "Profile Photo",
+               "Sticker (Animated)", "Audio", "Voice Recording")
 
 
 def _ts(val, divide=True):
@@ -270,13 +275,29 @@ class LoadWorker(QThread):
                 dur_s = int(dur)
                 dur_str = f"{dur_s // 60}m {dur_s % 60}s"
             except ValueError:
+                dur_s = -1
                 dur_str = dur
+            # The call log records a direction and a duration, never the word
+            # "answered". A connected call has seconds on it; an incoming call
+            # with no seconds rang and was not picked up. Missed, rejected and
+            # blocked calls carry no duration either and are reported as-is.
+            if call_type == "Incoming":
+                answered = "Answered" if dur_s > 0 else "Not answered"
+            elif call_type == "Outgoing":
+                answered = "Answered" if dur_s > 0 else "No answer"
+            elif call_type in ("Missed", "Rejected", "Blocked"):
+                answered = "—"
+            elif call_type == "Voicemail":
+                answered = "Voicemail"
+            else:
+                answered = "Answered" if dur_s > 0 else "Not answered"
             r.append({
                 "type": "Call", "category": "Calls", "date": ts_val,
                 "summary": f"{row.get('number', '?')} ({call_type}) {dur_str}",
                 "source": "content://call_log/calls",
                 "_data": {
                     "number": row.get("number", ""), "type": call_type,
+                    "answered": answered, "duration_s": dur_s,
                     "date": ts_val, "duration": dur_str, "duration_raw": dur,
                     "name": row.get("name", ""), "cached_name": row.get("cached_name", ""),
                     "country": row.get("countryiso", ""), "geocoded": row.get("geocoded_location", ""),
@@ -503,60 +524,133 @@ class LoadWorker(QThread):
                     break
         self.progress.emit(f"Loaded {c} Telegram files")
 
-    def _instagram(self, r):
-        self.progress.emit("Extracting Instagram cache files...")
-        ok, output = adb.adb_shell(self.serial,
-            'find /sdcard/Android/data/com.instagram.android/ -type f 2>/dev/null', timeout=15)
-        c = 0
-        if ok and output:
+    # -- social storage ------------------------------------------------------
+
+    def _app_media_roots(self, package: str):
+        """Roots worth probing for one app's media, most readable first."""
+        return (f"/sdcard/Android/media/{package}/",
+                f"/sdcard/Android/data/{package}/")
+
+    def _media_store_rows(self) -> list:
+        """Every MediaStore row, read once per extraction.
+
+        Instagram, Facebook and X each used to call this with their own package
+        list, so the same two provider queries ran three times. On the reference
+        handset that is what pushed the artifact pass past its five-minute
+        budget: each query has to walk a full camera roll. The rows do not
+        change during one load, so they are fetched once and filtered per app.
+        """
+        cached = getattr(self, "_media_rows_cache", None)
+        if cached is not None:
+            return cached
+
+        rows = []
+        for uri in ("content://media/external/images/media",
+                    "content://media/external/video/media"):
+            try:
+                output = adb.query_content(self.serial, uri, timeout=25)
+            except Exception:
+                continue
+            rows.extend(_parse_rows(output))
+        self._media_rows_cache = rows
+        return rows
+
+    def _media_store_paths(self, packages) -> list:
+        """Paths MediaStore indexes for these packages.
+
+        Scoped storage blocks adb from reading /sdcard/Android/data on Android
+        11+, and ``find`` answers that with silence rather than an error -- which
+        is why Instagram, Facebook and X looked like empty apps. The MediaStore
+        index is still readable from the shell and still names the files those
+        apps wrote into shared storage, so it is the one honest source left on
+        an unrooted handset.
+        """
+        wanted = set(packages)
+        found, seen = [], set()
+        for row in self._media_store_rows():
+            path = row.get("_data", "")
+            if not path or path in seen:
+                continue
+            owner = row.get("owner_package_name", "")
+            if owner in wanted or any(f"/{pkg}/" in path for pkg in wanted):
+                seen.add(path)
+                found.append(path)
+        return found
+
+    def _collect_social(self, label: str, packages, extra_paths=()) -> list:
+        """Filesystem finds plus MediaStore, and a truthful zero."""
+        files, seen = [], set()
+        roots = list(extra_paths)
+        for package in packages:
+            roots.extend(self._app_media_roots(package))
+        for root in roots:
+            ok, output = adb.adb_shell(
+                self.serial, f"find {root} -type f 2>/dev/null", timeout=15)
+            if not ok or not output:
+                continue
             for line in output.splitlines():
                 line = line.strip()
-                if not line or "Permission denied" in line:
+                if not line or "Permission denied" in line or line in seen:
                     continue
-                fname = Path(line).name
-                ext = Path(line).suffix.lower()
-                if ext in ('.jpg', '.jpeg', '.png', '.webp', '.gif'):
-                    ftype = "Image"
-                elif ext in ('.mp4', '.3gp', '.mkv'):
-                    ftype = "Video"
-                elif ext in ('.opus', '.aac', '.mp3'):
-                    ftype = "Audio"
-                else:
-                    ftype = "Cache File"
-                r.append({
-                    "type": ftype, "category": "Instagram", "date": "",
-                    "summary": fname, "source": line,
-                    "_data": {"filename": fname, "path": line, "type": ftype, "size": ""}
-                })
-                c += 1
+                seen.add(line)
+                files.append(line)
+        for path in self._media_store_paths(packages):
+            if path not in seen:
+                seen.add(path)
+                files.append(path)
+        if not files:
+            self.progress.emit(
+                f"{label}: nothing readable. Android 11+ blocks /sdcard/Android/data "
+                f"from adb, and MediaStore holds no entries for "
+                f"{', '.join(packages)}.")
+        return files
+
+    def _instagram(self, r):
+        self.progress.emit("Extracting Instagram media...")
+        c = 0
+        for line in self._collect_social("Instagram", ["com.instagram.android"]):
+            fname = Path(line).name
+            ext = Path(line).suffix.lower()
+            if ext in ('.jpg', '.jpeg', '.png', '.webp', '.gif'):
+                ftype = "Image"
+            elif ext in ('.mp4', '.3gp', '.mkv'):
+                ftype = "Video"
+            elif ext in ('.opus', '.aac', '.mp3'):
+                ftype = "Audio"
+            else:
+                ftype = "Cache File"
+            r.append({
+                "type": ftype, "category": "Instagram", "date": "",
+                "summary": fname, "source": line,
+                "_data": {"filename": fname, "path": line, "type": ftype, "size": ""}
+            })
+            c += 1
+            if c >= 5000:
+                break
         self.progress.emit(f"Loaded {c} Instagram files")
 
     def _twitter(self, r):
-        self.progress.emit("Extracting Twitter/X cache files...")
-        ok, output = adb.adb_shell(self.serial,
-            'find /sdcard/Android/data/com.twitter.android/ -type f 2>/dev/null', timeout=15)
+        self.progress.emit("Extracting Twitter/X media...")
         c = 0
-        if ok and output:
-            for line in output.splitlines():
-                line = line.strip()
-                if not line or "Permission denied" in line:
-                    continue
-                fname = Path(line).name
-                ext = Path(line).suffix.lower()
-                if ext in ('.jpg', '.jpeg', '.png', '.webp', '.gif'):
-                    ftype = "Image"
-                elif ext in ('.mp4', '.3gp', '.mkv'):
-                    ftype = "Video"
-                elif ext in ('.opus', '.aac', '.mp3'):
-                    ftype = "Audio"
-                else:
-                    ftype = "Cache File"
-                r.append({
-                    "type": ftype, "category": "Twitter", "date": "",
-                    "summary": fname, "source": line,
-                    "_data": {"filename": fname, "path": line, "type": ftype, "size": ""}
-                })
-                c += 1
+        for line in self._collect_social("Twitter/X", ["com.twitter.android"]):
+            fname = Path(line).name
+            ext = Path(line).suffix.lower()
+            if ext in ('.jpg', '.jpeg', '.png', '.webp', '.gif'):
+                ftype = "Image"
+            elif ext in ('.mp4', '.3gp', '.mkv'):
+                ftype = "Video"
+            elif ext in ('.opus', '.aac', '.mp3'):
+                ftype = "Audio"
+            else:
+                ftype = "Cache File"
+            r.append({
+                "type": ftype, "category": "Twitter", "date": "",
+                "summary": fname, "source": line,
+                "_data": {"filename": fname, "path": line, "type": ftype, "size": ""}
+            })
+            c += 1
+            if c >= 5000:
+                break
         self.progress.emit(f"Loaded {c} Twitter/X files")
 
     def _emails_accounts(self, r):
@@ -1408,35 +1502,20 @@ class LoadWorker(QThread):
         self.progress.emit(f"Loaded {c} crash entries")
 
     def _facebook(self, r):
-        self.progress.emit("Extracting Facebook/Messenger files...")
-        paths = [
-            '/sdcard/Android/data/com.facebook.katana/',
-            '/sdcard/Android/data/com.facebook.orca/',
-            '/sdcard/Android/media/com.facebook.katana/',
-            '/sdcard/Android/media/com.facebook.orca/',
-        ]
+        self.progress.emit("Extracting Facebook/Messenger media...")
+        packages = ["com.facebook.katana", "com.facebook.orca", "com.facebook.lite"]
         c = 0
-        for search_path in paths:
-            ok, output = adb.adb_shell(self.serial,
-                f'find {search_path} -type f 2>/dev/null', timeout=15)
-            if not ok or not output:
-                continue
-            for line in output.splitlines():
-                line = line.strip()
-                if not line or "Permission denied" in line:
-                    continue
-                fname = Path(line).name
-                ext = Path(line).suffix.lower()
-                ftype = "Image" if ext in ('.jpg', '.jpeg', '.png', '.webp', '.gif') else (
-                    "Video" if ext in ('.mp4', '.3gp') else "Cache File")
-                r.append({
-                    "type": ftype, "category": "Facebook", "date": "",
-                    "summary": fname, "source": line,
-                    "_data": {"filename": fname, "path": line, "type": ftype, "size": ""}
-                })
-                c += 1
-                if c >= 5000:
-                    break
+        for line in self._collect_social("Facebook/Messenger", packages):
+            fname = Path(line).name
+            ext = Path(line).suffix.lower()
+            ftype = "Image" if ext in ('.jpg', '.jpeg', '.png', '.webp', '.gif') else (
+                "Video" if ext in ('.mp4', '.3gp') else "Cache File")
+            r.append({
+                "type": ftype, "category": "Facebook", "date": "",
+                "summary": fname, "source": line,
+                "_data": {"filename": fname, "path": line, "type": ftype, "size": ""}
+            })
+            c += 1
             if c >= 5000:
                 break
         self.progress.emit(f"Loaded {c} Facebook files")
@@ -2342,6 +2421,14 @@ class ArtifactsPage(QWidget):
         self.stacked.addWidget(self.conversation_view)
         self.stacked.addWidget(self.chat_view)
 
+        # Thumbnail gallery, index 3. Kept as its own page so the list views can
+        # stay lists: a call log belongs in a table, a cache of screenshots
+        # belongs in a grid, and forcing both into one widget made both worse.
+        self.gallery_view = MediaGallery()
+        self.gallery_view.back_requested.connect(self._go_back_to_grid)
+        self.gallery_view.item_activated.connect(self._open_media_viewer)
+        self.stacked.addWidget(self.gallery_view)
+
     def _build_app_grid(self):
         page = QWidget()
         page.setStyleSheet("background: #0a0e17;")
@@ -2452,6 +2539,31 @@ class ArtifactsPage(QWidget):
         self.conv_count = QLabel("")
         self.conv_count.setStyleSheet("color: #64748b; font-size: 12px; background: transparent; border: none;")
         header_layout.addWidget(self.conv_count)
+
+        # Only meaningful for categories that hold pictures; hidden otherwise.
+        self.grid_btn = QPushButton("Grid view")
+        self.grid_btn.setFixedHeight(30)
+        self.grid_btn.setVisible(False)
+        self.grid_btn.setStyleSheet(
+            "QPushButton { background: #1e293b; color: #e2e8f0; border: 1px solid #334155;"
+            " border-radius: 6px; font-size: 12px; font-weight: 600; padding: 0 12px; }"
+            "QPushButton:hover { background: #334155; }")
+        self.grid_btn.clicked.connect(self._open_current_gallery)
+        header_layout.addWidget(self.grid_btn)
+
+        # ADB screencap: whatever the examiner is looking at on the handset can
+        # be captured as a finding, which is the only way to preserve a chat
+        # that lives inside an app the tool cannot read.
+        self.capture_btn = QPushButton("Capture Screen")
+        self.capture_btn.setFixedHeight(30)
+        self.capture_btn.setStyleSheet(
+            "QPushButton { background: #7c3aed; color: white; border: none;"
+            " border-radius: 6px; font-size: 12px; font-weight: 600; padding: 0 12px; }"
+            "QPushButton:hover { background: #7c3aed; }"
+            "QPushButton:disabled { background: #1e293b; color: #475569; }")
+        self.capture_btn.clicked.connect(self._capture_screen)
+        header_layout.addWidget(self.capture_btn)
+
         outer.addWidget(header)
 
         self.conv_scroll = QScrollArea()
@@ -2564,29 +2676,90 @@ class ArtifactsPage(QWidget):
         self.stacked.setCurrentIndex(1)
 
     def _show_call_conversations(self):
+        """The call log, as a table an examiner can actually read.
+
+        This used to group calls by number into a chat-style thread, which hid
+        the two facts that matter in a call log: which direction each call went
+        and whether it connected. A flat table keeps every call on its own line
+        and makes the missed, rejected and blocked entries visible instead of
+        burying them inside a conversation.
+        """
+        from PyQt6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
+        from PyQt6.QtGui import QColor
+
         self.conv_title.setText("Call Log")
         calls = [a for a in self.all_artifacts if a.get("category") == "Calls"]
+        calls.sort(key=lambda a: int(a.get("_data", {}).get("raw_date") or 0), reverse=True)
         self.conv_count.setText(f"{len(calls)} calls")
-
+        self._set_media_actions([])
         self._clear_layout(self.conv_list_layout)
 
-        call_convs = {}
-        for call in calls:
-            number = call.get("_data", {}).get("number", "Unknown")
-            if number not in call_convs:
-                contact_name = _resolve_contact_name(self._contacts, number)
-                call_convs[number] = {
-                    "phone": number,
-                    "contact_name": contact_name,
-                    "messages": [],
-                }
-            call_convs[number]["messages"].append(call)
+        if not calls:
+            self._add_empty(self.conv_list_layout, "No call log records were readable on this device.")
+            self.stacked.setCurrentIndex(1)
+            return
 
-        sorted_convs = sorted(call_convs.values(), key=_conversation_sort_key, reverse=True)
-        for conv in sorted_convs:
-            item = ConversationItemWidget(conv)
-            item.clicked.connect(self._on_conversation_clicked)
-            self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, item)
+        colour = {"Incoming": "#22c55e", "Outgoing": "#3b82f6", "Missed": "#ef4444",
+                  "Rejected": "#f59e0b", "Blocked": "#94a3b8", "Voicemail": "#a855f7"}
+
+        answered = sum(1 for c in calls if c.get("_data", {}).get("answered") == "Answered")
+        missed = sum(1 for c in calls if c.get("_data", {}).get("type") == "Missed")
+        rejected = sum(1 for c in calls if c.get("_data", {}).get("type") == "Rejected")
+        summary = QLabel(
+            f"  {answered} answered  \u00b7  {missed} missed  \u00b7  {rejected} rejected"
+            f"  \u00b7  {len(calls) - answered - missed - rejected} other")
+        summary.setStyleSheet(
+            "color: #94a3b8; font-size: 11px; padding: 4px 0 8px 0;"
+            " background: transparent; border: none;")
+        self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, summary)
+
+        headers = ["Contact / Number", "Direction", "Answered", "Duration", "Date & Time"]
+        table = QTableWidget()
+        table.setColumnCount(len(headers))
+        table.setHorizontalHeaderLabels(headers)
+        table.setRowCount(len(calls))
+        table.setSortingEnabled(False)
+        table.verticalHeader().setVisible(False)
+        table.setShowGrid(False)
+        table.setAlternatingRowColors(True)
+        table.setStyleSheet("""
+            QTableWidget { background: #111827; border: 1px solid #1e293b; border-radius: 8px;
+                gridline-color: #1e293b; font-size: 12px; }
+            QTableWidget::item { padding: 7px 10px; }
+            QTableWidget::item:selected { background: rgba(37,99,235,0.25); }
+            QHeaderView::section { background: #1a2234; color: #94a3b8; border: none;
+                border-bottom: 2px solid #1e293b; font-size: 11px; font-weight: 700; padding: 9px; }
+        """)
+
+        for row, call in enumerate(calls[:5000]):
+            data = call.get("_data", {})
+            number = data.get("number", "") or "Unknown"
+            name = data.get("name") or data.get("cached_name") or _resolve_contact_name(
+                self._contacts, number)
+            label = f"{name}  ({number})" if name and name != number else number
+            direction = data.get("type", "")
+            status = data.get("answered", "")
+
+            cells = [
+                label,
+                direction,
+                status,
+                data.get("duration", ""),
+                data.get("date", ""),
+            ]
+            for column, value in enumerate(cells):
+                item = QTableWidgetItem(str(value))
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                if column == 1:
+                    item.setForeground(QColor(colour.get(direction, "#a8b4c4")))
+                table.setItem(row, column, item)
+
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column in range(1, len(headers)):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        table.setMinimumHeight(480)
+        self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, table)
 
         self.stacked.setCurrentIndex(1)
 
@@ -2594,14 +2767,16 @@ class ArtifactsPage(QWidget):
         self.conv_title.setText("WhatsApp")
         wa_items = [a for a in self.all_artifacts if a.get("category") == "WhatsApp"]
         self.conv_count.setText(f"{len(wa_items)} files")
+        self._set_media_actions([a for a in wa_items if a.get("type") in MEDIA_TYPES],
+                                "WhatsApp media")
 
         self._clear_layout(self.conv_list_layout)
 
         if not wa_items:
-            empty = QLabel("No WhatsApp data accessible.\n\nWhatsApp databases require root access.\nCached media from /sdcard/Android/data/com.whatsapp/ is shown.")
-            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty.setStyleSheet("color: #64748b; font-size: 13px; padding: 40px; background: transparent; border: none;")
-            self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, empty)
+            self._add_empty(
+                self.conv_list_layout,
+                "No WhatsApp data accessible.\n\nWhatsApp databases require root access.\n"
+                "Cached media from /sdcard/Android/data/com.whatsapp/ is shown.")
             self.stacked.setCurrentIndex(1)
             return
 
@@ -2643,9 +2818,7 @@ class ArtifactsPage(QWidget):
                     item_layout.addWidget(sz_lbl)
 
                 if ftype in ("Image", "Video", "GIF"):
-                    view_btn = QPushButton("View")
-                    view_btn.setFixedSize(50, 26)
-                    view_btn.setStyleSheet("QPushButton { background: #25d366; color: white; border-radius: 6px; font-size: 10px; font-weight: 600; } QPushButton:hover { background: #1da851; }")
+                    view_btn = self._media_button("View", "#25d366")
                     remote_path = item.get("_data", {}).get("path", "")
                     view_btn.clicked.connect(lambda checked, p=remote_path, t=ftype: self._open_media_viewer(p, t))
                     item_layout.addWidget(view_btn)
@@ -2658,14 +2831,13 @@ class ArtifactsPage(QWidget):
         self.conv_title.setText("Telegram")
         tg_items = [a for a in self.all_artifacts if a.get("category") == "Telegram"]
         self.conv_count.setText(f"{len(tg_items)} files")
+        self._set_media_actions([a for a in tg_items if a.get("type") in MEDIA_TYPES],
+                                "Telegram media")
 
         self._clear_layout(self.conv_list_layout)
 
         if not tg_items:
-            empty = QLabel("No Telegram data accessible.")
-            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty.setStyleSheet("color: #64748b; font-size: 13px; padding: 40px; background: transparent; border: none;")
-            self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, empty)
+            self._add_empty(self.conv_list_layout, "No Telegram data accessible.")
             self.stacked.setCurrentIndex(1)
             return
 
@@ -2707,9 +2879,7 @@ class ArtifactsPage(QWidget):
                     item_layout.addWidget(sz_lbl)
 
                 if ftype in ("Image", "Video", "Profile Photo"):
-                    view_btn = QPushButton("View")
-                    view_btn.setFixedSize(50, 26)
-                    view_btn.setStyleSheet("QPushButton { background: #0088cc; color: white; border-radius: 6px; font-size: 10px; font-weight: 600; } QPushButton:hover { background: #006ba3; }")
+                    view_btn = self._media_button("View", "#0088cc")
                     remote_path = item.get("_data", {}).get("path", "")
                     view_btn.clicked.connect(lambda checked, p=remote_path, t=ftype: self._open_media_viewer(p, t))
                     item_layout.addWidget(view_btn)
@@ -2719,115 +2889,21 @@ class ArtifactsPage(QWidget):
         self.stacked.setCurrentIndex(1)
 
     def _show_media_gallery(self, category, app_def):
-        self.conv_title.setText(app_def["name"] + " — Media Gallery")
+        """Media categories open straight into the thumbnail grid."""
         media_items = [a for a in self.all_artifacts if a.get("category") == category
-                       and a.get("type") in ("Image", "Video", "GIF", "Audio", "Photo", "Voice Recording")]
+                       and a.get("type") in MEDIA_TYPES]
+        self.conv_title.setText(app_def["name"] + " \u2014 Media Gallery")
         self.conv_count.setText(f"{len(media_items)} media files")
 
-        self._clear_layout(self.conv_list_layout)
-
         if not media_items:
-            empty = QLabel("No media files found.")
-            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty.setStyleSheet("color: #64748b; font-size: 13px; padding: 40px; background: transparent; border: none;")
-            self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, empty)
+            self._clear_layout(self.conv_list_layout)
+            self._set_media_actions([])
+            self._add_empty(self.conv_list_layout,
+                            "No media files found in this category.")
             self.stacked.setCurrentIndex(1)
             return
 
-        type_groups = {}
-        for item in media_items:
-            ftype = item.get("type", "")
-            if ftype not in type_groups:
-                type_groups[ftype] = []
-            type_groups[ftype].append(item)
-
-        total_label = QLabel(f"  Total: {len(media_items)} files")
-        total_label.setStyleSheet("color: #94a3b8; font-size: 11px; padding: 4px 0 8px 0; background: transparent; border: none;")
-        self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, total_label)
-
-        for ftype in ["Photo", "Image", "Video", "GIF", "Audio", "Voice Recording"]:
-            items = type_groups.get(ftype, [])
-            if not items:
-                continue
-
-            color = "#8b5cf6"
-            if ftype in ("Photo", "Image"):
-                color = "#22c55e"
-            elif ftype == "Video":
-                color = "#3b82f6"
-            elif ftype == "GIF":
-                color = "#f59e0b"
-            elif ftype in ("Audio", "Voice Recording"):
-                color = "#ec4899"
-
-            header = QLabel(f"  {ftype} ({len(items)})")
-            header.setStyleSheet(f"color: {color}; font-size: 12px; font-weight: 700; padding: 8px 0 4px 0; background: transparent; border: none;")
-            self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, header)
-
-            folder_groups = {}
-            for item in items:
-                folder = item.get("_data", {}).get("folder", "Unknown")
-                if folder not in folder_groups:
-                    folder_groups[folder] = []
-                folder_groups[folder].append(item)
-
-            for folder, folder_items in folder_groups.items():
-                if len(folder_groups) > 1:
-                    folder_short = folder.split("/")[-1] if "/" in folder else folder
-                    folder_lbl = QLabel(f"    {folder_short} ({len(folder_items)})")
-                    folder_lbl.setStyleSheet("color: #64748b; font-size: 10px; padding: 2px 0 2px 12px; background: transparent; border: none;")
-                    self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, folder_lbl)
-
-                for item in folder_items[:1000]:
-                    item_frame = QFrame()
-                    item_frame.setStyleSheet(f"""
-                        QFrame {{ background: #111827; border-radius: 8px; border: 1px solid #1e293b; }}
-                        QFrame:hover {{ background: #1a2234; border: 1px solid {color}; }}
-                    """)
-                    item_frame.setFixedHeight(44)
-                    item_layout = QHBoxLayout(item_frame)
-                    item_layout.setContentsMargins(12, 6, 12, 6)
-
-                    fname = item.get("_data", {}).get("filename", "")
-                    sz = item.get("_data", {}).get("size", "")
-                    date = item.get("date", "")
-
-                    name_lbl = QLabel(fname[:50])
-                    name_lbl.setStyleSheet("color: #e2e8f0; font-size: 12px; background: transparent; border: none;")
-                    name_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-                    item_layout.addWidget(name_lbl, 1)
-
-                    if sz:
-                        sz_lbl = QLabel(sz)
-                        sz_lbl.setStyleSheet("color: #64748b; font-size: 11px; background: transparent; border: none;")
-                        item_layout.addWidget(sz_lbl)
-
-                    if date:
-                        date_lbl = QLabel(date[:10])
-                        date_lbl.setStyleSheet("color: #475569; font-size: 10px; background: transparent; border: none;")
-                        item_layout.addWidget(date_lbl)
-
-                    remote_path = item.get("_data", {}).get("path", "")
-                    is_media = ftype in ("Image", "Photo", "Video", "GIF")
-                    is_audio = ftype in ("Audio", "Voice Recording")
-
-                    if is_media:
-                        view_btn = QPushButton("View")
-                        view_btn.setFixedSize(50, 26)
-                        view_btn.setStyleSheet(f"QPushButton {{ background: {color}; color: white; border-radius: 6px; font-size: 10px; font-weight: 600; }} QPushButton:hover {{ opacity: 0.8; }}")
-                        media_t = "Image" if ftype in ("Photo", "Image") else ("Video" if ftype == "Video" else "GIF")
-                        view_btn.clicked.connect(lambda checked, p=remote_path, t=media_t: self._open_media_viewer(p, t))
-                        item_layout.addWidget(view_btn)
-                    elif is_audio:
-                        play_btn = QPushButton("Play")
-                        play_btn.setFixedSize(50, 26)
-                        play_btn.setStyleSheet(f"QPushButton {{ background: {color}; color: white; border-radius: 6px; font-size: 10px; font-weight: 600; }} QPushButton:hover {{ opacity: 0.8; }}")
-                        play_btn.clicked.connect(lambda checked, p=remote_path: self._open_media_viewer(p, "Audio"))
-                        item_layout.addWidget(play_btn)
-
-                    self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, item_frame)
-
-        self.stacked.setCurrentIndex(1)
+        self._open_gallery(app_def["name"], media_items)
 
     def _open_media_viewer(self, remote_path, media_type):
         """Open universal file viewer — shows actual content for images, video, audio, text, PDF, DB, etc."""
@@ -3191,12 +3267,8 @@ class ArtifactsPage(QWidget):
                 is_video = ext in ('.mp4', '.3gp', '.mkv', '.avi', '.mov')
 
                 if is_media or is_video:
-                    view_btn = QPushButton("View")
-                    view_btn.setFixedSize(50, 26)
-                    if is_media:
-                        view_btn.setStyleSheet("QPushButton { background: #25d366; color: white; border-radius: 6px; font-size: 10px; font-weight: 600; } QPushButton:hover { background: #1da851; }")
-                    else:
-                        view_btn.setStyleSheet("QPushButton { background: #3b82f6; color: white; border-radius: 6px; font-size: 10px; font-weight: 600; } QPushButton:hover { background: #2563eb; }")
+                    view_btn = self._media_button(
+                        "View", "#25d366" if is_media else "#3b82f6")
                     media_type = "Image" if is_media else "Video"
                     view_btn.clicked.connect(lambda checked, p=remote_path, t=media_type: self._open_media_viewer(p, t))
                     item_layout.addWidget(view_btn)
@@ -3360,9 +3432,7 @@ class ArtifactsPage(QWidget):
                         date_lbl.setStyleSheet("color: #64748b; font-size: 10px; background: transparent; border: none;")
                         item_layout.addWidget(date_lbl)
 
-                    view_btn = QPushButton("View")
-                    view_btn.setFixedSize(50, 26)
-                    view_btn.setStyleSheet("QPushButton { background: #22c55e; color: white; border-radius: 6px; font-size: 10px; font-weight: 600; } QPushButton:hover { background: #16a34a; }")
+                    view_btn = self._media_button("View", "#22c55e")
                     view_btn.clicked.connect(lambda checked, i=item: self._open_email_viewer(i))
                     item_layout.addWidget(view_btn)
 
@@ -3572,15 +3642,11 @@ class ArtifactsPage(QWidget):
                 is_pdf = ext == '.pdf'
 
                 if is_previewable:
-                    preview_btn = QPushButton("Preview")
-                    preview_btn.setFixedSize(65, 26)
-                    preview_btn.setStyleSheet("QPushButton { background: #8b5cf6; color: white; border-radius: 6px; font-size: 10px; font-weight: 600; } QPushButton:hover { background: #7c3aed; }")
+                    preview_btn = self._media_button("Preview", "#8b5cf6")
                     preview_btn.clicked.connect(lambda checked, p=remote_path, t=ftype: self._open_text_preview(p, t))
                     item_layout.addWidget(preview_btn)
                 elif is_pdf:
-                    view_btn = QPushButton("View")
-                    view_btn.setFixedSize(50, 26)
-                    view_btn.setStyleSheet("QPushButton { background: #ef4444; color: white; border-radius: 6px; font-size: 10px; font-weight: 600; } QPushButton:hover { background: #dc2626; }")
+                    view_btn = self._media_button("View", "#ef4444")
                     view_btn.clicked.connect(lambda checked, p=remote_path, t="PDF": self._open_media_viewer(p, t))
                     item_layout.addWidget(view_btn)
 
@@ -3677,8 +3743,16 @@ class ArtifactsPage(QWidget):
         self.conv_title.setText(app_def["name"])
         items = [a for a in self.all_artifacts if a.get("category") == category]
         self.conv_count.setText(f"{len(items)} items")
+        self._set_media_actions([a for a in items if a.get("type") in MEDIA_TYPES],
+                                app_def["name"])
 
         self._clear_layout(self.conv_list_layout)
+
+        if not items:
+            self._add_empty(self.conv_list_layout,
+                            "Nothing was recovered for this category on this device.")
+            self.stacked.setCurrentIndex(1)
+            return
 
         for item_data in items:
             item_frame = QFrame()
@@ -3704,6 +3778,114 @@ class ArtifactsPage(QWidget):
             self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, item_frame)
 
         self.stacked.setCurrentIndex(1)
+
+    # -- media helpers ------------------------------------------------------
+
+    def _media_button(self, text: str, colour: str) -> QPushButton:
+        """A small action button that cannot clip its own caption.
+
+        Every one of these used to be ``setFixedSize(50, 26)`` while the page
+        stylesheet added 20 px of horizontal padding to every QPushButton, so
+        the label was drawn into 10 px of space and "View" appeared as "iew".
+        Height is fixed, width comes from the text.
+        """
+        button = QPushButton(text)
+        button.setFixedHeight(28)
+        button.setMinimumWidth(64)
+        button.setStyleSheet(
+            f"QPushButton {{ background: {colour}; color: white; border: none;"
+            " border-radius: 6px; font-size: 11px; font-weight: 600; padding: 0 12px; }"
+            f"QPushButton:hover {{ background: {colour}; }}")
+        return button
+
+    def _add_empty(self, layout, message: str) -> None:
+        label = QLabel(message)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setStyleSheet(
+            "color: #64748b; font-size: 13px; padding: 40px;"
+            " background: transparent; border: none;")
+        layout.insertWidget(layout.count() - 1, label)
+
+    def _set_media_actions(self, media_items, title: str = "") -> None:
+        """Show the Grid button only when the current category holds pictures."""
+        self._gallery_items = list(media_items or [])
+        self._gallery_title = title or (self._current_app or {}).get("name", "Media")
+        self.grid_btn.setVisible(bool(self._gallery_items))
+
+    def _open_current_gallery(self) -> None:
+        self._open_gallery(self._gallery_title, self._gallery_items)
+
+    def _open_gallery(self, title: str, items) -> None:
+        items = [item for item in items if (item.get("_data", {}).get("path")
+                                            or item.get("source"))]
+        if not items:
+            self.progress_frame.setVisible(True)
+            self.progress_label.setText("Nothing to show in a grid for this category.")
+            return
+        self.gallery_view.set_serial(self.device_bar.get_first_serial() or "")
+        self.gallery_view.load(title, items)
+        if self.stacked.currentIndex() != 3:
+            self._gallery_return = self.stacked.currentIndex()
+        self.stacked.setCurrentIndex(3)
+
+    def _capture_screen(self) -> None:
+        """Grab the handset's screen over ADB and file it as evidence."""
+        import hashlib
+
+        serial = self.device_bar.get_first_serial()
+        if not serial:
+            self._flash_capture("No device connected")
+            return
+
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        folder = Path.home() / ".droidforenx" / "evidence" / "screenshots"
+        target = folder / f"screen_{stamp}.png"
+        ok, message = adb.capture_screen(serial, str(target))
+        if not ok:
+            logger.warning(f"Screenshot failed: {message}")
+            self._flash_capture("Capture failed")
+            return
+
+        try:
+            digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        except OSError:
+            digest = ""
+        size = target.stat().st_size if target.exists() else 0
+
+        artifact = {
+            "type": "Image",
+            "category": "Screenshots",
+            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            "summary": f"Screenshot {stamp}",
+            "source": str(target),
+            "_data": {
+                "filename": target.name,
+                "path": str(target),
+                "folder": "On-device screen capture",
+                "type": "Image",
+                "size": f"{size / 1024:.0f} KB",
+                "sha256": digest,
+                "captured_from": serial,
+            },
+        }
+        self.all_artifacts.append(artifact)
+        self._persist_artifacts([artifact])
+
+        widget = self.app_icon_widgets.get("Screenshots")
+        if widget is not None:
+            count = sum(1 for a in self.all_artifacts if a.get("category") == "Screenshots")
+            widget.update_count(count)
+
+        self._flash_capture(f"Saved {target.name}")
+
+    def _flash_capture(self, message: str) -> None:
+        self.capture_btn.setText(message)
+        self.capture_btn.setEnabled(False)
+        QTimer.singleShot(2500, self._reset_capture_button)
+
+    def _reset_capture_button(self) -> None:
+        self.capture_btn.setText("Capture Screen")
+        self.capture_btn.setEnabled(True)
 
     def _clear_layout(self, layout):
         while layout.count():
@@ -3742,7 +3924,10 @@ class ArtifactsPage(QWidget):
         sb.setValue(sb.maximum())
 
     def _go_back_to_grid(self):
-        self.stacked.setCurrentIndex(0)
+        # The gallery is reachable from the conversation list as well as from the
+        # app grid, so "back" returns to whatever view opened it.
+        target = getattr(self, "_gallery_return", 0)
+        self.stacked.setCurrentIndex(target if target != 3 else 0)
 
     def _go_back_to_conversations(self):
         self.stacked.setCurrentIndex(1)
@@ -3769,6 +3954,7 @@ class ArtifactsPage(QWidget):
             self._start_load(serial, "All")
 
     def _start_load(self, serial, category):
+        self._media_rows_cache = None
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait(2000)

@@ -67,7 +67,7 @@ def _pump(app, rounds=4):
 class BrandingAssetsTest(unittest.TestCase):
     """The files themselves, independent of any window."""
 
-    EXPECTED = ("logo.png", "icon.png", "icon.ico", "assistant.png")
+    EXPECTED = ("logo.png", "icon.png", "icon.ico")
 
     @classmethod
     def setUpClass(cls):
@@ -112,9 +112,8 @@ class BrandingAssetsTest(unittest.TestCase):
         self.assertAlmostEqual(logo.width(), 168, delta=1)
         self.assertGreater(logo.height(), 8)
 
-        avatar = branding.assistant_avatar(52)
-        self.assertIsNotNone(avatar)
-        self.assertEqual((avatar.width(), avatar.height()), (52, 52))
+        mark = branding.pixmap("icon.png")
+        self.assertIsNotNone(mark)
 
     @unittest.skipUnless(_QT_IMPORT, "PyQt6 is not available")
     def test_a_missing_asset_returns_none_instead_of_raising(self):
@@ -187,8 +186,10 @@ class BrandingInTheWindowTest(unittest.TestCase):
         self.assertFalse(self.window.windowIcon().isNull())
         self.assertFalse(self.window.windowIcon().pixmap(64, 64).isNull())
 
-    def test_the_assistant_button_wears_the_avatar(self):
-        button = self.window.assistant.button
-        self.assertFalse(button.icon().isNull(),
-                         "the assistant button fell back to the robot glyph")
-        self.assertEqual(button.iconSize().width(), 52)
+    def test_the_chat_assistant_is_gone(self):
+        """The officers asked for it out, so nothing should resurrect it.
+
+        It used to hang off a Ctrl+Shift+A shortcut with no visible control, so
+        a window-level assertion is the only way to notice it creeping back.
+        """
+        self.assertFalse(hasattr(self.window, "assistant"))

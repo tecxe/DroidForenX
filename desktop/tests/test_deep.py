@@ -22,7 +22,6 @@ for k, (name, _) in engine.ANALYSIS_MODULES.items():
 from desktop.ui.pages.home_page import HomePage
 from desktop.ui.pages.case_page import CasePage
 from desktop.ui.pages.device_page import DevicePage
-from desktop.ui.pages.seizure_page import SeizurePage
 from desktop.ui.pages.identify_page import IdentifyPage
 from desktop.ui.pages.acquire_page import AcquirePage
 from desktop.ui.pages.examine_page import ExaminePage
@@ -30,7 +29,7 @@ from desktop.ui.pages.report_page import ReportPage
 from desktop.ui.pages.browse_page import BrowsePage
 from desktop.ui.pages.artifacts_page import ArtifactsPage
 from desktop.ui.main_window import MainWindow
-print("\nAll 10 pages import OK")
+print("\nAll 9 pages import OK")
 print("MainWindow imports OK")
 
 from desktop.ui.widgets.stage_bar import StageBar

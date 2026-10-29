@@ -1,4 +1,4 @@
-"""Stage 4: Examination & Analysis page — deep forensic analysis of acquired data."""
+"""Stage 3: Examination & Analysis page — deep forensic analysis of acquired data."""
 import json
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                               QFrame, QGroupBox, QGridLayout, QCheckBox, QScrollArea,
@@ -73,7 +73,7 @@ class ExaminePage(QWidget):
         layout.setContentsMargins(32, 24, 32, 24)
         layout.setSpacing(16)
 
-        title = QLabel("🔬 Stage 4 — Examination & Analysis")
+        title = QLabel("🔬 Stage 3 — Examination & Analysis")
         title.setStyleSheet("font-size: 22px; font-weight: 700; color: #f59e0b; background: transparent; border: none;")
         layout.addWidget(title)
 
@@ -157,12 +157,18 @@ class ExaminePage(QWidget):
         # Results tabs
         self.tabs = QTabWidget()
         self.tabs.setVisible(False)
+        # A tab holding only tables has a size hint of a few rows, so the results
+        # used to open as a thin strip of clipped text once the page was scrolled
+        # to the top. The floor is what makes the findings readable at all.
+        self.tabs.setMinimumHeight(460)
         layout.addWidget(self.tabs)
 
         # Console
         self.console = LogConsole("Examination Log")
-        # This page previously pinned the console to 160px, which was the
-        # tightest squeeze in the app. Keep the LogConsole's own readable floor.
+        # Bounded in both directions: it needs to stay readable, but it must not
+        # eat the height the results tabs need.
+        self.console.setMinimumHeight(120)
+        self.console.setMaximumHeight(200)
         layout.addWidget(self.console)
 
         # No scroll area previously, so a short window compressed the console.
@@ -246,41 +252,7 @@ class ExaminePage(QWidget):
                     sub_label.setStyleSheet("font-size: 12px; font-weight: 600; color: #64748b; background: transparent; border: none; margin-top: 8px;")
                     tab_layout.addWidget(sub_label)
 
-                    table = QTableWidget()
-                    table.setAlternatingRowColors(True)
-                    table.setStyleSheet("""
-                        QTableWidget { background: #111827; border: 1px solid #1e293b; border-radius: 6px;
-                            gridline-color: #1e293b; font-size: 11px; }
-                        QTableWidget::item { padding: 6px 8px; border-bottom: 1px solid #1e293b; }
-                        QTableWidget::item:selected { background: rgba(37,99,235,0.15); }
-                        QHeaderView::section { background: #1a2234; color: #64748b; border: none;
-                            border-bottom: 2px solid #1e293b; font-size: 10px; font-weight: 600; padding: 8px; }
-                    """)
-                    table.verticalHeader().setVisible(False)
-                    table.setShowGrid(False)
-
-                    if isinstance(data[0], dict):
-                        headers = list(data[0].keys())
-                        table.setColumnCount(len(headers))
-                        table.setHorizontalHeaderLabels(headers)
-                        table.setRowCount(min(len(data), 500))
-                        for r, row_data in enumerate(data[:500]):
-                            for c, h in enumerate(headers):
-                                val = str(row_data.get(h, ""))[:200]
-                                item = QTableWidgetItem(val)
-                                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                                table.setItem(r, c, item)
-                    else:
-                        table.setColumnCount(1)
-                        table.setHorizontalHeaderLabels(["Value"])
-                        table.setRowCount(min(len(data), 500))
-                        for r, val in enumerate(data[:500]):
-                            item = QTableWidgetItem(str(val)[:200])
-                            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                            table.setItem(r, 0, item)
-
-                    table.horizontalHeader().setStretchLastSection(True)
-                    table.resizeColumnsToContents()
+                    table = self._result_table(data)
                     tab_layout.addWidget(table)
 
                 elif isinstance(data, dict) and data:
@@ -291,8 +263,75 @@ class ExaminePage(QWidget):
                             tab_layout.addWidget(lbl)
 
             tab_layout.addStretch()
-            self.tabs.addTab(tab, result["name"][:20])
+
+            # Each tab scrolls on its own. Modules such as the call log produce
+            # several sub-tables, and stacking them inside one fixed widget is
+            # what squeezed every table down to two visible rows.
+            scroller = QScrollArea()
+            scroller.setWidgetResizable(True)
+            scroller.setFrameShape(QFrame.Shape.NoFrame)
+            scroller.setWidget(tab)
+            self.tabs.addTab(scroller, result["name"][:20])
 
         self.tabs.setVisible(True)
         total_items = sum(r["item_count"] for r in results.values())
         self.console.log(f"Examination complete: {len(results)} modules, {total_items} total items", "success")
+
+    #: A results table never opens shorter than this, or the first thing the
+    #: examiner sees is a header and two clipped rows.
+    TABLE_MIN_HEIGHT = 240
+    TABLE_MAX_HEIGHT = 560
+    TABLE_MAX_COLUMN = 360
+
+    def _result_table(self, data: list) -> QTableWidget:
+        """One readable grid for a findings list.
+
+        Values used to be truncated to 200 characters *and* the columns were
+        sized to the widest cell, so a single long SMS pushed every other column
+        off screen. Columns are now capped and elide instead, which keeps the
+        row on one line and the grid inside the tab.
+        """
+        table = QTableWidget()
+        table.setAlternatingRowColors(True)
+        table.setStyleSheet("""
+            QTableWidget { background: #111827; border: 1px solid #1e293b; border-radius: 6px;
+                gridline-color: #1e293b; font-size: 12px; }
+            QTableWidget::item { padding: 6px 8px; border-bottom: 1px solid #1e293b; }
+            QTableWidget::item:selected { background: rgba(37,99,235,0.15); }
+            QHeaderView::section { background: #1a2234; color: #94a3b8; border: none;
+                border-bottom: 2px solid #1e293b; font-size: 11px; font-weight: 600; padding: 8px; }
+        """)
+        table.verticalHeader().setVisible(False)
+        table.setShowGrid(False)
+        table.setWordWrap(False)
+        table.setTextElideMode(Qt.TextElideMode.ElideRight)
+
+        rows = data[:500]
+        if isinstance(rows[0], dict):
+            headers = list(rows[0].keys())
+            table.setColumnCount(len(headers))
+            table.setHorizontalHeaderLabels(headers)
+            table.setRowCount(len(rows))
+            for r, row_data in enumerate(rows):
+                for c, h in enumerate(headers):
+                    item = QTableWidgetItem(str(row_data.get(h, ""))[:200])
+                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    table.setItem(r, c, item)
+        else:
+            table.setColumnCount(1)
+            table.setHorizontalHeaderLabels(["Value"])
+            table.setRowCount(len(rows))
+            for r, val in enumerate(rows):
+                item = QTableWidgetItem(str(val)[:200])
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(r, 0, item)
+
+        table.horizontalHeader().setStretchLastSection(True)
+        table.resizeColumnsToContents()
+        for column in range(table.columnCount()):
+            if table.columnWidth(column) > self.TABLE_MAX_COLUMN:
+                table.setColumnWidth(column, self.TABLE_MAX_COLUMN)
+
+        table.setMinimumHeight(self.TABLE_MIN_HEIGHT)
+        table.setMaximumHeight(self.TABLE_MAX_HEIGHT)
+        return table

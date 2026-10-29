@@ -129,6 +129,49 @@ def adb_shell(serial: str, command: str, timeout: int = 30) -> Tuple[bool, str]:
     return adb_cmd(["-s", serial, "shell", command], timeout=timeout)
 
 
+def capture_screen(serial: str, local_path: str, timeout: int = 45) -> Tuple[bool, str]:
+    """Save a PNG screenshot of whatever is on the device screen.
+
+    ``exec-out`` is used rather than ``shell`` because a shell redirect would
+    translate CR/LF and corrupt the PNG on Windows, and the write goes straight
+    to a binary file handle for the same reason. A screenshot is a finding in
+    its own right -- the file's hash is what proves it later -- so an empty or
+    non-PNG result is reported as a failure rather than saved.
+    """
+    destination = Path(local_path)
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with open(destination, "wb") as handle:
+            result = subprocess.run(
+                [ADB_PATH, "-s", serial, "exec-out", "screencap", "-p"],
+                stdout=handle, stderr=subprocess.PIPE, timeout=timeout,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+    except subprocess.TimeoutExpired:
+        return False, "Screenshot timed out"
+    except FileNotFoundError:
+        return False, f"ADB binary not found at: {ADB_PATH}"
+    except Exception as exc:  # pragma: no cover - defensive
+        return False, str(exc)
+
+    if result.returncode != 0:
+        destination.unlink(missing_ok=True)
+        return False, result.stderr.decode("utf-8", "replace").strip() or "screencap failed"
+
+    # PNG signature, and a floor on size: a dead device yields an empty file and
+    # an empty "screenshot" is worse than an honest error message.
+    try:
+        with open(destination, "rb") as handle:
+            signature = handle.read(8)
+        size = destination.stat().st_size
+    except OSError as exc:
+        return False, str(exc)
+    if signature != b"\x89PNG\r\n\x1a\n" or size < 1024:
+        destination.unlink(missing_ok=True)
+        return False, "device returned no usable image"
+    return True, str(destination)
+
+
 def list_devices() -> list:
     """
     List every ADB-attached device together with its state.
@@ -371,12 +414,18 @@ def pull_directory(serial: str, remote_dir: str, local_dir: str, timeout: int = 
     return count, total
 
 
-def query_content(serial: str, uri: str, sort: str = "") -> str:
-    """Query a content provider."""
+def query_content(serial: str, uri: str, sort: str = "", timeout: int = 60) -> str:
+    """Query a content provider.
+
+    ``timeout`` is exposed because the MediaStore index is huge on a phone with
+    a full camera roll: a 60-second default there is a minute of silence per
+    call, and three social loaders each making two calls can stall the whole
+    extraction. Callers that only want a sample should ask for less.
+    """
     cmd = f"content query --uri {uri}"
     if sort:
         cmd += f' --sort "{sort}"'
-    ok, output = adb_shell(serial, cmd, timeout=60)
+    ok, output = adb_shell(serial, cmd, timeout=timeout)
     return output if ok else ""
 
 

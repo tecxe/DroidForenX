@@ -302,6 +302,67 @@ def _merge(slots: List[Dict], subscriptions: List[Dict]) -> List[Dict]:
     return [by_slot[slot] for slot in sorted(by_slot)]
 
 
+def parse_siminfo(raw: str) -> List[Dict]:
+    """Parse ``content query content://telephony/siminfo``.
+
+    The telephony provider is the last place an unrooted handset will sometimes
+    still hand out the subscriber number: ``dumpsys isub`` redacts it and so do
+    the ``iphonesubinfo`` parcels on Android 11+. Each row is one subscription,
+    keyed by ``sim_id`` (the physical slot) and ``icc_id``.
+
+    ``number`` is only accepted when it looks like a dialable number. On many
+    builds the column is filled with the ICCID, a blank, or the literal string
+    ``null``, and reporting that as an MSISDN would be worse than reporting
+    nothing at all.
+    """
+    if not raw or "No result found" in raw:
+        return []
+
+    records = []
+    for line in raw.splitlines():
+        if "Row:" not in line:
+            continue
+        row = line.split("Row:", 1)[1].strip()
+        # Drop the leading row counter, then split on the comma that begins the
+        # next key=value pair so quoted values containing commas survive.
+        row = re.sub(r"^\d+\s*", "", row)
+        fields = {}
+        for pair in re.split(r",\s*(?=[a-zA-Z_]+=)", row):
+            key, sep, value = pair.partition("=")
+            if not sep:
+                continue
+            fields[key.strip()] = value.strip().strip('"')
+
+        slot_raw = fields.get("sim_id", "")
+        try:
+            slot = int(slot_raw)
+        except ValueError:
+            slot = None
+
+        number = (fields.get("number") or "").strip()
+        digits = re.sub(r"[^0-9]", "", number)
+        if number.lower() in ("null", "unknown") or len(digits) < 5:
+            number = ""
+        elif len(digits) >= 18 and digits.startswith("89"):
+            # An ICCID pasted into the number column. 89 is the major industry
+            # identifier for telecom and ICCIDs run to 19-20 digits; no phone
+            # number looks like that, and a report claiming otherwise is the
+            # kind of error an opposing expert enjoys.
+            number = ""
+
+        iccid = (fields.get("icc_id") or "").strip()
+        if iccid.lower() in ("null", "unknown"):
+            iccid = ""
+
+        records.append({
+            "slot": slot,
+            "iccid": iccid,
+            "msisdn": number,
+            "display_name": (fields.get("display_name") or "").strip(),
+        })
+    return records
+
+
 def read_sim_cards(serial: str) -> Dict:
     """Read every SIM the handset will expose, with provenance."""
     sources: Dict[str, str] = {}
@@ -340,6 +401,31 @@ def read_sim_cards(serial: str) -> Dict:
                     sim[field] = value
                     sim["source"] = f"{sim['source']} + {command}"
                     break
+
+    # The telephony provider, last. It is consulted for the subscriber number
+    # only: everything it reports about the card itself is already in hand from
+    # isub, and the provider happily reports an ICCID copied into the number
+    # column, which is exactly the value an examiner must not be told is an
+    # MSISDN. A row is matched to a card by slot, or by ICCID when the slot is
+    # not stated.
+    raw_siminfo = shell("content query --uri content://telephony/siminfo")
+    siminfo = parse_siminfo(raw_siminfo)
+    from_siminfo = 0
+    for record in siminfo:
+        if not record["msisdn"]:
+            continue
+        for sim in sims:
+            if sim["status"] != "present" or sim["msisdn"]:
+                continue
+            same_slot = record["slot"] is not None and record["slot"] == sim["slot"]
+            same_iccid = bool(record["iccid"]) and record["iccid"] == sim["iccid"]
+            if same_slot or same_iccid:
+                sim["msisdn"] = record["msisdn"]
+                sim["source"] = f"{sim['source']} + content://telephony/siminfo"
+                from_siminfo += 1
+                break
+    sources["content://telephony/siminfo"] = (
+        "ok" if from_siminfo else ("empty" if siminfo else "unavailable"))
 
     # Contacts: per-subscription ADN so they land on the right card.
     present = [sim for sim in sims if sim["status"] == "present"]

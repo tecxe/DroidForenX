@@ -177,12 +177,22 @@ class SidebarRenderingTest(unittest.TestCase):
             f"{self.SMALLEST_WORK_AREA_HEIGHT} px desktop leaves it {available} px, "
             "so its chrome will be squeezed and its labels clipped")
 
-    def test_the_seizure_nav_item_shows_a_literal_ampersand(self):
-        texts = [btn.text() for btn, _ in self.window.nav_buttons]
-        seizure = [text for text in texts if "Seizure" in text]
-        self.assertEqual(len(seizure), 1)
-        # A lone "&" is swallowed as a mnemonic and the word loses a character.
-        self.assertIn("&&", seizure[0])
+    def test_the_workflow_has_four_stages_starting_at_identification(self):
+        """Seizure and Isolation is gone: Faraday bags do that job.
+
+        The nav list is the one place the workflow is advertised, so it has to
+        match the pages that exist. A leftover fifth tile would send the
+        operator to a page that is no longer there.
+        """
+        stages = [(btn.text(), idx) for btn, idx in self.window.nav_buttons
+                  if "Stage" not in btn.text() and idx in (3, 4, 5, 6)]
+        self.assertEqual([idx for _, idx in stages], [3, 4, 5, 6])
+        self.assertFalse(any("Seizure" in text for text, _ in stages))
+
+    def test_identification_is_stage_one(self):
+        texts = [btn.text() for btn, idx in self.window.nav_buttons if idx == 3]
+        self.assertEqual(len(texts), 1)
+        self.assertIn("1. Identification", texts[0])
 
     def test_navigation_selects_by_index_not_caption(self):
         # The caption above only stays safe while nothing matches on it.
@@ -474,7 +484,7 @@ class NavigationRouteTest(unittest.TestCase):
         self.assertIs(self.window.stack.currentWidget(), self.window.sim_page)
 
     def test_every_named_route_reaches_its_own_page(self):
-        routes = ("home", "case", "device", "seizure", "identify", "acquire",
+        routes = ("home", "case", "device", "identify", "acquire",
                   "examine", "report", "browse", "artifacts", "sim")
         landed = {}
         for name in routes:

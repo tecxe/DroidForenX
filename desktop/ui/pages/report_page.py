@@ -1,4 +1,4 @@
-"""Stage 5: Professional Forensic Investigation Report — court-ready, non-technical language."""
+"""Stage 4: Professional Forensic Investigation Report — court-ready, non-technical language."""
 import uuid
 import hashlib
 import json
@@ -31,7 +31,7 @@ class ReportPage(QWidget):
         layout.setContentsMargins(32, 24, 32, 24)
         layout.setSpacing(16)
 
-        title = QLabel("Stage 5 — Forensic Investigation Report")
+        title = QLabel("Stage 4 — Forensic Investigation Report")
         title.setStyleSheet("font-size: 22px; font-weight: 700; color: #ef4444; background: transparent; border: none;")
         layout.addWidget(title)
 
@@ -665,7 +665,6 @@ in legal proceedings.</p>
 <tr><th>Agency</th><td>{d['org'] if d['org'] else 'Digital Forensics Unit'}</td></tr>
 <tr><th>Device Serial Number</th><td>{dev.get('session_id', 'N/A')}</td></tr>
 <tr><th>Initial Condition</th><td>Device was powered on and connected to the examination workstation via USB cable</td></tr>
-<tr><th>Network Isolation</th><td>Device was placed in airplane mode to prevent remote access or data modification</td></tr>
 </table>
 
 <h3>2.2 Custody Log</h3>
@@ -848,21 +847,14 @@ assume no responsibility for the misuse of this report or its findings outside o
 
     def _html_methodology_section(self):
         return """
-<h3>Stage 1: Seizure and Isolation</h3>
-<div class="finding-card">
-<p>The device was physically seized and immediately placed in airplane mode to prevent any remote
-access, data deletion, or communication that could compromise the evidence. The device was connected
-to a forensic workstation using a USB cable in a controlled environment.</p>
-</div>
-
-<h3>Stage 2: Device Identification</h3>
+<h3>Stage 1: Device Identification</h3>
 <div class="finding-card">
 <p>The device was identified by its make, model, serial number, and operating system version. This
 information is essential for determining which forensic techniques are applicable and for uniquely
 identifying the device in legal proceedings.</p>
 </div>
 
-<h3>Stage 3: Data Acquisition</h3>
+<h3>Stage 2: Data Acquisition</h3>
 <div class="finding-card">
 <p>Data was collected from the device using multiple forensic methods. The Android Debug Bridge (ADB)
 was used to communicate with the device and extract data from publicly accessible sources, including
@@ -870,7 +862,7 @@ text messages, call logs, contacts, media files, installed applications, and app
 No data was written to or modified on the device during this process.</p>
 </div>
 
-<h3>Stage 4: Examination and Analysis</h3>
+<h3>Stage 3: Examination and Analysis</h3>
 <div class="finding-card">
 <p>The recovered data was organized into categories and analyzed for investigative relevance. Text
 messages were reviewed for content and frequency. Call logs were analyzed for communication patterns.
@@ -878,7 +870,7 @@ Financial transactions were identified and catalogued. Documents were categorize
 Social media and email accounts were identified and documented.</p>
 </div>
 
-<h3>Stage 5: Reporting</h3>
+<h3>Stage 4: Reporting</h3>
 <div class="finding-card">
 <p>All findings were compiled into this report, written in plain language suitable for non-technical
 readers including lawyers, judges, and investigators. Every piece of evidence is documented with its
@@ -1441,12 +1433,11 @@ with tabular data are available.</p>
         pdf.set_text_color(50, 50, 50)
         methodology = (
             "The examination followed NIST SP 800-101 Rev. 2 guidelines and SWGDE best practices. "
-            "The 5-stage workflow was employed:\n\n"
-            "Stage 1 — Seizure & Isolation: Device placed in airplane mode, connected to forensic workstation.\n"
-            "Stage 2 — Device Identification: Make, model, serial number, and OS version documented.\n"
-            "Stage 3 — Data Acquisition: Evidence collected from content providers, dumpsys, and filesystem.\n"
-            "Stage 4 — Examination & Analysis: Data organized, categorized, and analyzed for relevance.\n"
-            "Stage 5 — Reporting: Findings compiled into this report with hash verification."
+            "The 4-stage workflow was employed:\n\n"
+            "Stage 1 — Device Identification: Make, model, serial number, and OS version documented.\n"
+            "Stage 2 — Data Acquisition: Evidence collected from content providers, dumpsys, and filesystem.\n"
+            "Stage 3 — Examination & Analysis: Data organized, categorized, and analyzed for relevance.\n"
+            "Stage 4 — Reporting: Findings compiled into this report with hash verification."
         )
         pdf.multi_cell(0, 6, methodology)
         pdf.ln(5)

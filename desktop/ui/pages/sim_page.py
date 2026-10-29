@@ -1,4 +1,4 @@
-"""SIM Forensics — read the UICC the handset will expose, over ADB.
+"""SIM Info — read the UICC the handset will expose, over ADB.
 
 The page is deliberately honest about what an unrooted phone allows: it shows
 which sources answered, which were refused, and marks identifiers Android has
@@ -74,7 +74,7 @@ class SimForensicsPage(QWidget):
         layout.setContentsMargins(32, 24, 32, 24)
         layout.setSpacing(16)
 
-        title = QLabel("SIM Forensics")
+        title = QLabel("SIM Info")
         title.setStyleSheet("font-size: 22px; font-weight: 700; color: #10b981;"
                             " background: transparent; border: none;")
         layout.addWidget(title)
@@ -86,6 +86,33 @@ class SimForensicsPage(QWidget):
         subtitle.setStyleSheet("font-size: 13px; color: #64748b; background: transparent;"
                                " border: none;")
         layout.addWidget(subtitle)
+
+        # The officers asked for the phone number to be published here, and the
+        # honest answer is that most modern handsets refuse to hand it over. If
+        # the scope is not stated up front, an empty MSISDN field reads as "no
+        # number on this card", which is a finding the evidence does not support.
+        scope = QFrame()
+        scope.setObjectName("simScope")
+        scope.setStyleSheet(
+            "QFrame#simScope { background: #0f172a; border: 1px solid #1e293b;"
+            " border-left: 3px solid #f59e0b; border-radius: 8px; }")
+        scope_layout = QVBoxLayout(scope)
+        scope_layout.setContentsMargins(14, 10, 14, 10)
+        scope_layout.setSpacing(4)
+        scope_note = QLabel(
+            "What this reads \u2014 and what it cannot. "
+            "Values come from the telephony service on the handset itself, so no "
+            "card is removed and no reader is needed. Android redacts the SIM "
+            "serial (ICCID), subscriber ID (IMSI) and phone number (MSISDN) on "
+            "most builds: a truncated value ending in \u2026 was redacted by the "
+            "platform, and an \u201cunreadable\u201d field means Android refused "
+            "it, not that the card is empty. A UICC read outside the handset "
+            "needs a PC/SC reader, which this tool does not drive.")
+        scope_note.setWordWrap(True)
+        scope_note.setStyleSheet(
+            "color: #94a3b8; font-size: 11px; background: transparent; border: none;")
+        scope_layout.addWidget(scope_note)
+        layout.addWidget(scope)
 
         self.device_bar = DeviceStatusBar()
         self.device_bar.device_rescanned.connect(self._on_device_rescanned)
