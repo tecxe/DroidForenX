@@ -223,6 +223,45 @@ class ReportPage(QWidget):
                 ).fetchall()
                 data["audit_log"] = [dict(l) for l in logs]
 
+            # Images for the plates. Read from the case store, never from the
+            # handset: a report has to describe evidence that was acquired, not
+            # whatever happens to be reachable when someone clicks Generate.
+            try:
+                from ...report import artifact_images
+
+                data["images"] = artifact_images.collect(
+                    self._session_id,
+                    (data.get("session") or {}).get("device_id"),
+                    limit=18,
+                )
+            except Exception as exc:
+                self.console.log(f"Could not collect images for the report: {exc}", "warning")
+                data["images"] = []
+
+            # Artifact-view panels: one per artifact class the tool advertises.
+            # The case store is the source of truth; the handset is only read
+            # for the logical classes when the store holds no copy, and each
+            # panel says which of the two it used.
+            try:
+                from ...report import artifact_images, artifact_views
+                from ...core import adb_manager
+
+                serial = None
+                try:
+                    ready = adb_manager.ready_devices()
+                    serial = ready[0].get("serial") if ready else None
+                except Exception:
+                    serial = None
+
+                store = artifact_images.acquisition_for(serial)
+                data["artifact_views"] = artifact_views.collect(
+                    store, serial, allow_live=bool(serial), limit=8,
+                    generated_at=data.get("generated_at", ""),
+                )
+            except Exception as exc:
+                self.console.log(f"Could not collect artifact views: {exc}", "warning")
+                data["artifact_views"] = []
+
             conn.close()
         except Exception as e:
             try:
@@ -308,13 +347,18 @@ class ReportPage(QWidget):
         self.console.log(f"Report generated: {path}", "success")
         self.console.log(f"SHA-256: {report_hash}", "info")
         self.console.log(f"Size: {path.stat().st_size:,} bytes", "info")
+        if path.with_suffix(path.suffix + ".sha256").exists():
+            self.console.log(f"Integrity sidecar: {path.name}.sha256", "info")
 
         QMessageBox.information(
             self, "Report Generated",
             f"Investigation report saved successfully.\n\n"
             f"Path: {path}\n"
             f"Size: {path.stat().st_size:,} bytes\n"
-            f"SHA-256: {report_hash[:32]}..."
+            f"SHA-256: {report_hash[:32]}...\n\n"
+            f"The PDF carries its own table of contents and page numbers. Its\n"
+            f"integrity record is the sidecar file written beside it:\n"
+            f"{path.name}.sha256"
         )
 
     # ═══════════════════════════════════════════════════════════════════════
@@ -1230,305 +1274,17 @@ with tabular data are available.</p>
     # ═════════════════════════════════════════════════════════════════════
 
     def _build_pdf_report(self, d, path):
-        from fpdf import FPDF
+        """Write the investigation report, in the same house style as the
+        evidence report.
 
-        class _Latin1PDF(FPDF):
-            """FPDF whose core-font text is folded to Latin-1.
+        The layout lives in :mod:`desktop.report.investigation_report` so it can
+        be composed, rendered and tested without a window. This method only
+        hands it the case data and reports what it wrote.
+        """
+        from ...report import investigation_report
 
-            The built-in Helvetica face is Latin-1 only, so characters such as
-            the em dash used in this report's headings would otherwise raise
-            ``FPDFUnicodeEncodingException``. Folding happens before encoding so
-            the common typographic characters survive as readable ASCII, and any
-            other out-of-range character (e.g. from a device-supplied string) is
-            replaced rather than crashing the export.
-            """
-
-            _FOLD = {
-                "\u2014": "-", "\u2013": "-", "\u2018": "'", "\u2019": "'",
-                "\u201c": '"', "\u201d": '"', "\u2026": "...", "\u00a0": " ",
-                "\u200b": "",
-            }
-
-            def normalize_text(self, text: str) -> str:
-                folded = "".join(self._FOLD.get(ch, ch) for ch in text)
-                return folded.encode("latin-1", "replace").decode("latin-1")
-
-        dev = d["device"]
-        results = d["results"]
-        audit = d["audit_log"]
-
-        # Extract metrics
-        sms_count = calls_count = contacts_count = media_count = apps_count = 0
-        accounts = []
-        transactions = []
-        documents = []
-
-        for r in results:
-            atype = r.get("analysis_type", "")
-            count = r.get("item_count", 0) or 0
-            findings = r.get("findings", {}) or {}
-            if atype == "sms": sms_count = count
-            elif atype == "calls": calls_count = count
-            elif atype == "contacts": contacts_count = count
-            elif atype == "media": media_count = count
-            elif atype == "apps": apps_count = count
-            elif atype == "emails_accounts" and isinstance(findings, dict):
-                accounts = findings.get("accounts", [])
-            elif atype == "transactions" and isinstance(findings, dict):
-                transactions = findings.get("transactions", [])
-            elif atype == "documents" and isinstance(findings, dict):
-                documents = findings.get("documents", [])
-
-        total = sms_count + calls_count + contacts_count + media_count + apps_count
-
-        pdf = _Latin1PDF()
-        pdf.set_auto_page_break(auto=True, margin=20)
-
-        # ── Cover Page ──────────────────────────────────────────────
-        pdf.add_page()
-        pdf.ln(30)
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(198, 40, 40)
-        pdf.cell(0, 8, "CONFIDENTIAL — LAW ENFORCEMENT SENSITIVE", align="C", new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(15)
-
-        pdf.set_draw_color(26, 35, 126)
-        pdf.set_line_width(1)
-        pdf.line(30, pdf.get_y(), 180, pdf.get_y())
-        pdf.ln(10)
-
-        pdf.set_font("Helvetica", "B", 24)
-        pdf.set_text_color(26, 35, 126)
-        pdf.cell(0, 14, "FORENSIC INVESTIGATION", align="C", new_x="LMARGIN", new_y="NEXT")
-        pdf.cell(0, 14, "REPORT", align="C", new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(5)
-
-        pdf.set_font("Helvetica", "", 14)
-        pdf.set_text_color(55, 71, 79)
-        pdf.cell(0, 10, "Mobile Device Digital Forensic Examination", align="C", new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(5)
-
-        pdf.set_line_width(1)
-        pdf.line(30, pdf.get_y(), 180, pdf.get_y())
-        pdf.ln(15)
-
-        # Case badge
-        pdf.set_fill_color(26, 35, 126)
-        pdf.set_text_color(255, 255, 255)
-        pdf.set_font("Helvetica", "B", 16)
-        pdf.cell(0, 12, d["case_number"], align="C", fill=True, new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(15)
-
-        pdf.set_text_color(55, 71, 79)
-        pdf.set_font("Helvetica", "", 11)
-        meta_items = [
-            ("Investigator", d["examiner"]),
-            ("Badge/ID", d["badge"] if d["badge"] else "N/A"),
-            ("Agency", d["org"] if d["org"] else "Digital Forensics Unit"),
-            ("Date of Report", d["generated_at"]),
-            ("Software", "DroidForenX v1.0"),
-        ]
-        for label, value in meta_items:
-            pdf.set_font("Helvetica", "B", 11)
-            pdf.cell(45, 8, f"{label}:", align="R", new_x="END")
-            pdf.set_font("Helvetica", "", 11)
-            pdf.cell(0, 8, f"  {value}", new_x="LMARGIN", new_y="NEXT")
-
-        pdf.ln(20)
-        pdf.set_font("Helvetica", "I", 9)
-        pdf.set_text_color(150, 150, 150)
-        pdf.cell(0, 6, "This report is confidential and intended for authorized personnel only.", align="C", new_x="LMARGIN", new_y="NEXT")
-        pdf.cell(0, 6, f"Case: {d['case_number']}", align="C", new_x="LMARGIN", new_y="NEXT")
-
-        # ── Executive Summary ───────────────────────────────────────
-        pdf.add_page()
-        pdf.set_font("Helvetica", "B", 16)
-        pdf.set_text_color(26, 35, 126)
-        pdf.cell(0, 10, "1. Executive Summary", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_draw_color(26, 35, 126)
-        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-        pdf.ln(5)
-
-        pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(50, 50, 50)
-        summary = (
-            f"This report presents the findings of a forensic examination of a mobile device "
-            f"conducted as part of case {d['case_number']}. The examination recovered "
-            f"{total:,} digital artifacts including {sms_count:,} text messages, "
-            f"{calls_count:,} call records, {contacts_count:,} contacts, "
-            f"{media_count:,} media files, and {apps_count:,} installed applications. "
-            f"Additionally, {len(accounts)} accounts and {len(transactions):,} financial "
-            f"transaction records were identified."
-        )
-        pdf.multi_cell(0, 6, summary)
-        pdf.ln(5)
-
-        # ── Chain of Custody ────────────────────────────────────────
-        pdf.set_font("Helvetica", "B", 16)
-        pdf.set_text_color(26, 35, 126)
-        pdf.cell(0, 10, "2. Chain of Custody", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_draw_color(26, 35, 126)
-        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-        pdf.ln(5)
-
-        pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(50, 50, 50)
-        custody_text = (
-            "The device was seized and immediately placed in airplane mode to prevent remote access. "
-            "All evidence was handled according to standard forensic procedures. No data was added to, "
-            "modified on, or deleted from the device during examination. The following actions were logged:"
-        )
-        pdf.multi_cell(0, 6, custody_text)
-        pdf.ln(3)
-
-        for a in audit[:15]:
-            ts = a.get("timestamp", "N/A")
-            action = a.get("action", "Unknown")
-            pdf.set_font("Helvetica", "B", 9)
-            pdf.cell(40, 5, ts[:19], new_x="END")
-            pdf.set_font("Helvetica", "", 9)
-            pdf.cell(0, 5, f" — {action}", new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(5)
-
-        # ── Device Information ──────────────────────────────────────
-        pdf.set_font("Helvetica", "B", 16)
-        pdf.set_text_color(26, 35, 126)
-        pdf.cell(0, 10, "3. Device Information", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_draw_color(26, 35, 126)
-        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-        pdf.ln(5)
-
-        if dev:
-            dev_fields = [
-                ("Manufacturer", dev.get("manufacturer", "Unknown")),
-                ("Model", dev.get("model", "Unknown")),
-                ("Device Name", dev.get("device_name", "Unknown")),
-                ("Android Version", dev.get("android_version", "Unknown")),
-                ("Security Patch", dev.get("security_patch", "Unknown")),
-                ("Encryption", dev.get("encryption_status", "Unknown")),
-                ("Total Storage", self._format_bytes(dev.get("storage_total_bytes", 0))),
-                ("Free Storage", self._format_bytes(dev.get("storage_free_bytes", 0))),
-            ]
-            pdf.set_font("Helvetica", "", 10)
-            pdf.set_text_color(50, 50, 50)
-            for label, value in dev_fields:
-                pdf.set_font("Helvetica", "B", 10)
-                pdf.cell(45, 7, f"{label}:", new_x="END")
-                pdf.set_font("Helvetica", "", 10)
-                pdf.cell(0, 7, str(value), new_x="LMARGIN", new_y="NEXT")
-        else:
-            pdf.set_font("Helvetica", "", 10)
-            pdf.cell(0, 7, "Device information not available.", new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(5)
-
-        # ── Methodology ─────────────────────────────────────────────
-        pdf.set_font("Helvetica", "B", 16)
-        pdf.set_text_color(26, 35, 126)
-        pdf.cell(0, 10, "4. Examination Methodology", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_draw_color(26, 35, 126)
-        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-        pdf.ln(5)
-
-        pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(50, 50, 50)
-        methodology = (
-            "The examination followed NIST SP 800-101 Rev. 2 guidelines and SWGDE best practices. "
-            "The 4-stage workflow was employed:\n\n"
-            "Stage 1 — Device Identification: Make, model, serial number, and OS version documented.\n"
-            "Stage 2 — Data Acquisition: Evidence collected from content providers, dumpsys, and filesystem.\n"
-            "Stage 3 — Examination & Analysis: Data organized, categorized, and analyzed for relevance.\n"
-            "Stage 4 — Reporting: Findings compiled into this report with hash verification."
-        )
-        pdf.multi_cell(0, 6, methodology)
-        pdf.ln(5)
-
-        # ── Evidence Findings ───────────────────────────────────────
-        pdf.set_font("Helvetica", "B", 16)
-        pdf.set_text_color(26, 35, 126)
-        pdf.cell(0, 10, "5. Evidence Findings", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_draw_color(26, 35, 126)
-        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-        pdf.ln(5)
-
-        pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(50, 50, 50)
-        findings_items = [
-            (f"Text Messages: {sms_count:,} messages recovered", "SMS and text message content with timestamps"),
-            (f"Phone Calls: {calls_count:,} call records recovered", "Incoming, outgoing, and missed calls"),
-            (f"Contacts: {contacts_count:,} entries recovered", "Names, phone numbers, and email addresses"),
-            (f"Media Files: {media_count:,} files recovered", "Photos, videos, and audio files"),
-            (f"Installed Apps: {apps_count:,} applications", "Complete application inventory"),
-            (f"Accounts: {len(accounts)} identified", "Email, social media, and messaging accounts"),
-            (f"Financial Transactions: {len(transactions):,} records", "Mobile money and payment activity"),
-            (f"Documents: {len(documents)} recovered", "PDF, Word, Excel, and PowerPoint files"),
-        ]
-        for title, desc in findings_items:
-            pdf.set_font("Helvetica", "B", 10)
-            pdf.cell(0, 7, title, new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font("Helvetica", "", 9)
-            pdf.set_text_color(100, 100, 100)
-            pdf.cell(0, 5, desc, new_x="LMARGIN", new_y="NEXT")
-            pdf.set_text_color(50, 50, 50)
-            pdf.ln(2)
-        pdf.ln(3)
-
-        # ── Conclusions ─────────────────────────────────────────────
-        pdf.set_font("Helvetica", "B", 16)
-        pdf.set_text_color(26, 35, 126)
-        pdf.cell(0, 10, "6. Conclusions", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_draw_color(26, 35, 126)
-        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-        pdf.ln(5)
-
-        pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(50, 50, 50)
-        conclusions = (
-            f"Based on the forensic examination, {total:,} digital artifacts were recovered from "
-            f"the device. The evidence includes comprehensive communication records, financial "
-            f"transaction data, social media activity, and recovered documents. All evidence was "
-            f"acquired using forensically sound methods and verified with SHA-256 hash values."
-        )
-        pdf.multi_cell(0, 6, conclusions)
-        pdf.ln(5)
-
-        # ── Recommendations ─────────────────────────────────────────
-        pdf.set_font("Helvetica", "B", 16)
-        pdf.set_text_color(26, 35, 126)
-        pdf.cell(0, 10, "7. Recommendations", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_draw_color(26, 35, 126)
-        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-        pdf.ln(5)
-
-        pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(50, 50, 50)
-        recs = [
-            "Preserve all acquired evidence in a secure, access-controlled environment.",
-            "Maintain chain-of-custody documentation for all evidence items.",
-            "Periodically verify hash values to ensure evidence integrity.",
-            "Cross-reference all extracted artifacts for comprehensive case analysis.",
-            "Consider forensic examination of associated online accounts if legally authorized.",
-        ]
-        for i, rec in enumerate(recs, 1):
-            pdf.cell(0, 7, f"{i}. {rec}", new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(5)
-
-        # ── Footer / Disclaimer ─────────────────────────────────────
-        pdf.ln(10)
-        pdf.set_draw_color(26, 35, 126)
-        pdf.set_line_width(0.5)
-        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-        pdf.ln(5)
-
-        pdf.set_font("Helvetica", "I", 8)
-        pdf.set_text_color(120, 120, 120)
-        pdf.multi_cell(0, 4,
-            "This report was generated by DroidForenX v1.0 Professional Digital Forensic Examination Platform. "
-            "All evidence was acquired using forensically sound methods that preserve the integrity of the "
-            "original data. Hash verification was performed to confirm data integrity. This report is "
-            "confidential and intended for authorized personnel involved in this case only."
-        )
-
-        pdf.output(str(path))
+        written = investigation_report.build(d, path)
+        self.console.log(f"PDF composed: {written.name} ({written.stat().st_size:,} bytes)", "info")
 
     # ═════════════════════════════════════════════════════════════════════
     #  HELPERS

@@ -106,7 +106,11 @@ def adb_cmd(args: list, timeout: int = 30) -> Tuple[bool, str]:
     try:
         result = subprocess.run(
             [ADB_PATH] + args,
-            capture_output=True, text=True, timeout=timeout, errors="replace",
+            capture_output=True, text=True, timeout=timeout,
+            # The device speaks UTF-8. Letting Python pick the console code page
+            # silently mangles contact names and message bodies into mojibake,
+            # which then gets hashed into a report as if it were evidence.
+            encoding="utf-8", errors="replace",
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
         )
         if result.returncode == 0:

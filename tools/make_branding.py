@@ -11,7 +11,7 @@ What it produces, in ``desktop/assets/branding/``:
     icon.png       the X emblem on its own plate, for the window and the taskbar
     icon.ico       the same emblem, multi-size, for the executable
 
-All three source images are dark-navy artwork with light lettering, not the other
+The source images are dark-navy artwork with light lettering, not the other
 way round, so the background is keyed out against the sampled corner colour
 rather than against white. The maths is an un-premultiply:
 

@@ -139,6 +139,9 @@ python -m unittest `
   desktop.tests.test_create_image_dialog `
   desktop.tests.test_progress_panel `
   desktop.tests.test_sim_forensics `
+  desktop.tests.test_artifact_images `
+  desktop.tests.test_artifact_views `
+  desktop.tests.test_investigation_report `
   desktop.tests.test_branding `
   desktop.tests.test_theme `
   desktop.tests.test_device_page `
@@ -153,11 +156,12 @@ python -m unittest `
 manual device probes (`test_full_adb.py`, `test_quick.py`, `test_deep.py`) that
 run on import and need a connected handset, not a test runner.
 
-![Test suite finishing with 274 tests passed and one skipped](docs/images/tests.png)
+![Test suite finishing with 337 tests passed and one skipped](docs/images/tests.png)
 
-The run above is v1.0.26: 274 tests with one skip — 18 for percentage progress,
+The run above is v1.0.26: 337 tests with one skip — 18 for percentage progress,
 30 for SIM parsing and storage, 15 for the media gallery, call-log table and
-device card, and the rest accumulated across earlier releases.
+device card, 63 for the report composer and its artifact views, and the rest
+accumulated across earlier releases.
 
 ---
 
@@ -415,7 +419,7 @@ that integrity was verified.
 ### Images
 
 Acquisition writes a folder tree. When a container is wanted instead — the way
-FTK Imager's *Create Disk Image* works — use **Stage 3 → Create Image**. The
+FTK Imager's *Create Disk Image* works — use **Stage 2 → Create Image**. The
 dialog picks a source, an output format, and the parameters for it.
 
 | Format | Source | Output |
@@ -570,7 +574,7 @@ by anyone. `test_reproducible_build.py` compares the installed environment
 against the lock, and the full two-build byte comparison runs only with
 `DROIDFORENX_SLOW_TESTS=1`.
 
-274 tests, no device required. They cover the properties that matter:
+337 tests, no device required. They cover the properties that matter:
 
 - an acquired artifact survives being read (the original bug was that 11
   loaders deleted evidence after parsing)
@@ -697,11 +701,9 @@ already read.
 
 ---
 
----
-
 ## Configuration
 
-Optional `.env` (gitignored; see `.env.example`). All acquisition, hashing,
+Optional .env (gitignored; see `.env.example`). All acquisition, hashing,
 custody and reporting features work **without** any `.env` file — configuration
 is only needed to point at a different database or adb binary.
 

@@ -9,6 +9,14 @@ if str(_ROOT) not in sys.path:
 
 from desktop.core import adb_manager as adb
 
+# This file is a probe, not a test case: importing it would open a device,
+# print, and call sys.exit -- which takes `unittest discover` down with it.
+# Skipping the module keeps it runnable by hand and harmless in a test run.
+if __name__ != "__main__":
+    import unittest
+
+    raise unittest.SkipTest("full ADB integration probe; run this file directly")
+
 # Test 1: ADB path
 print(f"ADB path: {adb.ADB_PATH}")
 print(f"ADB exists: {os.path.exists(adb.ADB_PATH)}")

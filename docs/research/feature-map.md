@@ -14,7 +14,7 @@ Three defects were found and fixed in the same pass; each finding carries a
 
 | Claim (README) | Source | Tests | Verdict |
 |---|---|---|---|
-| Five forensic stages | `desktop/ui/theme.py:101` — `STAGE_NAMES = [Seizure, Identification, Acquisition, Examination, Reporting]` | `test_main_window.py` (7) | **Confirmed** |
+| Four forensic stages | `desktop/ui/theme.py:101` — `STAGE_NAMES = [Identification, Acquisition, Examination, Reporting]` | `test_main_window.py` | **Confirmed** |
 | 24 acquisition loaders | `desktop/core/forensic_engine.py` — `ANALYSIS_MODULES`, **24 entries** | `test_forensic_engine.py` (8) | **Confirmed** |
 | 10 root-gated loaders reported `NOT_ACCESSIBLE` | `forensic_engine.py` — `ROOT_REQUIRED_MODULES`, exactly **10** | `test_forensic_engine.py` | **Confirmed** |
 | 14 of 24 device-verified | `CASE-BASELINE-001/manifests/verification.jsonl` — 14 `T1_DEVICE_VERIFIED` records with serial, build, date, observed count | — | **Confirmed as recorded**; the claims are reachability, not preservation (Finding 2) |
