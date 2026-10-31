@@ -62,8 +62,12 @@ where the current case sits in the four-stage workflow.
 
 ![DroidForenX dashboard with a connected device and an open case](docs/images/dashboard.png)
 
-**Case management** — every case the operator has opened, with investigator,
+**Case management** - every case the operator has opened, with investigator,
 agency and status. A case is the container for sessions, images and reports.
+Select a row to correct a mistyped case number, title, investigator or status,
+or to delete a case opened by mistake; deletion asks separately whether the
+evidence folder should go with it, and leaves the files alone unless you say
+otherwise.
 
 ![Case management table showing an open demonstration case](docs/images/case-management.png)
 
@@ -158,7 +162,8 @@ run on import and need a connected handset, not a test runner.
 
 ![Test suite finishing with 337 tests passed and one skipped](docs/images/tests.png)
 
-The run above is v1.0.26: 337 tests with one skip — 18 for percentage progress,
+The run above is v1.0.27: 354 tests with two skips — 16 for case editing and
+deletion, 18 for percentage progress,
 30 for SIM parsing and storage, 15 for the media gallery, call-log table and
 device card, 63 for the report composer and its artifact views, and the rest
 accumulated across earlier releases.

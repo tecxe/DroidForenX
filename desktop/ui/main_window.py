@@ -536,6 +536,7 @@ class MainWindow(QMainWindow):
         self.home_page.navigate.connect(self._navigate_by_name)
 
         self.case_page.case_selected.connect(self._on_case_selected)
+        self.case_page.case_deleted.connect(self._on_case_deleted)
         self.case_page.navigate.connect(self._navigate_by_name)
 
         self.device_page.device_connected.connect(self._on_device_connected)
@@ -624,6 +625,21 @@ class MainWindow(QMainWindow):
         if case:
             self.acquire_page.set_device(self._device_serial, case_id, self._current_session_id)
             self.report_page.set_session(self._current_session_id, case["case_number"])
+
+    def _on_case_deleted(self, case_id: str):
+        """Forget a deleted case instead of leaving every page pointing at it.
+
+        Without this the acquisition, reporting and artifact pages keep the
+        dead id and the next write fails on a foreign key that no longer has a
+        parent.
+        """
+        if self._current_case_id == case_id:
+            self._current_case_id = ""
+            self._current_session_id = ""
+            self.acquire_page.set_device(self._device_serial, "", "")
+            self.report_page.set_session("")
+            self.artifacts_page.set_session("")
+        self._refresh_stats()
 
     def _on_session_created(self, session_id: str):
         self._current_session_id = session_id

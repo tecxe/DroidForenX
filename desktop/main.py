@@ -30,6 +30,11 @@ from desktop import __version__
 
 from desktop.core.database import init_db, audit_log
 
+# FileHandler does not create parent directories. A packaged executable may
+# be launched before this application has ever run on the current machine.
+LOG_DIR = os.path.join(os.path.expanduser("~"), ".droidforenx")
+os.makedirs(LOG_DIR, exist_ok=True)
+
 qInstallMessageHandler(_qt_message_handler)
 
 
@@ -39,7 +44,7 @@ def main():
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(os.path.join(os.path.expanduser("~"), ".droidforenx", "droidforenx.log"), mode="a"),
+            logging.FileHandler(os.path.join(LOG_DIR, "droidforenx.log"), mode="a"),
         ],
     )
 

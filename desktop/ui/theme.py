@@ -481,6 +481,7 @@ SWATCH = {
     "#94a3b8": "#475569",
     "#64748b": "#55657a",
     "#475569": "#94a3b8",
+    "#cbd5e1": "#334155",
     # a pair of speaker labels that read distinctly from one another:
     # green for the model, both darkened until they hold on a white panel
     "#93c5fd": "#1d4ed8",
@@ -497,6 +498,8 @@ SWATCH = {
     "#16a34a": "#15803d",
     "#ef4444": "#dc2626",
     "#dc2626": "#b91c1c",
+    "#b91c1c": "#991b1b",
+    "#f87171": "#b91c1c",
     "#f59e0b": "#d97706",
     "#d97706": "#b45309",
     "#f97316": "#ea580c",
