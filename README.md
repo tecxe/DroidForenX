@@ -17,7 +17,8 @@ copy, and records an append-only chain of custody for every action.
 > | RAW / ZIP image output, including streamed ZIP for logical images | **Tested** - writers, recording and the Create Image dialog, no device needed |
 > | 24 acquisition loaders implemented | **Code complete** |
 > | Device-verified loaders | **14 of 24** |
-> | Root-gated, reported `NOT_ACCESSIBLE` | **10 of 24** |
+> | Root-gated, reported `NOT_ACCESSIBLE` | **8 of 24** |
+> | WhatsApp and Deleted Data: shared-storage path on an unrooted handset | **Code complete** - fixture-tested, awaiting a handset run |
 >
 > **Verified device:** TECNO TECNO KL6 (Tecno Spark 30), Android 14 (API 34),
 > serial `13276374A7004073`, build `TECNO/KL6-OP/TECNO-KL6:14/UP1A.231005.007/260709V1745:user/release-keys`,
@@ -94,6 +95,30 @@ hashes it, and files it as a finding under the Screenshots category.
 
 ![Artifact viewer reading messages, calls and contacts from the device](docs/images/artifact-viewer.png)
 
+**WhatsApp without root** — the WhatsApp tile no longer shows zero on an
+unrooted handset. It reads what Android actually exposes and says what it could
+not reach:
+
+| Source | What comes out |
+|---|---|
+| Chat exports (`WhatsApp Chat with X.txt`) | Full text, sender, side, timestamps, media placeholders, and WhatsApp's own "this message was deleted" markers |
+| A plain `msgstore.db` | Messages, chat and contact names, media captions, deleted markers - both the legacy `messages` table and the current `message`/`chat`/`jid` schema |
+| `msgstore-DATE.db.crypt15` | Inventory only: date, size, and the fact it is sealed. The key lives in app-private storage, so the contents stay closed and the tool says so |
+| `dumpsys notification --noredact` | Message previews, including chats already cleared in the app |
+| `WhatsApp/Media/**` | Images, video, voice notes and documents with their original file names |
+
+A deleted message is shown in red with the status "Deleted by the app - body no
+longer stored", and the deleted-media entries carry the original filename and
+the deletion time rebuilt from the `.trashed-<epoch>-<name>` naming.
+
+**Deleted data** — the tile now reads the deletion traces that survive on
+shared storage instead of claiming root-only failure: `.trashed-*`, `.pending-*`
+and `.deleted-*` entries with their original names and deletion timestamps,
+pre-delete page images pulled out of `-wal`/`-journal` sidecars (the recovered
+text is listed line by line), and any user-visible trash directories. It does
+not claim to read unallocated space — that needs a physical image, and the tile
+says so when nothing was found.
+
 **Media gallery** - the same media categories as a thumbnail grid, at three
 tile sizes, with the pull running in the background so the window stays
 usable while a cache of a few thousand images fills in. Thumbnails land in
@@ -160,10 +185,11 @@ python -m unittest `
 manual device probes (`test_full_adb.py`, `test_quick.py`, `test_deep.py`) that
 run on import and need a connected handset, not a test runner.
 
-![Test suite finishing with 337 tests passed and one skipped](docs/images/tests.png)
+![Test suite finishing with 384 tests passed and two skipped](docs/images/tests.png)
 
-The run above is v1.0.27: 354 tests with two skips — 16 for case editing and
-deletion, 18 for percentage progress,
+The run above is v1.0.28: 384 tests with two skips — 16 for case editing and
+deletion, 30 for WhatsApp parsing, deleted-entry recovery and freelist salvage,
+18 for percentage progress,
 30 for SIM parsing and storage, 15 for the media gallery, call-log table and
 device card, 63 for the report composer and its artifact views, and the rest
 accumulated across earlier releases.
@@ -339,6 +365,8 @@ desktop/
     doc_metadata.py           document metadata extraction
     email_extractor.py        email artifact extraction
     sim_forensics.py          SIM / UICC extraction over ADB
+    cases.py                  case records: create, edit, delete
+    whatsapp.py               WhatsApp exports/backups/media, deleted traces
   ui/
     main_window.py            window shell, stage navigation
     theme.py                  palette and typography
@@ -501,20 +529,51 @@ a live read-only query on the TECNO KL6 above; observed volumes are in
 `gps` · `wifi` · `bluetooth` · `apps` · `installed_apps` (423 packages) ·
 `app_permissions` · `clipboard` · `notifications` · `usage_stats` · `notes`
 
-**Root-gated — confirmed `NOT_ACCESSIBLE`** (10). They read app-private
+**Root-gated — confirmed `NOT_ACCESSIBLE`** (8). They read app-private
 `/data/data/<pkg>` or keystore `/data/misc/wifi` paths, and Android denies the
 shell. The probe confirmed `permission denied` on every one; they are recorded
 and surfaced, never silently dropped:
 
-`whatsapp` · `telegram` · `instagram` · `snapchat` · `tiktok` · `facebook` ·
-`transactions` · `browser` · `wifi_passwords` · `deleted`
+`telegram` · `instagram` · `snapchat` · `tiktok` · `facebook` ·
+`transactions` · `browser` · `wifi_passwords`
 
-`whatsapp` carries a second and separate caveat. Extracting WhatsApp data was
-within this project's planned scope, but the work was never completed or
-validated, so the loader is surfaced as unavailable rather than presented as
-working. It stands as future work; any implementation should stay within
-authorised forensic work and documented lawful exports. *(Recorded by
-te7mina1 in `b888c2f`.)*
+### WhatsApp and deleted data without root
+
+`whatsapp` and `deleted` moved out of that list. Both now read the shared storage
+an unrooted handset actually exposes, and state what they could not reach
+instead of returning a reassuring zero. `desktop/core/whatsapp.py` handles the
+work:
+
+- **Chat exports** (`WhatsApp Chat with X.txt`, `_chat.txt`) are pulled and
+  parsed in full: sender, side, timestamp, multi-line bodies, media
+  placeholders, app events, and the app's own *"this message was deleted"*
+  markers. A message the app discarded is reported as deleted, with its body
+  gone rather than invented.
+- **`msgstore.db`**, when the app left one unencrypted, is read under both
+  schemas — the legacy `messages` table and the current
+  `message`/`chat`/`jid` one — including media captions and deleted markers.
+- **Local backups** are inventoried with size, date and seal state. A
+  `msgstore-YYYY-MM-DD.1.db.crypt15` file is labelled *sealed*: it proves a
+  copy of the database existed on that date, and its contents stay unreadable
+  without the device key (root) or the 64-digit backup key. That distinction is
+  the point — "encrypted, not acquired" is not the same finding as "no
+  messages".
+- **Notifications** (`dumpsys notification --noredact`) are parsed for WhatsApp
+  message previews, which can outlive the chat they came from.
+- **Media** in `Android/media/com.whatsapp/...` is enumerated with type and path.
+
+Deleted data has its own honest ladder:
+
+| Trace | What is claimed |
+|---|---|
+| `.trashed-<epoch>-<name>` | Recently deleted; original name and deletion timestamp restored from the filename |
+| `.pending-…`, `.deleted-…` | Pending deletion; entry still present |
+| `-wal` / `-journal` sidecars | Pre-delete page images pulled, readable text extracted as fragments |
+| Freelist pages of a plain database | Rows SQLite has freed but not yet overwritten, decoded from their record headers |
+| Unallocated space | **Not** read without a physical image; reported as such |
+
+Nothing is labelled "recovered" unless a file or a decoded record exists behind
+it. The two loaders are covered by `desktop/tests/test_whatsapp.py` (30 tests).
 
 `is_device_rooted()` and `device_root_summary()` in `adb_manager.py` perform
 root detection so the tool knows its own ceiling before interpreting results.
@@ -536,6 +595,25 @@ capability, integrity and chain of custody only.
 
 State these in any report; they are properties of Android, not bugs to be
 "fixed" by this tool.
+
+The unrooted ceiling for these two loaders is implemented in
+`desktop/core/whatsapp.py`. Its limits are Android's, not bugs:
+
+- An unrooted handset does **not** expose the live WhatsApp `msgstore.db`. The
+  database is app-private and sealed with crypt15. What the tool can read is
+  the exported chat text, plain databases, media, backups and notifications.
+  Treat an export as a copy the phone made, not as the database itself.
+- **Android MediaStore trash is not on the filesystem.** Files deleted with the
+  system picker may sit in MediaStore's private trash; only WhatsApp/Telegram-style
+  `.trashed-*` entries on shared storage are reachable over adb.
+- **Freelist recovery needs an unencrypted database.** It salvages rows SQLite
+  has freed but not overwritten on a plain `.db`; it cannot touch a crypt15 file.
+- **Journal fragments are fragments.** Text found in a `-wal`/`-journal` proves
+  something was written and removed; it does not restore the row, the sender or
+  the timestamp around it.
+- Delete-for-everyone in WhatsApp replaces the body on the device. The marker is
+  evidence of a deletion, not of what was said; a chat export or a local backup
+  made *before* the deletion is what recovers the text.
 
 - **App-private data needs root.** Since Android 7, `/data/data/<pkg>` is
   unreadable to the ADB shell. Without root, messaging, social media, browser
@@ -579,7 +657,7 @@ by anyone. `test_reproducible_build.py` compares the installed environment
 against the lock, and the full two-build byte comparison runs only with
 `DROIDFORENX_SLOW_TESTS=1`.
 
-337 tests, no device required. They cover the properties that matter:
+384 tests, no device required. They cover the properties that matter:
 
 - an acquired artifact survives being read (the original bug was that 11
   loaders deleted evidence after parsing)

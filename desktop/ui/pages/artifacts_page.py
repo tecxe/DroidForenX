@@ -6,6 +6,8 @@ from pathlib import Path
 import re, logging, json
 from datetime import datetime, timezone
 from ...core import adb_manager as adb
+from ...core import whatsapp as wa_core
+from ...core import evidence_store
 from ..widgets.media_gallery import MediaGallery, media_kind
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,21 @@ QScrollArea > QWidget > QWidget { background: transparent; }
 #: Artefact types the thumbnail gallery knows how to present.
 MEDIA_TYPES = ("Image", "Photo", "Video", "GIF", "Profile Photo",
                "Sticker (Animated)", "Audio", "Voice Recording")
+
+
+def _human_size(value) -> str:
+    """Bytes as a compact string, or empty when the size was never stat'd."""
+    try:
+        size = int(value)
+    except (TypeError, ValueError):
+        return ""
+    if size < 1024:
+        return f"{size} B"
+    for unit in ("KB", "MB", "GB", "TB"):
+        size /= 1024.0
+        if size < 1024:
+            return f"{size:.1f} {unit}"
+    return f"{size:.1f} PB"
 
 
 def _ts(val, divide=True):
@@ -436,62 +453,111 @@ class LoadWorker(QThread):
         self.progress.emit(f"Loaded {c} MoMo transactions")
 
     def _whatsapp(self, r):
-        self.progress.emit("Extracting WhatsApp files (data + media)...")
+        self.progress.emit("Reading WhatsApp chats, backups and media...")
         c = 0
 
-        wa_search_paths = [
-            '/sdcard/Android/data/com.whatsapp/',
-            '/sdcard/Android/media/com.whatsapp/',
-        ]
+        # Pulls land inside the evidence root so a parsed export or plain
+        # msgstore can be produced again from the same bytes, not just trusted.
+        workdir = evidence_store.EVIDENCE_ROOT / "_whatsapp" / (self.serial or "device")[:32]
+        try:
+            workdir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.warning("WhatsApp workdir unavailable: %s", exc)
+            workdir = Path(__import__("tempfile").mkdtemp(prefix="dfx-wa-"))
 
-        for search_path in wa_search_paths:
-            ok, output = adb.adb_shell(self.serial,
-                f'find {search_path} -type f 2>/dev/null', timeout=15)
-            if not ok or not output:
-                continue
-            for line in output.splitlines():
-                line = line.strip()
-                if not line or "Permission denied" in line or line.endswith(".nomedia"):
-                    continue
-                fname = Path(line).name
-                ext = Path(line).suffix.lower()
-                ftype = "GIF" if ext == ".gif" else ("Image" if ext in ('.jpg', '.jpeg', '.png', '.webp') else
-                    ("Video" if ext in ('.mp4', '.3gp', '.mkv') else
-                    ("Audio" if ext in ('.opus', '.aac', '.mp3', '.m4a') else
-                    ("Document" if ext in ('.pdf', '.doc', '.docx', '.txt') else "Cache File"))))
-                r.append({
-                    "type": ftype, "category": "WhatsApp", "date": "",
-                    "summary": fname, "source": line,
-                    "_data": {"filename": fname, "path": line, "type": ftype, "size": ""}
-                })
-                c += 1
-                if c >= 10000:
-                    break
+        try:
+            data = wa_core.collect(self.serial, workdir)
+        except Exception as exc:
+            logger.error("WhatsApp collection failed: %s", exc)
+            data = {"messages": [], "deleted_messages": [], "backups": [],
+                    "media": [], "notifications": [], "notes": [str(exc)],
+                    "stats": {}}
 
-        if c == 0:
-            ok2, ls_data = adb.adb_shell(self.serial, 'ls /sdcard/WhatsApp/ 2>/dev/null', timeout=10)
-            if ok2 and ls_data and "No such file" not in ls_data:
-                for sub in ["Images", "Video", "Audio", "Documents", "Voice Notes", "GIFs", "Stickers"]:
-                    ok3, files = adb.adb_shell(self.serial, f'ls /sdcard/WhatsApp/{sub}/ 2>/dev/null', timeout=10)
-                    if ok3 and files:
-                        for fname in files.splitlines():
-                            fname = fname.strip()
-                            if not fname:
-                                continue
-                            ext = Path(fname).suffix.lower()
-                            ftype = "GIF" if ext == ".gif" else ("Image" if ext in ('.jpg', '.jpeg', '.png', '.webp') else
-                                ("Video" if ext in ('.mp4', '.3gp', '.mkv') else
-                                ("Audio" if ext in ('.opus', '.aac', '.mp3', '.m4a') else
-                                ("Document" if ext in ('.pdf', '.doc', '.docx', '.txt') else "Cache File"))))
-                            remote = f"/sdcard/WhatsApp/{sub}/{fname}"
-                            r.append({
-                                "type": ftype, "category": "WhatsApp", "date": "",
-                                "summary": fname, "source": remote,
-                                "_data": {"filename": fname, "path": remote, "type": ftype, "size": ""}
-                            })
-                            c += 1
+        for msg in data.get("messages", []):
+            is_deleted = bool(msg.get("deleted"))
+            direction = msg.get("direction") or "unknown"
+            r.append({
+                "type": "Deleted Message" if is_deleted else "Message",
+                "category": "WhatsApp",
+                "date": msg.get("date_text") or msg.get("timestamp", ""),
+                "summary": (msg.get("text") or msg.get("body") or
+                            msg.get("attachment") or "(no body)")[:120],
+                "source": msg.get("source", ""),
+                "_data": {
+                    "chat": msg.get("chat", ""),
+                    "sender": msg.get("sender", ""),
+                    "direction": direction,
+                    "text": msg.get("text") or msg.get("body", ""),
+                    "kind": msg.get("kind", "text"),
+                    "deleted": is_deleted,
+                    "attachment": msg.get("attachment", ""),
+                    "date": msg.get("date_text") or msg.get("timestamp", ""),
+                    "timestamp": msg.get("timestamp", ""),
+                    "source": msg.get("source", ""),
+                    "status": ("Deleted by the app - body no longer stored"
+                               if is_deleted else "Present in database/export"),
+                },
+            })
+            c += 1
 
-        self.progress.emit(f"Loaded {c} WhatsApp files")
+        for note in data.get("notifications", []):
+            r.append({
+                "type": "Notification",
+                "category": "WhatsApp",
+                "date": note.get("timestamp", ""),
+                "summary": (note.get("text") or "")[:120],
+                "source": note.get("source", ""),
+                "_data": {
+                    "chat": note.get("chat", ""), "sender": note.get("sender", ""),
+                    "text": note.get("text", ""), "direction": "notification",
+                    "date": note.get("timestamp", ""), "path": note.get("source", ""),
+                    "status": "Notification remnant (survives chat deletion)",
+                    "deleted": False, "kind": "notification",
+                },
+            })
+            c += 1
+
+        for backup in data.get("backups", []):
+            r.append({
+                "type": "Backup",
+                "category": "WhatsApp",
+                "date": backup.get("modified", ""),
+                "summary": backup.get("name", ""),
+                "source": backup.get("path", ""),
+                "_data": {
+                    "filename": backup.get("name", ""),
+                    "path": backup.get("path", ""),
+                    "size": _human_size(backup.get("size")),
+                    "date": backup.get("modified", ""),
+                    "format": backup.get("format", ""),
+                    "sealed": backup.get("sealed", False),
+                    "status": backup.get("status", ""),
+                },
+            })
+            c += 1
+
+        for media in data.get("media", []):
+            r.append({
+                "type": media.get("type", "Cache File"),
+                "category": "WhatsApp",
+                "date": "",
+                "summary": media.get("name", ""),
+                "source": media.get("path", ""),
+                "_data": {"filename": media.get("name", ""),
+                          "path": media.get("path", ""),
+                          "type": media.get("type", ""), "size": "",
+                          "status": "Shared storage"},
+            })
+            c += 1
+
+        for note in data.get("notes", []):
+            self.progress.emit(f"  {note}")
+
+        deleted = data.get("stats", {}).get("deleted_messages", 0)
+        self.progress.emit(
+            f"Loaded {c} WhatsApp artifacts ({data.get('stats', {}).get('messages', 0)}"
+            f" messages, {deleted} deleted, "
+            f"{data.get('stats', {}).get('sealed_backups', 0)} sealed backups)")
 
     def _telegram(self, r):
         self.progress.emit("Extracting Telegram cache files...")
@@ -1404,18 +1470,89 @@ class LoadWorker(QThread):
         self.progress.emit(f"Loaded {c} system properties")
 
     def _deleted(self, r):
-        self.progress.emit("Scanning for deleted/recoverable files...")
+        self.progress.emit("Scanning for deleted and recoverable data...")
         c = 0
         seen_paths = set()
 
-        trash_dirs = [
-            "/sdcard/.trashed-*/",
-            "/sdcard/.Trash/",
-            "/sdcard/.trash/",
-            "/sdcard/Lost.dir/",
-            "/sdcard/Android/data/*/cache/.trash/",
-        ]
-        for d in trash_dirs:
+        workdir = evidence_store.EVIDENCE_ROOT / "_deleted" / (self.serial or "device")[:32]
+        try:
+            workdir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.warning("Deleted-data workdir unavailable: %s", exc)
+            workdir = Path(__import__("tempfile").mkdtemp(prefix="dfx-del-"))
+
+        try:
+            found = wa_core.collect_deleted(self.serial, workdir)
+        except Exception as exc:
+            logger.error("Deleted-data collection failed: %s", exc)
+            found = {"entries": [], "journals": [], "stats": {}}
+
+        type_map = {"Image": "Deleted Image", "Video": "Deleted Video",
+                    "Audio": "Deleted Audio", "Document": "Deleted Document",
+                    "GIF": "Deleted Image", "File": "Deleted File"}
+
+        for entry in found.get("entries", []):
+            path = entry["path"]
+            if path in seen_paths:
+                continue
+            seen_paths.add(path)
+            ftype = type_map.get(entry.get("type", "File"), "Deleted File")
+            r.append({
+                "type": ftype, "category": "Deleted Files",
+                "date": entry.get("deleted_at", ""),
+                "summary": entry.get("original_name", entry.get("name", "")),
+                "source": path,
+                "_data": {
+                    "filename": entry.get("original_name", ""),
+                    "stored_name": entry.get("name", ""),
+                    "path": path,
+                    "type": ftype,
+                    "size": _human_size(entry.get("size")),
+                    "status": entry.get("status", "Deleted"),
+                    "deleted_at": entry.get("deleted_at_text", ""),
+                    "extension": entry.get("extension", ""),
+                    "recovery": "Trash entry still present on storage",
+                },
+            })
+            c += 1
+
+        for journal in found.get("journals", []):
+            r.append({
+                "type": "DB Journal", "category": "Deleted Files",
+                "date": "", "summary": journal.get("name", ""),
+                "source": journal.get("path", ""),
+                "_data": {
+                    "filename": journal.get("name", ""),
+                    "path": journal.get("path", ""),
+                    "type": "DB Journal",
+                    "size": _human_size(journal.get("size")),
+                    "status": journal.get("status", ""),
+                    "extension": ".db-wal",
+                    "recovery": "Pre-delete page images in a database sidecar",
+                },
+            })
+            c += 1
+            for fragment in journal.get("fragments", [])[:60]:
+                r.append({
+                    "type": "Recovered Text", "category": "Deleted Files",
+                    "date": "", "summary": fragment[:120],
+                    "source": journal.get("path", ""),
+                    "_data": {
+                        "filename": journal.get("name", ""),
+                        "path": journal.get("path", ""),
+                        "type": "Recovered Text",
+                        "text": fragment,
+                        "size": "",
+                        "status": "Fragment recovered from journal",
+                        "extension": ".db-wal",
+                        "recovery": "Text found in pre-delete page images",
+                    },
+                })
+                c += 1
+
+        # Older Android builds keep a user-visible trash outside the prefixes
+        # above; keep the directory listing, but only for real entries.
+        for d in ("/sdcard/.Trash/", "/sdcard/.trash/", "/sdcard/Lost.dir/"):
             ok, output = adb.adb_shell(self.serial, f'ls -la {d} 2>/dev/null', timeout=10)
             if not ok or not output:
                 continue
@@ -1437,7 +1574,9 @@ class LoadWorker(QThread):
                 r.append({
                     "type": ftype, "category": "Deleted Files", "date": "",
                     "summary": fname, "source": full_path,
-                    "_data": {"filename": fname, "path": full_path, "type": ftype, "size": "", "status": status, "extension": ext}
+                    "_data": {"filename": fname, "path": full_path, "type": ftype,
+                              "size": "", "status": status, "extension": ext,
+                              "recovery": "Trash directory entry"},
                 })
                 c += 1
                 if c >= 5000:
@@ -1445,24 +1584,10 @@ class LoadWorker(QThread):
             if c >= 5000:
                 break
 
-        ok, output = adb.adb_shell(self.serial,
-            'find /sdcard/Android/data/ -maxdepth 3 \\( -name "*.db-wal" -o -name "*.db-shm" -o -name "*.wal" -o -name "*.shm" \\) 2>/dev/null | head -2000',
-            timeout=15)
-        if ok and output:
-            for line in output.splitlines():
-                line = line.strip()
-                if not line or "Permission denied" in line or line in seen_paths:
-                    continue
-                seen_paths.add(line)
-                fname = Path(line).name
-                r.append({
-                    "type": "DB Journal", "category": "Deleted Files", "date": "",
-                    "summary": fname, "source": line,
-                    "_data": {"filename": fname, "path": line, "type": "DB Journal", "size": "", "status": "Uncommitted DB changes", "extension": ".db-wal"}
-                })
-                c += 1
-
-        self.progress.emit(f"Found {c} deleted/recoverable files")
+        self.progress.emit(
+            f"Found {c} deleted/recoverable entries "
+            f"({found.get('stats', {}).get('trashed', 0)} trash entries, "
+            f"{found.get('stats', {}).get('fragments', 0)} journal fragments)")
 
     def _classify_deleted(self, fname, ext, path):
         if ext in ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'):
@@ -2764,28 +2889,132 @@ class ArtifactsPage(QWidget):
         self.stacked.setCurrentIndex(1)
 
     def _show_whatsapp_conversations(self):
-        self.conv_title.setText("WhatsApp")
-        wa_items = [a for a in self.all_artifacts if a.get("category") == "WhatsApp"]
-        self.conv_count.setText(f"{len(wa_items)} files")
-        self._set_media_actions([a for a in wa_items if a.get("type") in MEDIA_TYPES],
-                                "WhatsApp media")
+        from PyQt6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
+        from PyQt6.QtGui import QColor
 
+        wa_items = [a for a in self.all_artifacts if a.get("category") == "WhatsApp"]
+        messages = [a for a in wa_items
+                    if a.get("type") in ("Message", "Deleted Message", "Notification")]
+        backups = [a for a in wa_items if a.get("type") == "Backup"]
+        files = [a for a in wa_items if a not in messages and a not in backups]
+
+        deleted_count = sum(1 for a in messages if a.get("type") == "Deleted Message")
+        self.conv_title.setText("WhatsApp")
+        self.conv_count.setText(
+            f"{len(messages)} messages · {deleted_count} deleted · "
+            f"{len(files)} files · {len(backups)} backups")
+        self._set_media_actions([a for a in files if a.get("type") in MEDIA_TYPES],
+                                "WhatsApp media")
         self._clear_layout(self.conv_list_layout)
 
         if not wa_items:
             self._add_empty(
                 self.conv_list_layout,
-                "No WhatsApp data accessible.\n\nWhatsApp databases require root access.\n"
-                "Cached media from /sdcard/Android/data/com.whatsapp/ is shown.")
+                "No WhatsApp data was readable on this device.\n\n"
+                "An unrooted handset exposes WhatsApp media, local backups and "
+                "chat exports, but not the live msgstore. Export a chat in "
+                "WhatsApp (Chat → ⋮ → More → Export chat) and scan again, or "
+                "bring the handset in with root/USB debugging plus a physical "
+                "image for the database itself.")
             self.stacked.setCurrentIndex(1)
             return
 
+        if messages:
+            header = QLabel(f"  Messages ({len(messages)})")
+            header.setStyleSheet(
+                "color: #25d366; font-size: 12px; font-weight: 700;"
+                " padding: 8px 0 4px 0; background: transparent; border: none;")
+            self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, header)
+
+            table = QTableWidget()
+            headers = ["Chat", "Direction", "Date & Time", "Message", "Status"]
+            table.setColumnCount(len(headers))
+            table.setHorizontalHeaderLabels(headers)
+            table.setRowCount(len(messages))
+            table.setSortingEnabled(False)
+            table.verticalHeader().setVisible(False)
+            table.setShowGrid(False)
+            table.setAlternatingRowColors(True)
+            table.setStyleSheet("""
+                QTableWidget { background: #111827; border: 1px solid #1e293b;
+                    border-radius: 8px; gridline-color: #1e293b; font-size: 12px; }
+                QTableWidget::item { padding: 7px 10px; }
+                QTableWidget::item:selected { background: rgba(37,99,235,0.25); }
+                QHeaderView::section { background: #1a2234; color: #94a3b8;
+                    border: none; border-bottom: 2px solid #1e293b;
+                    font-size: 11px; font-weight: 700; padding: 9px; }
+            """)
+
+            ordered = sorted(messages, key=lambda a: str(a.get("date") or ""), reverse=True)
+            for row, artifact in enumerate(ordered[:5000]):
+                data = artifact.get("_data", {})
+                is_deleted = artifact.get("type") == "Deleted Message"
+                kind = data.get("kind", "text")
+                body = data.get("text") or data.get("attachment") or ""
+                if not body:
+                    body = "(no body stored)" if is_deleted else "(empty)"
+                if kind == "media" and not data.get("text"):
+                    body = f"<media: {data.get('attachment') or 'attachment'}>"
+                status = data.get("status", "")
+                cells = [
+                    data.get("chat") or data.get("sender") or "Unknown",
+                    data.get("direction", ""),
+                    data.get("date", ""),
+                    body.replace("\n", " "),
+                    status,
+                ]
+                for column, value in enumerate(cells):
+                    item = QTableWidgetItem(str(value))
+                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    if is_deleted:
+                        item.setForeground(QColor("#f87171"))
+                    elif kind == "media":
+                        item.setForeground(QColor("#93c5fd"))
+                    elif data.get("direction") == "notification":
+                        item.setForeground(QColor("#f59e0b"))
+                    table.setItem(row, column, item)
+
+            header_view = table.horizontalHeader()
+            header_view.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+            header_view.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+            header_view.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+            header_view.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+            header_view.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+            table.setMinimumHeight(420)
+            self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, table)
+
+        if backups:
+            header = QLabel(f"  Local backups ({len(backups)})")
+            header.setStyleSheet(
+                "color: #25d366; font-size: 12px; font-weight: 700;"
+                " padding: 12px 0 4px 0; background: transparent; border: none;")
+            self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, header)
+            for backup in backups[:30]:
+                data = backup.get("_data", {})
+                frame = QFrame()
+                frame.setStyleSheet("""
+                    QFrame { background: #0d2e1c; border-radius: 8px; border: 1px solid #14532d; }
+                """)
+                frame.setFixedHeight(46)
+                layout = QHBoxLayout(frame)
+                layout.setContentsMargins(12, 6, 12, 6)
+                name = QLabel(f"{data.get('filename', '')}")
+                name.setStyleSheet("color: #e2e8f0; font-size: 12px; background: transparent; border: none;")
+                layout.addWidget(name, 1)
+                meta = QLabel(f"{data.get('date', '')}  {data.get('size', '')}")
+                meta.setStyleSheet("color: #94a3b8; font-size: 11px; background: transparent; border: none;")
+                layout.addWidget(meta)
+                state = QLabel("SEALED" if data.get("sealed") else "PLAINTEXT")
+                state.setStyleSheet(
+                    f"color: {'#f59e0b' if data.get('sealed') else '#22c55e'};"
+                    " font-size: 10px; font-weight: 700; background: transparent; border: none;")
+                layout.addWidget(state)
+                self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, frame)
+
         type_groups = {}
-        for item in wa_items:
+        for item in files:
             ftype = item.get("type", "Cache File")
-            if ftype not in type_groups:
-                type_groups[ftype] = []
-            type_groups[ftype].append(item)
+            type_groups.setdefault(ftype, []).append(item)
 
         for ftype in ["Image", "Video", "Audio", "GIF", "Document", "Cache File"]:
             items = type_groups.get(ftype, [])
@@ -3208,7 +3437,7 @@ class ArtifactsPage(QWidget):
     def _show_deleted_files(self):
         self.conv_title.setText("Deleted Files — Recovery Viewer")
         items = [a for a in self.all_artifacts if a.get("category") == "Deleted Files"]
-        self.conv_count.setText(f"{len(items)} recoverable files")
+        self.conv_count.setText(f"{len(items)} recovery items")
 
         self._clear_layout(self.conv_list_layout)
 
@@ -3227,7 +3456,9 @@ class ArtifactsPage(QWidget):
                 type_groups[ftype] = []
             type_groups[ftype].append(item)
 
-        ordered_types = ["Deleted Image", "Deleted Video", "Deleted Audio", "Deleted Document", "DB Journal", "Temp/Backup", "Deleted File"]
+        ordered_types = ["Deleted Image", "Deleted Video", "Deleted Audio",
+                         "Deleted Document", "Recovered Text", "DB Journal",
+                         "Temp/Backup", "Deleted File"]
         for ftype in ordered_types:
             group = type_groups.get(ftype, [])
             if not group:
@@ -3250,9 +3481,14 @@ class ArtifactsPage(QWidget):
                 fname = item.get("_data", {}).get("filename", "")
                 status = item.get("_data", {}).get("status", "Deleted")
                 ext = item.get("_data", {}).get("extension", "")
+                if ftype == "Recovered Text":
+                    fname = item.get("_data", {}).get("text", "")
+                deleted_at = item.get("_data", {}).get("deleted_at", "")
+                if deleted_at:
+                    status = f"{status} · {deleted_at}"
 
                 status_lbl = QLabel(status)
-                status_lbl.setFixedWidth(160)
+                status_lbl.setFixedWidth(210)
                 status_lbl.setStyleSheet("color: #f59e0b; font-size: 10px; font-weight: 600; background: transparent; border: none;")
                 item_layout.addWidget(status_lbl)
 

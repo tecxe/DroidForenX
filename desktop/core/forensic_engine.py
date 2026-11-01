@@ -357,30 +357,55 @@ def analyze_calendar(serial):
 
 def recover_deleted(serial):
     _ensure_evidence_dir()
-    results = {"trash_files": [], "deleted_files": [], "sqlite_journals": [], "summary": {}}
-    ok, trashed = adb.adb_shell(serial, 'find /sdcard/ -name ".trashed*" -o -name ".deleted*" -o -name "*.trash" 2>/dev/null')
-    if ok and trashed:
+    from . import whatsapp as wa
+    results = {"trash_files": [], "deleted_files": [], "sqlite_journals": [],
+               "recovered_text": [], "summary": {}, "notes": []}
+    base = EVIDENCE_ROOT / "_deleted" / (serial or "device")[:32]
+    try:
+        found = wa.collect_deleted(serial, base)
+    except Exception as exc:
+        logger.error(f"Deleted-data collection failed: {exc}")
+        found = {"entries": [], "journals": [], "stats": {}}
+
+    for entry in found.get("entries", []):
+        record = {"path": entry["path"], "name": entry["name"],
+                  "original_name": entry["original_name"],
+                  "deleted_at": entry["deleted_at_text"],
+                  "status": entry["status"], "type": entry["type"]}
+        if entry["kind"] == "trashed":
+            results["trash_files"].append(record)
+        else:
+            results["deleted_files"].append(record)
+
+    for journal in found.get("journals", []):
+        results["sqlite_journals"].append({
+            "path": journal["path"], "name": journal["name"],
+            "fragments": len(journal.get("fragments", [])),
+            "status": journal["status"]})
+        for fragment in journal.get("fragments", [])[:100]:
+            results["recovered_text"].append(
+                {"text": fragment, "source": journal["path"]})
+
+    okay, trashed = adb.adb_shell(serial, 'find /sdcard/ -name ".pending*" 2>/dev/null')
+    if okay and trashed:
+        known = {entry["path"] for entry in found.get("entries", [])}
         for line in trashed.splitlines():
             line = line.strip()
-            if line and "Permission denied" not in line:
-                results["trash_files"].append({"path": line})
-    ok, deleted = adb.adb_shell(serial, 'find /sdcard/DCIM/ -name ".trashed*" -o -name ".pending*" 2>/dev/null')
-    if ok and deleted:
-        for line in deleted.splitlines():
-            line = line.strip()
-            if line and "Permission denied" not in line:
-                results["deleted_files"].append({"path": line})
-    ok, wal = adb.adb_shell(serial, 'find /data/data/ -name "*.db-wal" -o -name "*.db-shm" 2>/dev/null')
-    if ok and wal:
-        for line in wal.splitlines():
-            line = line.strip()
-            if line and "Permission denied" not in line:
-                results["sqlite_journals"].append({"path": line})
+            if line and "Permission denied" not in line and line not in known:
+                results["deleted_files"].append({"path": line, "name": Path(line).name,
+                                                 "status": "Pending deletion"})
+
     results["summary"] = {
         "trash": len(results["trash_files"]),
         "deleted": len(results["deleted_files"]),
         "sqlite_journals": len(results["sqlite_journals"]),
+        "recovered_text": len(results["recovered_text"]),
     }
+    if not (results["trash_files"] or results["deleted_files"]
+            or results["sqlite_journals"]):
+        results["notes"].append(
+            "No trash entries or journal sidecars were readable. Deleted bytes "
+            "on unallocated space need a physical image; nothing was invented.")
     return results
 
 
@@ -401,7 +426,8 @@ def analyze_notes(serial):
 
 
 def analyze_whatsapp(serial, evidence_root=None):
-    results = {"messages": [], "contacts": [], "stats": {}}
+    results = {"messages": [], "contacts": [], "stats": {},
+               "backups": [], "notifications": [], "notes": [], "access": ""}
     _ensure_evidence_dir()
     base = evidence_root or EVIDENCE_ROOT
     msgstore_paths = [
@@ -424,6 +450,7 @@ def analyze_whatsapp(serial, evidence_root=None):
                 msg["timestamp_readable"] = _ts_to_str(msg.get("timestamp", 0))
                 msg["direction"] = "outgoing" if msg.get("key_from_me") == 1 else "incoming"
             results["messages"] = messages
+            results["access"] = "app-private database (root)"
         except Exception as e:
             logger.error(f"WhatsApp msgstore parse error: {e}")
     if local_wa:
@@ -432,12 +459,40 @@ def analyze_whatsapp(serial, evidence_root=None):
             results["contacts"] = contacts
         except Exception as e:
             logger.error(f"WhatsApp wa.db parse error: {e}")
+
+    if not results["messages"]:
+        # Unrooted handset: read the shared storage the app does expose. An
+        # exported chat carries the full text; a plain msgstore is parsed
+        # directly; crypt15 backups are inventoried and labelled sealed.
+        from . import whatsapp as wa
+        workdir = Path(base) / "_whatsapp" / (serial or "device")[:32]
+        try:
+            collected = wa.collect(serial, workdir)
+        except Exception as exc:
+            logger.error(f"WhatsApp shared-storage collection failed: {exc}")
+            collected = {"messages": [], "backups": [], "media": [],
+                         "notifications": [], "notes": [str(exc)], "stats": {}}
+        results["messages"] = collected.get("messages", [])
+        results["backups"] = collected.get("backups", [])
+        results["notifications"] = collected.get("notifications", [])
+        results["notes"] = collected.get("notes", [])
+        results["media_count"] = collected.get("stats", {}).get("media", 0)
+        results["access"] = "shared storage (unexported msgstore is encrypted)"
+        for message in results["messages"]:
+            message.setdefault("timestamp_readable", message.get("date_text", ""))
+            message.setdefault("direction",
+                               "outgoing" if message.get("from_me") else "incoming")
+
     results["stats"] = {
         "total_messages": len(results["messages"]),
         "total_contacts": len(results["contacts"]),
         "incoming": sum(1 for m in results["messages"] if m.get("direction") == "incoming"),
         "outgoing": sum(1 for m in results["messages"] if m.get("direction") == "outgoing"),
-        "with_media": sum(1 for m in results["messages"] if m.get("media_url")),
+        "with_media": sum(1 for m in results["messages"] if m.get("attachment") or m.get("media_url")),
+        "deleted_messages": sum(1 for m in results["messages"] if m.get("deleted")),
+        "backups": len(results["backups"]),
+        "sealed_backups": sum(1 for b in results["backups"] if b.get("sealed")),
+        "notifications": len(results["notifications"]),
     }
     return results
 
@@ -930,9 +985,13 @@ ANALYSIS_MODULES = {
 #: (``/data/misc/wifi``) paths. Android exposes these to root only, so on an
 #: unrooted device they cannot succeed. The tool reports NOT_ACCESSIBLE with
 #: that reason rather than returning an empty result that reads as success.
+#: WhatsApp and Deleted Data are no longer here: both now read the shared
+#: storage an unrooted handset exposes (chat exports, plain msgstore, backup
+#: inventory, trash entries and journal sidecars) and say plainly what they
+#: could not reach.
 ROOT_REQUIRED_MODULES = frozenset({
-    "whatsapp", "telegram", "instagram", "snapchat", "tiktok", "facebook",
-    "transactions", "browser", "wifi_passwords", "deleted",
+    "telegram", "instagram", "snapchat", "tiktok", "facebook",
+    "transactions", "browser", "wifi_passwords",
 })
 
 # Verification tiers are NOT declared here. A tier is a claim that a loader
@@ -987,7 +1046,8 @@ def run_examination(serial, modules=None):
 
         try:
             findings = func(serial)
-            total_items = sum(len(v) for v in findings.values() if isinstance(v, list))
+            total_items = sum(len(v) for k, v in findings.items()
+                              if isinstance(v, list) and k != "notes")
 
             if total_items > 0:
                 status = AcquisitionStatus.ACQUIRED

@@ -462,6 +462,7 @@ SWATCH = {
     "#0d262e": "#e3f5f9",
     "#0d2e15": "#e8f8ee",
     "#0d2e1c": "#e7f7ef",
+    "#14532d": "#dcfce7",
     "#0d3328": "#e5f6f0",
     "#162d4a": "#dfeaf7",
     "#1a1a2e": "#efecfb",
