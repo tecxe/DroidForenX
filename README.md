@@ -190,10 +190,10 @@ run on import and need a connected handset, not a test runner.
 
 ![Test suite finishing with 437 tests passed and one skipped](docs/images/tests.png)
 
-The run above is v1.0.30: 437 tests with one skip — 16 for case editing and
+The run above is v1.0.31: 440 tests with one skip — 16 for case editing and
 deletion, 30 for WhatsApp parsing, deleted-entry recovery and freelist salvage,
 18 for Telegram exports, chat kinds, cache schemas and notifications, 24 for the
-media gallery, Telegram viewer, view modes and back-arrow behaviour, 27 for
+media gallery, Telegram viewer, view modes and back-arrow behaviour, 30 for
 physical-acquisition detection and image validation, 18 for
 percentage progress,
 30 for SIM parsing and storage, 63 for the report composer and its artifact
@@ -655,6 +655,25 @@ $env:DROIDFORENX_MTKCLIENT = "C:\tools\mtk\mtk.py"
 $env:DROIDFORENX_EDL = "C:\tools\edl\edl.py"
 ```
 
+The app also looks for engines without any environment setup: `tools\` beside
+the executable, `~/.droidforenx/tools/`, `~/droidforenx-tools/`, and the
+`mtkclient`/`edl` subfolders of each. Whatever it finds is remembered in
+`~/.droidforenx/tools.json` together with a Python interpreter, so a frozen
+build with no PATH configuration still runs a `.py` engine on the next click.
+
+On Windows the boot-mode device needs a libusb-compatible driver **once**.
+Windows installs the ADB driver by itself; it does not install one for a raw
+BootROM endpoint. Use [Zadig](https://zadig.akeo.ie): Options -> List All
+Devices -> *MediaTek USB Port* (VID `0E8D`) -> **WinUSB** -> Replace Driver.
+After that, every acquisition is a single click.
+
+Boot order matters: the preloader is only on the bus for a few seconds, so the
+engine has to be waiting before the cable goes in. mtkclient does wait, which is
+why **Acquire** is enabled as soon as the SoC and engine are known: it starts
+the engine, then asks for the powered-off handset. The panel also watches the
+USB bus while it is open, so the boot mode and plan update themselves when the
+phone appears or leaves.
+
 The MediaTek route needs no loader file. The Qualcomm route does: a secure-boot
 chip accepts only the firehose programmer that matches it, so **Acquire** stays
 disabled until a `.mbn`/`.elf` is chosen in the panel. That is a property of the
@@ -687,7 +706,7 @@ volumes, and an integrity-bound copy of the ciphertext for a laboratory holding
 the key material. The panel and the report say which of these applies instead
 of implying the messages are in there somewhere.
 
-Covered by `desktop/tests/test_physical.py` (27 tests): chipset naming from
+Covered by `desktop/tests/test_physical.py` (30 tests): chipset naming from
 Transsion property layouts, FBE/FDE labels, three USB-inventory formats, plan
 selection and every refusal path, GPT/MBR/sparse parsing, partition slicing and
 hash agreement.
@@ -776,7 +795,7 @@ by anyone. `test_reproducible_build.py` compares the installed environment
 against the lock, and the full two-build byte comparison runs only with
 `DROIDFORENX_SLOW_TESTS=1`.
 
-437 tests, no device required. They cover the properties that matter:
+440 tests, no device required. They cover the properties that matter:
 
 - an acquired artifact survives being read (the original bug was that 11
   loaders deleted evidence after parsing)

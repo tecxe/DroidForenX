@@ -61,6 +61,43 @@ def _store_artifact(session_id: str, name: str, source: str, category: str,
         pass
 
 
+class PhysicalWatchWorker(QThread):
+    """Watch the USB bus while the page is open.
+
+    BROM/Preloader only exists for a few seconds after the cable is plugged
+    in, so a one-shot Detect button misses it whenever the operator follows
+    the instructions "power off, hold the buttons, plug in". Polling here
+    means the panel flips to the boot mode by itself and Acquire becomes
+    clickable without a second trip to the button.
+    """
+
+    changed = Signal(list)
+
+    INTERVAL = 2.5
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._running = True
+
+    def stop(self):
+        self._running = False
+
+    def run(self):
+        from ...core import physical
+        last = None
+        while self._running:
+            try:
+                modes = physical.detect_usb_modes()
+            except Exception:
+                modes = []
+            key = sorted((m.get("mode", ""), m.get("vid", ""), m.get("pid", ""))
+                         for m in modes)
+            if key != last:
+                last = key
+                self.changed.emit(modes)
+            time.sleep(self.INTERVAL)
+
+
 class PhysicalDetectWorker(QThread):
     """Detect chipset, boot mode and engine availability off the UI thread."""
 
@@ -86,11 +123,14 @@ class PhysicalImageWorker(QThread):
     finished = Signal(dict)
 
     def __init__(self, serial: str, case_id: str, loader: str = "",
-                 parent=None):
+                 soc: dict = None, parent=None):
         super().__init__(parent)
         self.serial = serial or ""
         self.case_id = case_id or ""
         self.loader = loader or ""
+        # The handset is powered off by the time the engine runs, so ADB can no
+        # longer name the chipset. Keep what the last probe learned.
+        self.soc = soc or {}
         self._reader = None
 
     def cancel(self):
@@ -101,19 +141,19 @@ class PhysicalImageWorker(QThread):
         from ...core import physical, evidence_store
         try:
             detection = physical.detect(self.serial, self.loader)
-            plan_data = detection.get("plan", {})
-            plan = physical.Plan(
-                route=plan_data.get("route", "logical"),
-                viable=bool(plan_data.get("viable")),
-                reason=plan_data.get("reason", ""),
-                argv=list(plan_data.get("argv") or []),
-                note=plan_data.get("note", ""),
-            )
+            soc = (detection.get("profile") or {}).get("soc") or {}
+            if soc.get("family") in (None, "", "unknown") and self.soc:
+                soc = self.soc
+            transports = detection.get("transports") or []
+            tools = detection.get("tools") or {}
+            plan = physical.build_plan(soc, transports, tools, self.loader)
             if not plan.viable:
                 self.log.emit(plan.reason, "warning")
                 self.finished.emit({"ok": False, "message": plan.reason,
                                     "files": []})
                 return
+
+            self.log.emit(plan.reason, "info")
 
             stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             if self.case_id:
@@ -1021,7 +1061,14 @@ class AcquisitionWorker(QThread):
             self._log("  Boot mode: " + ", ".join(t["label"] for t in transports),
                       "info")
         else:
-            self._log("  Boot mode: none (only ADB is present)", "info")
+            self._log(
+                "  Boot mode: none (only ADB is present). A physical run has to "
+                "start the engine before the handset is plugged in; use the "
+                "Physical Image panel for that.", "info")
+            self._log(
+                "  Physical phase skipped. No image is claimed and no empty "
+                "'physical' folder is left behind.", "info")
+            return
 
         tools = physical.find_tools()
         plan = physical.build_plan(soc, transports, tools)
@@ -2157,6 +2204,7 @@ class AcquirePage(QWidget):
         run_row = QHBoxLayout()
         self.btn_phys_acquire = QPushButton("⛏ Acquire Physical Image")
         self.btn_phys_acquire.setFixedHeight(36)
+        self.btn_phys_acquire.setEnabled(False)
         self.btn_phys_acquire.clicked.connect(self._acquire_physical)
         run_row.addWidget(self.btn_phys_acquire)
         self.btn_phys_stop = QPushButton("⏹ Stop")
@@ -2178,6 +2226,9 @@ class AcquirePage(QWidget):
 
         self._phys_detect_worker = None
         self._phys_worker = None
+        self._phys_watch = None
+        self._phys_modes = []
+        self._phys_soc = {}
         self._phys_detected_serial = ""
         return group
 
@@ -2200,6 +2251,29 @@ class AcquirePage(QWidget):
         self._phys_detect_worker = worker
         worker.start()
 
+    def _on_boot_mode_changed(self, modes):
+        """The phone entered or left a boot mode while the page was open."""
+        previous = self._phys_modes
+        self._phys_modes = modes or []
+        now = sorted(m.get("mode", "") for m in self._phys_modes)
+        before = sorted(m.get("mode", "") for m in previous)
+        if now == before:
+            return
+        imaging = [m for m in self._phys_modes
+                   if m.get("mode") in ("mtk_brom", "mtk_preloader", "mtk_da",
+                                        "qualcomm_edl")]
+        if imaging:
+            self.console.log(
+                "Boot mode detected: "
+                + ", ".join(m.get("label", m.get("mode", "")) for m in imaging),
+                "success")
+            # Re-detect with the device now on the bus, so the engine and plan
+            # are rebuilt instead of showing the stale "ADB only" reason.
+            self._detect_physical()
+        else:
+            self.phys_mode.setText("ADB only (no boot-mode USB device present)")
+            self.btn_phys_acquire.setEnabled(False)
+
     def _on_physical_detected(self, data):
         if data.get("error"):
             self.phys_reason.setText(f"Detection failed: {data['error']}")
@@ -2212,14 +2286,21 @@ class AcquirePage(QWidget):
         plan = data.get("plan") or {}
 
         self._phys_detected_serial = profile.get("serial", "")
-        self.phys_soc.setText(
-            f"{soc.get('label', 'Unknown')}"
-            + (f" · {soc['model']}" if soc.get("model") else ""))
+        # A handset in BROM is no longer on ADB, so the profile read fails and
+        # would blank the chipset line. Only replace it with a real answer.
+        if soc.get("family") not in (None, "", "unknown"):
+            self.phys_soc.setText(
+                f"{soc.get('label', 'Unknown')}"
+                + (f" · {soc['model']}" if soc.get("model") else ""))
         self.phys_mode.setText(
             ", ".join(t["label"] for t in transports) if transports
             else "ADB only (no boot-mode USB device present)")
         engine = tools.get("mtkclient") or tools.get("mtkclient_module") or tools.get("edl")
+        if engine and engine.lower().endswith(".py"):
+            engine += f"  (python: {tools.get('python') or 'default'})"
         self.phys_tools.setText(engine or "No acquisition engine found on PATH")
+        if soc.get("family") not in (None, "", "unknown"):
+            self._phys_soc = soc
         reason = plan.get("reason", "")
         if crypto.get("encrypted"):
             reason += f"\nEncryption: {crypto.get('label', 'encrypted')}"
@@ -2238,7 +2319,8 @@ class AcquirePage(QWidget):
         self.btn_phys_stop.setEnabled(True)
         self.console.log("Starting physical acquisition...", "info")
         worker = PhysicalImageWorker(
-            serial, self._case_id, self.phys_loader.text().strip(), self)
+            serial, self._case_id, self.phys_loader.text().strip(),
+            soc=self._phys_soc, parent=self)
         worker.log.connect(self.console.log)
         worker.finished.connect(self._on_physical_finished)
         self._phys_worker = worker
@@ -2298,9 +2380,17 @@ class AcquirePage(QWidget):
     def showEvent(self, event):
         super().showEvent(event)
         self.device_bar.auto_scan()
-        serial = self._serial or self.device_bar.get_first_serial()
-        if serial and serial != self._phys_detected_serial:
-            self._detect_physical()
+        self._detect_physical()
+        if self._phys_watch is None or not self._phys_watch.isRunning():
+            self._phys_watch = PhysicalWatchWorker(self)
+            self._phys_watch.changed.connect(self._on_boot_mode_changed)
+            self._phys_watch.start()
+
+    def hideEvent(self, event):
+        if self._phys_watch is not None:
+            self._phys_watch.stop()
+            self._phys_watch = None
+        super().hideEvent(event)
 
     def _start_acquisition(self):
         serial = self._serial or self.device_bar.get_first_serial()

@@ -175,16 +175,45 @@ class PlanTest(unittest.TestCase):
         self.assertTrue(plan.viable)
         self.assertEqual(plan.argv[-2:], ["--loader", "/firmware/prog_firehose.mbn"])
 
-    def test_a_mediatek_handset_over_adb_says_how_to_enter_brom(self):
+    def test_a_mediatek_handset_over_adb_is_armed_before_plugging_in(self):
+        # mtkclient waits for the port, so the engine is viable over ADB; the
+        # instructions tell the operator to start it first, then plug in.
         plan = physical.build_plan(self.mediatek, [], {"mtkclient": "/bin/mtk"})
+        self.assertTrue(plan.viable)
+        self.assertIn("Volume Up", plan.reason)
+        self.assertIn("waits", plan.reason)
+
+    def test_a_mediatek_handset_without_an_engine_says_how_to_enter_brom(self):
+        plan = physical.build_plan(self.mediatek, [], {})
         self.assertFalse(plan.viable)
         self.assertIn("BootROM", plan.reason)
-        self.assertIn("Volume Up", plan.reason)
 
     def test_an_unknown_handset_falls_back_to_logical(self):
         plan = physical.build_plan({"family": "unknown"}, [], {})
         self.assertEqual(plan.route, "logical")
         self.assertFalse(plan.viable)
+
+    def test_a_script_engine_is_run_with_the_configured_python(self):
+        plan = physical.build_plan(
+            self.mediatek, self.brom,
+            {"mtkclient": "/opt/mtk/mtk.py", "python": "/usr/bin/python3"})
+        self.assertEqual(plan.argv, ["/usr/bin/python3", "/opt/mtk/mtk.py",
+                                     "rl", "<evidence>/physical"])
+
+    def test_a_frozen_build_without_python_refuses_instead_of_crashing(self):
+        import sys
+        tools = {"mtkclient": "/opt/mtk/mtk.py", "python": ""}
+        original = getattr(sys, "frozen", None)
+        sys.frozen = True
+        try:
+            plan = physical.build_plan(self.mediatek, self.brom, tools)
+        finally:
+            if original is None:
+                del sys.frozen
+            else:
+                sys.frozen = original
+        self.assertFalse(plan.viable)
+        self.assertIn("DROIDFORENX_PYTHON", plan.reason)
 
 
 class GptTest(unittest.TestCase):

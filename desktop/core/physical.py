@@ -247,15 +247,93 @@ def detect_usb_modes() -> list[dict]:
 TOOL_ENV = {
     "mtkclient": ("DROIDFORENX_MTKCLIENT", "MTKCLIENT"),
     "edl": ("DROIDFORENX_EDL", "EDL"),
+    "python": ("DROIDFORENX_PYTHON",),
 }
 
+#: Names each engine may be installed under.
+TOOL_NAMES = {
+    "mtkclient": ("mtk", "mtkclient", "mtk.py"),
+    "edl": ("edl", "edl.py"),
+    "heimdall": ("heimdall",),
+}
 
-def _resolve_tool(names: Iterable[str], env_keys: Iterable[str] = ()) -> str:
-    for key in env_keys:
-        value = os.environ.get(key, "").strip()
+#: A frozen build has no interpreter of its own, so the engine path and the
+#: Python that can import pyusb are remembered in one small file. The installer
+#: (or the operator, once) writes it; every later launch finds the engine with
+#: no environment setup at all.
+CONFIG_PATH = Path.home() / ".droidforenx" / "tools.json"
+
+
+def read_tool_config() -> dict:
+    try:
+        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def write_tool_config(values: dict) -> bool:
+    """Merge ``values`` into the remembered tools. Never raises."""
+    merged = read_tool_config()
+    merged.update({k: str(v) for k, v in values.items() if v})
+    if not merged:
+        return False
+    try:
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG_PATH.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+        return True
+    except OSError:
+        logger.warning("cannot write %s", CONFIG_PATH, exc_info=True)
+        return False
+
+
+def _search_dirs() -> list:
+    """Folders that may hold an engine, most specific first."""
+    dirs = []
+    if getattr(sys, "frozen", False):
+        dirs.append(Path(sys.executable).resolve().parent)
+    dirs.append(Path(__file__).resolve().parents[2])
+    dirs.append(Path.home() / ".droidforenx" / "tools")
+    dirs.append(Path.home() / "droidforenx-tools")
+    return dirs
+
+
+def _resolve_tool(names: Iterable[str], env_keys: Iterable[str] = (),
+                  config_key: str = "") -> str:
+    config = read_tool_config()
+    candidates = list(env_keys) + ([config_key] if config_key else [])
+    for key in candidates:
+        value = (os.environ.get(key) or config.get(key) or "").strip()
         if value and Path(value).exists():
             return value
     for name in names:
+        path = shutil.which(name)
+        if path:
+            return path
+    for folder in _search_dirs():
+        for parent in (folder, folder / "mtkclient", folder / "edl"):
+            for name in names:
+                candidate = parent / name
+                if candidate.is_file():
+                    return str(candidate)
+    return ""
+
+
+def find_python() -> str:
+    """The interpreter that can import pyusb, for a ``.py`` engine.
+
+    When running from a checkout ``sys.executable`` is already that
+    interpreter. A frozen executable is not, so the configured path, the
+    environment and PATH are checked instead.
+    """
+    config = read_tool_config()
+    for value in (os.environ.get("DROIDFORENX_PYTHON", ""), config.get("python", "")):
+        value = (value or "").strip()
+        if value and Path(value).exists():
+            return value
+    if not getattr(sys, "frozen", False):
+        return sys.executable
+    for name in ("python", "python3", "py"):
         path = shutil.which(name)
         if path:
             return path
@@ -264,8 +342,8 @@ def _resolve_tool(names: Iterable[str], env_keys: Iterable[str] = ()) -> str:
 
 def find_tools() -> dict:
     """Locate the open acquisition engines. Nothing is installed by us."""
-    mtk = _resolve_tool(("mtk", "mtkclient", "mtk.py"), TOOL_ENV["mtkclient"])
-    edl = _resolve_tool(("edl", "edl.py"), TOOL_ENV["edl"])
+    mtk = _resolve_tool(TOOL_NAMES["mtkclient"], TOOL_ENV["mtkclient"], "mtkclient")
+    edl = _resolve_tool(TOOL_NAMES["edl"], TOOL_ENV["edl"], "edl")
     mtk_module = ""
     if not mtk:
         try:
@@ -274,22 +352,27 @@ def find_tools() -> dict:
                 mtk_module = "mtkclient"
         except (ImportError, ValueError):
             pass
+    python = find_python()
+    # Remember what was found so the next launch is a single click even if the
+    # operator never opens a terminal.
+    write_tool_config({"mtkclient": mtk, "edl": edl, "python": python})
     return {
         "mtkclient": mtk,
         "mtkclient_module": mtk_module,
         "edl": edl,
-        "heimdall": _resolve_tool(("heimdall",)),
+        "heimdall": _resolve_tool(TOOL_NAMES["heimdall"]),
+        "python": python,
     }
 
 
-def _script_argv(tool: str, *args: str) -> list:
-    """Run a ``.py`` engine with the current interpreter, an exe directly."""
+def _script_argv(tool: str, *args: str, python: str = "") -> list:
+    """Run a ``.py`` engine with an interpreter, an exe directly."""
     if tool.lower().endswith(".py"):
-        return [sys.executable, tool, *args]
+        return [python or sys.executable, tool, *args]
     return [tool, *args]
 
 
-def build_mtk_argv(tool: str, outdir, *, module: str = "") -> list:
+def build_mtk_argv(tool: str, outdir, *, module: str = "", python: str = "") -> list:
     """``mtk rl <dir>`` reads every partition into ``<dir>``.
 
     ``rl`` is mtkclient's "read all partitions to a folder" verb. Each
@@ -297,11 +380,11 @@ def build_mtk_argv(tool: str, outdir, *, module: str = "") -> list:
     to hash separately than one multi-gigabyte blob.
     """
     if module:
-        return [sys.executable, "-m", module, "rl", str(outdir)]
-    return _script_argv(tool, "rl", str(outdir))
+        return [python or sys.executable, "-m", module, "rl", str(outdir)]
+    return _script_argv(tool, "rl", str(outdir), python=python)
 
 
-def build_edl_argv(tool: str, outdir, loader: str = "") -> list:
+def build_edl_argv(tool: str, outdir, loader: str = "", python: str = "") -> list:
     """``edl rl <dir>`` with an optional firehose loader.
 
     A Qualcomm device in EDL needs a programmer that matches its chip. Without
@@ -311,7 +394,7 @@ def build_edl_argv(tool: str, outdir, loader: str = "") -> list:
     args = ["rl", str(outdir)]
     if loader:
         args += ["--loader", loader]
-    return _script_argv(tool, *args)
+    return _script_argv(tool, *args, python=python)
 
 
 @dataclass
@@ -336,13 +419,24 @@ def build_plan(soc: dict, transports: list[dict], tools: dict,
 
     if modes & {"mtk_brom", "mtk_preloader", "mtk_da"}:
         if tools.get("mtkclient") or tools.get("mtkclient_module"):
+            tool = tools.get("mtkclient", "")
+            if (tool.lower().endswith(".py") and getattr(sys, "frozen", False)
+                    and not tools.get("python")):
+                return Plan(
+                    route="mtkclient",
+                    viable=False,
+                    reason=("mtkclient was found, but this build has no Python "
+                            "to run it with. Set DROIDFORENX_PYTHON to a Python "
+                            "that can import pyusb."),
+                    note="The handset and the engine are both available.")
             return Plan(
                 route="mtkclient",
                 viable=True,
                 reason="MediaTek boot mode detected and mtkclient is installed.",
                 argv=build_mtk_argv(
-                    tools.get("mtkclient", ""), "<evidence>/physical",
-                    module=tools.get("mtkclient_module", "")),
+                    tool, "<evidence>/physical",
+                    module=tools.get("mtkclient_module", ""),
+                    python=tools.get("python", "")),
                 note="Reads every partition over the BootROM/Preloader; no root.")
         return Plan(
             route="mtkclient",
@@ -371,10 +465,28 @@ def build_plan(soc: dict, transports: list[dict], tools: dict,
             route="edl",
             viable=True,
             reason="Qualcomm EDL detected, edl.py and a loader are present.",
-            argv=build_edl_argv(tools["edl"], "<evidence>/physical", loader),
+            argv=build_edl_argv(tools["edl"], "<evidence>/physical", loader,
+                                python=tools.get("python", "")),
             note="Reads every partition over the firehose protocol.")
 
     if family == "mediatek":
+        tool = tools.get("mtkclient", "")
+        if tool or tools.get("mtkclient_module"):
+            # mtkclient waits for the port, so the correct order is: start the
+            # engine, then plug the powered-off handset in. Requiring the
+            # boot-mode device to already exist would make the click
+            # impossible: the preloader is only present for a few seconds.
+            return Plan(
+                route="mtkclient",
+                viable=True,
+                reason=("Ready. Click Acquire, then power the handset off and "
+                        "hold Volume Up + Volume Down while plugging USB in. "
+                        "mtkclient waits for the boot ROM."),
+                argv=build_mtk_argv(
+                    tool, "<evidence>/physical",
+                    module=tools.get("mtkclient_module", ""),
+                    python=tools.get("python", "")),
+                note="The engine must be running before the handset is plugged in.")
         return Plan(
             route="mediatek",
             viable=False,
@@ -384,6 +496,16 @@ def build_plan(soc: dict, transports: list[dict], tools: dict,
                     "points) to enter BROM."),
             note="ADB cannot see /dev/block without root; the chip can.")
     if family == "qualcomm":
+        if tools.get("edl") and loader:
+            return Plan(
+                route="edl",
+                viable=True,
+                reason=("Ready. Click Acquire, then power the handset off and "
+                        "connect USB while holding the EDL key combination "
+                        "(often Volume Up + Volume Down). edl.py waits for 9008."),
+                argv=build_edl_argv(tools["edl"], "<evidence>/physical", loader,
+                                    python=tools.get("python", "")),
+                note="The engine must be running before the handset is plugged in.")
         return Plan(
             route="qualcomm",
             viable=False,
