@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                               QFrame, QComboBox, QGroupBox, QGridLayout, QProgressBar,
-                              QCheckBox, QScrollArea, QMessageBox)
+                              QCheckBox, QScrollArea, QMessageBox, QLineEdit,
+                              QFileDialog)
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSignal as Signal
 from ..widgets.log_console import LogConsole
 from ..widgets.data_table import DataTable
@@ -58,6 +59,151 @@ def _store_artifact(session_id: str, name: str, source: str, category: str,
         conn.close()
     except Exception:
         pass
+
+
+class PhysicalDetectWorker(QThread):
+    """Detect chipset, boot mode and engine availability off the UI thread."""
+
+    done = Signal(dict)
+
+    def __init__(self, serial: str = "", loader: str = "", parent=None):
+        super().__init__(parent)
+        self._serial = serial
+        self._loader = loader
+
+    def run(self):
+        try:
+            from ...core import physical
+            self.done.emit(physical.detect(self._serial, self._loader))
+        except Exception as exc:  # a probe must never take the window down
+            self.done.emit({"error": str(exc)})
+
+
+class PhysicalImageWorker(QThread):
+    """Drive mtkclient/edl, then validate and record what came back."""
+
+    log = Signal(str, str)
+    finished = Signal(dict)
+
+    def __init__(self, serial: str, case_id: str, loader: str = "",
+                 parent=None):
+        super().__init__(parent)
+        self.serial = serial or ""
+        self.case_id = case_id or ""
+        self.loader = loader or ""
+        self._reader = None
+
+    def cancel(self):
+        if self._reader is not None:
+            self._reader.cancel()
+
+    def run(self):
+        from ...core import physical, evidence_store
+        try:
+            detection = physical.detect(self.serial, self.loader)
+            plan_data = detection.get("plan", {})
+            plan = physical.Plan(
+                route=plan_data.get("route", "logical"),
+                viable=bool(plan_data.get("viable")),
+                reason=plan_data.get("reason", ""),
+                argv=list(plan_data.get("argv") or []),
+                note=plan_data.get("note", ""),
+            )
+            if not plan.viable:
+                self.log.emit(plan.reason, "warning")
+                self.finished.emit({"ok": False, "message": plan.reason,
+                                    "files": []})
+                return
+
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            if self.case_id:
+                try:
+                    outdir = evidence_store.acquired_dir(self.case_id) / "physical"
+                except Exception:
+                    outdir = (Path.home() / ".droidforenx" / "images"
+                              / f"physical_{stamp}")
+            else:
+                outdir = (Path.home() / ".droidforenx" / "images"
+                          / f"physical_{stamp}_{self.serial[:8]}")
+            outdir.mkdir(parents=True, exist_ok=True)
+
+            plan.argv = [arg.replace("<evidence>/physical", str(outdir))
+                         for arg in plan.argv]
+            self.log.emit("Running: " + " ".join(plan.argv), "info")
+            result = physical.run_acquisition(
+                plan,
+                on_line=lambda line: self.log.emit("  " + line, "info"),
+                on_reader=self._set_reader,
+            )
+            if result.get("cancelled"):
+                self.log.emit("Physical acquisition cancelled by user.", "warning")
+                self.finished.emit({"ok": False, "message": "cancelled",
+                                    "files": []})
+                return
+            if not result.get("ok"):
+                message = result.get("message") or (
+                    f"engine exited {result.get('returncode')}")
+                self.log.emit(f"Physical acquisition failed: {message}", "error")
+                self.finished.emit({"ok": False, "message": message,
+                                    "files": []})
+                return
+
+            report = physical.image_set_report(outdir)
+            self.log.emit(
+                f"Engine wrote {report['count']} files "
+                f"({report['total_bytes']:,} bytes).", "success")
+
+            # A whole-disk blob gets its table parsed and its partitions
+            # sliced out, so the examiner is not left with a 128 GiB file.
+            partitions = []
+            for entry in report["files"]:
+                path = Path(entry["path"])
+                try:
+                    image = physical.validate_image(path)
+                except OSError as exc:
+                    self.log.emit(f"  {path.name}: could not validate ({exc})",
+                                  "warning")
+                    continue
+                self.log.emit(
+                    f"  {path.name}: {image.container}, {image.table.upper()}, "
+                    f"{image.size_bytes:,} bytes - {image.summary()}", "info")
+                if image.table in ("gpt", "mbr"):
+                    sliced = physical.extract_partitions(
+                        path, image, outdir / "partitions")
+                    partitions.extend(sliced)
+                    self.log.emit(
+                        f"    sliced {len(sliced)} partitions from {path.name}",
+                        "info")
+
+            if self.case_id:
+                for entry in report["files"]:
+                    evidence_store.record_acquired(
+                        self.case_id, f"physical:{entry['name']}",
+                        entry["path"], "physical",
+                        detail=f"{entry['filesystem'] or 'unrecognised'} "
+                               f"{entry['size_bytes']} bytes",
+                        digest=entry["sha256"])
+                for entry in partitions:
+                    evidence_store.record_acquired(
+                        self.case_id, f"physical:{entry['name']}",
+                        entry["path"], "physical",
+                        detail=f"partition slice, {entry['filesystem'] or 'unknown'}",
+                        digest=entry["sha256"])
+
+            self.finished.emit({
+                "ok": True,
+                "outdir": str(outdir),
+                "files": report["files"],
+                "partitions": partitions,
+                "total_bytes": report["total_bytes"],
+                "engine_output": result.get("output", []),
+            })
+        except Exception as exc:
+            self.log.emit(f"Physical acquisition error: {exc}", "error")
+            self.finished.emit({"ok": False, "message": str(exc), "files": []})
+
+    def _set_reader(self, reader):
+        self._reader = reader
 
 
 class AcquisitionWorker(QThread):
@@ -157,7 +303,7 @@ class AcquisitionWorker(QThread):
         self._log("━━━ Phase 7: Deleted & Trashed Files ━━━", "info")
         self._extract_deleted_files(evidence_root, results)
 
-        # ── Phase 8: Physical Image (if root) ──
+        # ── Phase 8: Physical Image (BootROM/EDL, no root) ──
         if self.level >= 3:
             self.phase_changed.emit("Physical Image")
             self._log("━━━ Phase 8: Physical Image Attempt ━━━", "info")
@@ -845,46 +991,98 @@ class AcquisitionWorker(QThread):
     # ── Phase 8: Physical ──
 
     def _extract_physical(self, evidence_root, results):
-        self._log("Attempting physical image (requires root)...", "warning")
-        ok, test = adb.adb_shell(self.serial, "id")
-        is_root = ok and "uid=0" in test
+        """Physical image without root, via the chip's boot mode.
 
-        if not is_root:
-            # Try su
-            ok, test = adb.adb_shell(self.serial, "su -c id")
-            is_root = ok and "uid=0" in test
+        The previous version asked for ``su`` and gave up, which on every
+        handset this tool sees meant the phase did nothing while the UI still
+        said "Level 3 - Physical". The block devices stay denied to ``adb`` no
+        matter how the request is worded; the chip's BootROM/EDL is the only
+        unrooted route, and that is what is driven here.
+        """
+        from ...core import physical
 
-        if not is_root:
-            self._log("  Device is not rooted — physical image skipped", "warning")
-            self._log("  Logical extraction provides comprehensive data without root", "info")
+        self._log("Physical acquisition: detecting chipset and boot mode...", "info")
+        profile = {"soc": physical.normalise_soc({}), "encryption": {}}
+        if self.serial:
+            try:
+                profile = physical.read_device_profile(self.serial)
+            except Exception as exc:
+                self._log(f"  Device profile failed: {exc}", "warning")
+
+        soc = profile.get("soc") or physical.normalise_soc({})
+        crypto = profile.get("encryption") or {}
+        self._log(
+            f"  SoC: {soc.get('label', 'Unknown')}"
+            + (f" ({soc['model']})" if soc.get("model") else ""), "info")
+        self._log(f"  Encryption: {crypto.get('label', 'not stated')}", "info")
+
+        transports = physical.detect_usb_modes()
+        if transports:
+            self._log("  Boot mode: " + ", ".join(t["label"] for t in transports),
+                      "info")
+        else:
+            self._log("  Boot mode: none (only ADB is present)", "info")
+
+        tools = physical.find_tools()
+        plan = physical.build_plan(soc, transports, tools)
+        if not plan.viable:
+            self._log(f"  {plan.reason}", "warning")
+            self._log(
+                "  Physical phase skipped. The image is not claimed, and no "
+                "empty 'physical' folder is left behind.", "info")
             return
 
-        phys_dir = evidence_root / "physical"
-        phys_dir.mkdir(parents=True, exist_ok=True)
+        outdir = evidence_root / "physical"
+        outdir.mkdir(parents=True, exist_ok=True)
+        plan.argv = [arg.replace("<evidence>/physical", str(outdir))
+                     for arg in plan.argv]
+        self._log("  Running: " + " ".join(plan.argv), "info")
 
-        # Get block device info
-        ok, blocks = adb.adb_shell(self.serial, "ls -la /dev/block/by-name/ 2>/dev/null")
-        if ok and blocks:
-            blocks_path = phys_dir / "block_devices.txt"
-            blocks_path.write_text(blocks, encoding="utf-8", errors="replace")
-            self._hash_and_store(str(blocks_path), "ls /dev/block/by-name", "physical", evidence_root)
+        result = physical.run_acquisition(
+            plan, on_line=lambda line: self._log("  " + line, "info"))
+        if result.get("cancelled"):
+            self._log("  Physical acquisition cancelled.", "warning")
+            return
+        if not result.get("ok"):
+            self._log(
+                f"  Engine failed: {result.get('message') or result.get('returncode')}",
+                "warning")
+            return
+
+        try:
+            report = physical.image_set_report(outdir)
+        except OSError as exc:
+            self._log(f"  Could not inventory the image set: {exc}", "warning")
+            return
+
+        for entry in report["files"]:
+            size, _digest = self._hash_and_store(
+                entry["path"], f"physical:{entry['name']}", "physical_image",
+                evidence_root)
             results["files"] += 1
-            results["bytes"] += blocks_path.stat().st_size
+            results["bytes"] += size
+            self._log(
+                f"  ✓ {entry['name']}: {size:,} bytes"
+                + (f" [{entry['filesystem']}]" if entry["filesystem"] else ""),
+                "success")
 
-        # Attempt to image boot partition (small, fast)
-        for part, name in [("/dev/block/by-name/boot", "boot.img"),
-                          ("/dev/block/by-name/recovery", "recovery.img")]:
-            ok, _ = adb.adb_shell(self.serial, f"dd if={part} of=/sdcard/dfx_{name} bs=4096 2>/dev/null")
-            if ok:
-                local = str(phys_dir / name)
-                if adb.pull_file(self.serial, f"/sdcard/dfx_{name}", local, timeout=60):
-                    sz = Path(local).stat().st_size if Path(local).exists() else 0
-                    if sz > 0:
-                        self._hash_and_store(local, part, "physical_image", evidence_root)
-                        results["files"] += 1
-                        results["bytes"] += sz
-                        self._log(f"  ✓ {name}: {sz:,} bytes", "success")
-                adb.adb_shell(self.serial, f"rm /sdcard/dfx_{name}")
+            # Parse the table and slice a whole-disk blob.
+            try:
+                image = physical.validate_image(entry["path"])
+            except OSError:
+                continue
+            if image.table in ("gpt", "mbr"):
+                slices = physical.extract_partitions(
+                    entry["path"], image, outdir / "partitions")
+                for part in slices:
+                    psize, _ = self._hash_and_store(
+                        part["path"], f"physical:{part['name']}",
+                        "physical_image", evidence_root)
+                    results["files"] += 1
+                    results["bytes"] += psize
+                self._log(
+                    f"    {image.table.upper()} table: sliced {len(slices)} partitions",
+                    "info")
 
     # ═══════════════════════════════════════════════════════════════════════
     #  PHASE 9: FULL STORAGE IMAGE
@@ -1752,7 +1950,7 @@ class AcquirePage(QWidget):
         self.level_combo.addItems([
             "Level 1 — Logical (contacts, SMS, calls, calendar, app data, adb backup)",
             "Level 2 — Full (+sdcard media, social apps, documents, full storage, file carving)",
-            "Level 3 — Physical (+disk image, requires root)",
+            "Level 3 — Physical (+flash image via BootROM/EDL, no root)",
         ])
         self.level_combo.setStyleSheet("padding: 10px;")
         config_layout.addWidget(self.level_combo, 0, 1, 1, 2)
@@ -1763,6 +1961,8 @@ class AcquirePage(QWidget):
         config_layout.addWidget(self.hash_combo, 1, 1)
 
         layout.addWidget(config_group)
+
+        layout.addWidget(self._build_physical_group())
 
         # Extraction checklist
         check_group = QGroupBox("📋 Extraction Checklist (auto-selected by level)")
@@ -1845,7 +2045,7 @@ class AcquirePage(QWidget):
 
         # The acquisition runs a fixed list of phases; tracking the index is what
         # lets one bar describe the whole job instead of each phase separately.
-        self._phase_total = 9
+        self._phase_total = 15
         self._phase_index = 0
         self._phase_name = ""
         self._phase_started = False
@@ -1888,6 +2088,188 @@ class AcquirePage(QWidget):
         # No scroll area previously, so a short window compressed the console.
         enable_page_scroll(self)
 
+    # -- physical acquisition (no root) -----------------------------------
+
+    def _build_physical_group(self):
+        group = QGroupBox("🔓 Physical Image (no root)")
+        outer = QVBoxLayout(group)
+        outer.setSpacing(8)
+
+        intro = QLabel(
+            "A physical image is the raw flash, taken below the filesystem. "
+            "Without root that means talking to the chip: MediaTek BootROM "
+            "via mtkclient, or Qualcomm EDL via edl.py. The engines are "
+            "separate open-source tools; this app detects, drives and validates "
+            "them.")
+        intro.setWordWrap(True)
+        intro.setStyleSheet("font-size: 12px; color: #94a3b8; background: transparent;")
+        outer.addWidget(intro)
+
+        row = QHBoxLayout()
+        self.btn_phys_detect = QPushButton("Detect Chipset & Mode")
+        self.btn_phys_detect.setFixedHeight(34)
+        self.btn_phys_detect.clicked.connect(self._detect_physical)
+        row.addWidget(self.btn_phys_detect)
+        row.addStretch()
+        outer.addLayout(row)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(4)
+        self.phys_soc = QLabel("Not detected")
+        self.phys_mode = QLabel("Not detected")
+        self.phys_tools = QLabel("Not checked")
+        for row_index, (label, widget) in enumerate((
+                ("Chipset:", self.phys_soc),
+                ("Boot mode:", self.phys_mode),
+                ("Engine:", self.phys_tools))):
+            name = QLabel(label)
+            name.setStyleSheet("color: #64748b; font-size: 12px; background: transparent;")
+            widget.setStyleSheet("color: #e2e8f0; font-size: 12px; background: transparent;")
+            widget.setWordWrap(True)
+            grid.addWidget(name, row_index, 0)
+            grid.addWidget(widget, row_index, 1)
+        outer.addLayout(grid)
+
+        self.phys_reason = QLabel(
+            "Press Detect. A powered-on handset is read over ADB; for a "
+            "physical image it has to be powered off and connected in "
+            "BootROM/EDL mode.")
+        self.phys_reason.setWordWrap(True)
+        self.phys_reason.setStyleSheet(
+            "color: #f59e0b; font-size: 12px; background: transparent;")
+        outer.addWidget(self.phys_reason)
+
+        loader_row = QHBoxLayout()
+        loader_label = QLabel("Firehose loader:")
+        loader_label.setStyleSheet("color: #64748b; font-size: 12px; background: transparent;")
+        loader_row.addWidget(loader_label)
+        self.phys_loader = QLineEdit()
+        self.phys_loader.setPlaceholderText(
+            "Qualcomm only - programmer .mbn/.elf matching the SoC (optional for MediaTek)")
+        loader_row.addWidget(self.phys_loader, 1)
+        self.btn_phys_browse = QPushButton("Browse")
+        self.btn_phys_browse.setFixedHeight(30)
+        self.btn_phys_browse.clicked.connect(self._browse_loader)
+        loader_row.addWidget(self.btn_phys_browse)
+        outer.addLayout(loader_row)
+
+        run_row = QHBoxLayout()
+        self.btn_phys_acquire = QPushButton("⛏ Acquire Physical Image")
+        self.btn_phys_acquire.setFixedHeight(36)
+        self.btn_phys_acquire.clicked.connect(self._acquire_physical)
+        run_row.addWidget(self.btn_phys_acquire)
+        self.btn_phys_stop = QPushButton("⏹ Stop")
+        self.btn_phys_stop.setFixedHeight(36)
+        self.btn_phys_stop.setEnabled(False)
+        self.btn_phys_stop.clicked.connect(self._stop_physical)
+        run_row.addWidget(self.btn_phys_stop)
+        run_row.addStretch()
+        outer.addLayout(run_row)
+
+        self.phys_ceiling = QLabel(
+            "Ceiling: an encrypted handset yields ciphertext for userdata. "
+            "Boot, vendor, metadata and any unencrypted volume stay readable; "
+            "the image is still integrity-bound evidence for a lab with keys.")
+        self.phys_ceiling.setWordWrap(True)
+        self.phys_ceiling.setStyleSheet(
+            "color: #64748b; font-size: 11px; background: transparent;")
+        outer.addWidget(self.phys_ceiling)
+
+        self._phys_detect_worker = None
+        self._phys_worker = None
+        self._phys_detected_serial = ""
+        return group
+
+    def _browse_loader(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select firehose loader", "",
+            "Loaders (*.mbn *.elf *.bin);;All files (*)")
+        if path:
+            self.phys_loader.setText(path)
+
+    def _detect_physical(self):
+        if self._phys_detect_worker is not None and self._phys_detect_worker.isRunning():
+            return
+        serial = self._serial or self.device_bar.get_first_serial()
+        self.phys_reason.setText("Detecting...")
+        self.btn_phys_detect.setEnabled(False)
+        worker = PhysicalDetectWorker(serial, self.phys_loader.text().strip(), self)
+        worker.done.connect(self._on_physical_detected)
+        worker.finished.connect(lambda: self.btn_phys_detect.setEnabled(True))
+        self._phys_detect_worker = worker
+        worker.start()
+
+    def _on_physical_detected(self, data):
+        if data.get("error"):
+            self.phys_reason.setText(f"Detection failed: {data['error']}")
+            return
+        profile = data.get("profile") or {}
+        soc = profile.get("soc") or {}
+        crypto = profile.get("encryption") or {}
+        transports = data.get("transports") or []
+        tools = data.get("tools") or {}
+        plan = data.get("plan") or {}
+
+        self._phys_detected_serial = profile.get("serial", "")
+        self.phys_soc.setText(
+            f"{soc.get('label', 'Unknown')}"
+            + (f" · {soc['model']}" if soc.get("model") else ""))
+        self.phys_mode.setText(
+            ", ".join(t["label"] for t in transports) if transports
+            else "ADB only (no boot-mode USB device present)")
+        engine = tools.get("mtkclient") or tools.get("mtkclient_module") or tools.get("edl")
+        self.phys_tools.setText(engine or "No acquisition engine found on PATH")
+        reason = plan.get("reason", "")
+        if crypto.get("encrypted"):
+            reason += f"\nEncryption: {crypto.get('label', 'encrypted')}"
+        self.phys_reason.setText(reason or "No route reported.")
+        self.phys_reason.setStyleSheet(
+            "color: #22c55e; font-size: 12px; background: transparent;"
+            if plan.get("viable") else
+            "color: #f59e0b; font-size: 12px; background: transparent;")
+        self.btn_phys_acquire.setEnabled(bool(plan.get("viable")))
+
+    def _acquire_physical(self):
+        if self._phys_worker is not None and self._phys_worker.isRunning():
+            return
+        serial = self._serial or self.device_bar.get_first_serial()
+        self.btn_phys_acquire.setEnabled(False)
+        self.btn_phys_stop.setEnabled(True)
+        self.console.log("Starting physical acquisition...", "info")
+        worker = PhysicalImageWorker(
+            serial, self._case_id, self.phys_loader.text().strip(), self)
+        worker.log.connect(self.console.log)
+        worker.finished.connect(self._on_physical_finished)
+        self._phys_worker = worker
+        worker.start()
+
+    def _stop_physical(self):
+        if self._phys_worker is not None and self._phys_worker.isRunning():
+            self._phys_worker.cancel()
+            self.console.log("Stopping physical acquisition...", "warning")
+
+    def _on_physical_finished(self, result):
+        self.btn_phys_stop.setEnabled(False)
+        self.btn_phys_acquire.setEnabled(True)
+        if not result.get("ok"):
+            self.console.log(
+                f"Physical image not acquired: {result.get('message', 'unknown')}",
+                "warning")
+            return
+        files = result.get("files") or []
+        partitions = result.get("partitions") or []
+        self.console.log(
+            f"Physical image complete: {len(files)} files, "
+            f"{result.get('total_bytes', 0):,} bytes, "
+            f"{len(partitions)} partition slices.", "success")
+        self.console.log(f"Stored under: {result.get('outdir', '')}", "info")
+        self.phys_reason.setText(
+            f"Physical image captured: {len(files)} files, "
+            f"{len(partitions)} partition slices.\n{result.get('outdir', '')}")
+        self.phys_reason.setStyleSheet(
+            "color: #22c55e; font-size: 12px; background: transparent;")
+
     def set_device(self, serial: str, case_id: str = "", session_id: str = ""):
         self._serial = serial
         self._case_id = case_id
@@ -1910,10 +2292,15 @@ class AcquirePage(QWidget):
     def _on_device_rescanned(self, devices):
         if devices:
             self._serial = devices[0].get("serial", "")
+            if self._serial and self._serial != self._phys_detected_serial:
+                self._detect_physical()
 
     def showEvent(self, event):
         super().showEvent(event)
         self.device_bar.auto_scan()
+        serial = self._serial or self.device_bar.get_first_serial()
+        if serial and serial != self._phys_detected_serial:
+            self._detect_physical()
 
     def _start_acquisition(self):
         serial = self._serial or self.device_bar.get_first_serial()
@@ -1953,7 +2340,7 @@ class AcquirePage(QWidget):
         try:
             done, steps = int(current), int(total)
             # One percentage for the whole acquisition, not one per phase: the
-            # operator asked "how far through the job", and nine phase-local
+            # operator asked "how far through the job", and phase-local
             # bars that each restart at zero answer a different question.
             within = (done / steps) if steps > 0 else 0.0
             overall = ((max(0, self._phase_index - 1) + within) / self._phase_total) * 100
