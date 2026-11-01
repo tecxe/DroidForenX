@@ -78,6 +78,16 @@ USB_MODES = {
 #: Modes that can be driven to a full image by an open engine.
 IMAGING_MODES = ("mtk_brom", "mtk_preloader", "mtk_da", "qualcomm_edl")
 
+#: Told to the operator when a boot-mode device is on the bus but no driver is
+#: bound to it. Windows lets the device be enumerated and then refuses every
+#: read, which looks identical to a dead handset until it is named.
+DRIVER_HELP = (
+    "Windows sees {label} ({vid}:{pid}) but has bound no driver to it, so "
+    "every USB read is refused before the handshake. Bind WinUSB once, with "
+    "the device plugged in: Zadig -> Options -> List All Devices -> {label} "
+    "-> WinUSB -> Replace Driver. The binding is permanent for this model."
+)
+
 #: Filesystem magics checked at fixed offsets inside a partition.
 _FS_MAGIC = (
     ("ext2/3/4", 0x438, b"\x53\xef"),
@@ -219,24 +229,79 @@ def _run(argv: list, timeout: int = 20) -> str:
 
 def detect_usb_modes() -> list[dict]:
     """Ask the host which boot-mode USB devices are present right now."""
-    modes = []
     if sys.platform.startswith("win"):
-        script = (
-            "Get-CimInstance Win32_PnPEntity | "
-            "Where-Object { $_.PNPDeviceID -like 'USB*' } | "
-            "ForEach-Object { $_.PNPDeviceID }")
-        modes += parse_usb_listing(
-            _run(["powershell", "-NoProfile", "-Command", script]), "Windows PnP")
+        modes = parse_pnp_binding(_run_pnp_inventory())
     elif sys.platform == "darwin":
-        modes += parse_usb_listing(
+        modes = parse_usb_listing(
             _run(["system_profiler", "SPUSBDataType"]), "system_profiler")
     else:
-        modes += parse_usb_listing(_run(["lsusb"]), "lsusb")
+        modes = parse_usb_listing(_run(["lsusb"]), "lsusb")
     # Deduplicate by mode while keeping the first device name.
     by_mode = {}
     for entry in modes:
         by_mode.setdefault(entry["mode"], entry)
     return list(by_mode.values())
+
+
+def _run_pnp_inventory() -> str:
+    """One PowerShell pass: ID, name, driver service, status, problem code."""
+    script = (
+        "Get-CimInstance Win32_PnPEntity | "
+        "Where-Object { $_.PNPDeviceID -like 'USB*' } | "
+        "ForEach-Object { $_.PNPDeviceID + '|' + $_.Name + '|' + "
+        "$_.Service + '|' + $_.Status + '|' + $_.ConfigManagerErrorCode }")
+    return _run(["powershell", "-NoProfile", "-Command", script])
+
+
+def parse_pnp_binding(text: str) -> list[dict]:
+    """Parse the Windows inventory into boot-mode entries with their driver.
+
+    ``Service`` is the name of the function driver the device node is bound to
+    and ``ConfigManagerErrorCode`` is 28 when Windows has no driver at all.
+    Both matter: a node with neither cannot be read from user mode, whatever
+    the engine does.
+    """
+    found = []
+    seen = set()
+    for line in (text or "").splitlines():
+        parts = [part.strip() for part in line.split("|")]
+        if len(parts) < 5:
+            continue
+        pnp, name, service, status, code = parts[:5]
+        match = re.search(r"VID_([0-9A-Fa-f]{4})&PID_([0-9A-Fa-f]{4})", pnp)
+        if not match:
+            continue
+        pair = (match.group(1).lower().zfill(4), match.group(2).lower().zfill(4))
+        if pair in seen or pair not in USB_MODES:
+            continue
+        seen.add(pair)
+        kind, label = USB_MODES[pair]
+        found.append({
+            "vid": pair[0], "pid": pair[1], "mode": kind, "label": label,
+            "device": name, "source": "Windows PnP",
+            "driver": service.lower(), "status": status,
+            "problem": code not in ("", "0"),
+            "bound": bool(service) and code in ("", "0"),
+        })
+    return found
+
+
+def unbound_modes(transports: list) -> list:
+    """Boot-mode devices present on the bus whose node has no driver."""
+    return [t for t in (transports or [])
+            if t.get("mode") in IMAGING_MODES and t.get("bound") is False]
+
+
+def driver_message(entry: dict) -> str:
+    """The actionable sentence for one unbounded boot-mode device.
+
+    The name matters: Zadig lists the node by the name Windows gave it, which
+    is ``MT65xx Preloader``, not the nicer label this module uses.
+    """
+    return DRIVER_HELP.format(
+        label=entry.get("device") or entry.get("label")
+        or "the boot-mode device",
+        vid=entry.get("vid", ""), pid=entry.get("pid", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -340,6 +405,20 @@ def find_python() -> str:
     return ""
 
 
+def find_zadig() -> str:
+    """Locate Zadig, the signed-driver installer for a raw USB endpoint."""
+    for name in ("zadig", "zadig.exe", "Zadig.exe"):
+        path = shutil.which(name)
+        if path:
+            return path
+    for folder in _search_dirs():
+        for name in ("zadig.exe", "Zadig.exe", "zadig-2.9.exe"):
+            candidate = folder / name
+            if candidate.is_file():
+                return str(candidate)
+    return ""
+
+
 def find_tools() -> dict:
     """Locate the open acquisition engines. Nothing is installed by us."""
     mtk = _resolve_tool(TOOL_NAMES["mtkclient"], TOOL_ENV["mtkclient"], "mtkclient")
@@ -406,9 +485,22 @@ class Plan:
     reason: str
     argv: list = field(default_factory=list)
     note: str = ""
+    #: Directory the child must have on PATH to load libusb on Windows. Only a
+    #: ``.py`` engine needs it: the DLL sits beside the interpreter.
+    env_path: str = ""
 
     def as_dict(self) -> dict:
         return asdict(self)
+
+    def __post_init__(self):
+        # A .py engine is launched as [python, script, ...]. The libusb DLL is
+        # installed beside that interpreter, so its directory has to be on the
+        # child's PATH or pyusb reports "no backend available" before the
+        # engine ever reaches the handset.
+        if self.env_path or len(self.argv) < 2:
+            return
+        if str(self.argv[1]).lower().endswith(".py"):
+            self.env_path = str(Path(self.argv[0]).resolve().parent)
 
 
 def build_plan(soc: dict, transports: list[dict], tools: dict,
@@ -416,6 +508,18 @@ def build_plan(soc: dict, transports: list[dict], tools: dict,
     """Choose the acquisition route this device can actually take."""
     modes = {t["mode"] for t in transports}
     family = (soc or {}).get("family", "unknown")
+
+    # A device on the bus with no driver bound is a Windows fault, not a
+    # handset fault. Running the engine against it produces nothing but
+    # "Handshake failed" for minutes, so name the real cause and stop.
+    blocked = unbound_modes(transports)
+    if blocked:
+        return Plan(
+            route="driver",
+            viable=False,
+            reason=driver_message(blocked[0]),
+            note=("The chip is reachable; the host has no function driver on "
+                  "the port, so no engine can read it yet."))
 
     if modes & {"mtk_brom", "mtk_preloader", "mtk_da"}:
         if tools.get("mtkclient") or tools.get("mtkclient_module"):
@@ -524,9 +628,11 @@ def build_plan(soc: dict, transports: list[dict], tools: dict,
 class _LineReader:
     """Run a subprocess and hand each output line to a callback."""
 
-    def __init__(self, argv: list, on_line: Callable[[str], None]):
+    def __init__(self, argv: list, on_line: Callable[[str], None],
+                 env_path: str = ""):
         self.argv = list(argv)
         self.on_line = on_line
+        self.env_path = env_path
         self._process: Optional[subprocess.Popen] = None
         self._cancelled = False
 
@@ -540,10 +646,13 @@ class _LineReader:
                 pass
 
     def run(self, timeout: Optional[int] = None) -> dict:
+        env = dict(os.environ)
+        if self.env_path:
+            env["PATH"] = self.env_path + os.pathsep + env.get("PATH", "")
         try:
             self._process = subprocess.Popen(
                 self.argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1,
+                text=True, bufsize=1, env=env,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except OSError as exc:
             return {"ok": False, "message": str(exc), "argv": self.argv}
@@ -585,13 +694,73 @@ def run_acquisition(plan: Plan, on_line: Callable[[str], None] = None,
     """
     if not plan.viable or not plan.argv:
         return {"ok": False, "message": plan.reason, "argv": plan.argv}
-    reader = _LineReader(plan.argv, on_line or (lambda _line: None))
+    holder = acquire_engine_lock()
+    if holder is not None:
+        return {
+            "ok": False,
+            "message": (
+                "Another acquisition engine is already running (pid "
+                f"{holder}). Only one process may drive the boot-mode port: a "
+                "second one makes both fail their handshake. Stop it, or wait "
+                "for it to finish."),
+            "argv": plan.argv,
+        }
+    reader = _LineReader(plan.argv, on_line or (lambda _line: None),
+                         env_path=getattr(plan, "env_path", ""))
     if on_reader is not None:
         try:
             on_reader(reader)
         except Exception:
             logger.debug("on_reader callback failed", exc_info=True)
-    return reader.run()
+    try:
+        return reader.run()
+    finally:
+        release_engine_lock()
+
+
+#: One boot-mode port, one engine. Two processes on the same endpoint make
+#: both fail the handshake, which reads like a broken handset.
+ENGINE_LOCK = Path.home() / ".droidforenx" / "engine.lock"
+
+
+def _process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if sys.platform.startswith("win"):
+        out = _run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], timeout=10)
+        return str(pid) in out
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def acquire_engine_lock() -> Optional[int]:
+    """Take the engine lock. Returns the holding pid if it is already taken."""
+    try:
+        ENGINE_LOCK.parent.mkdir(parents=True, exist_ok=True)
+        if ENGINE_LOCK.exists():
+            try:
+                holder = int(ENGINE_LOCK.read_text(encoding="utf-8").strip() or 0)
+            except (OSError, ValueError):
+                holder = 0
+            if holder and _process_alive(holder):
+                return holder
+            # A stale lock from a crash must not block every future run.
+            ENGINE_LOCK.unlink(missing_ok=True)
+        ENGINE_LOCK.write_text(str(os.getpid()), encoding="utf-8")
+        return None
+    except OSError:
+        logger.warning("cannot take the engine lock", exc_info=True)
+        return None
+
+
+def release_engine_lock():
+    try:
+        ENGINE_LOCK.unlink(missing_ok=True)
+    except OSError:
+        logger.debug("cannot release the engine lock", exc_info=True)
 
 
 # ---------------------------------------------------------------------------

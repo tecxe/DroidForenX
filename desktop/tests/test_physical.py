@@ -137,6 +137,98 @@ class UsbTest(unittest.TestCase):
             physical.parse_usb_listing("ID 0781:5567 SanDisk Cruzer"), [])
 
 
+class DriverBindingTest(unittest.TestCase):
+    """A device on the bus with no driver is a host fault, not a handset one."""
+
+    def _line(self, pnp, name, service, status="Error", code="28"):
+        return f"{pnp}|{name}|{service}|{status}|{code}"
+
+    def test_a_bound_device_reports_its_service(self):
+        text = self._line(r"USB\VID_0E8D&PID_0003\5&1", "MediaTek BootROM",
+                          "WINUSB", "OK", "0")
+        entry = physical.parse_pnp_binding(text)[0]
+        self.assertEqual(entry["mode"], "mtk_brom")
+        self.assertEqual(entry["driver"], "winusb")
+        self.assertTrue(entry["bound"])
+        self.assertFalse(entry["problem"])
+
+    def test_an_unbound_preloader_is_flagged_and_explained(self):
+        text = self._line(r"USB\VID_0E8D&PID_2000\5&347706db&0&1",
+                          "MT65xx Preloader", "", "Error", "28")
+        entry = physical.parse_pnp_binding(text)[0]
+        self.assertFalse(entry["bound"])
+        self.assertEqual(physical.unbound_modes([entry]), [entry])
+        message = physical.driver_message(entry)
+        self.assertIn("MT65xx Preloader", message)
+        self.assertIn("0e8d", message)
+        self.assertIn("WinUSB", message)
+
+    def test_a_stopped_device_is_not_called_bound(self):
+        text = self._line(r"USB\VID_0E8D&PID_2000\5&1", "MT65xx Preloader",
+                          "WINUSB", "Error", "10")
+        entry = physical.parse_pnp_binding(text)[0]
+        self.assertFalse(entry["bound"])
+
+    def test_non_boot_mode_devices_are_ignored(self):
+        text = self._line(r"USB\VID_046D&PID_C52B\5&1", "Receiver",
+                          "usbhid", "OK", "0")
+        self.assertEqual(physical.parse_pnp_binding(text), [])
+
+    def test_the_plan_refuses_an_unbound_port_and_names_the_fix(self):
+        entry = {"mode": "mtk_preloader", "label": "MediaTek Preloader",
+                 "vid": "0e8d", "pid": "2000", "bound": False}
+        plan = physical.build_plan({"family": "mediatek"}, [entry],
+                                   {"mtkclient": "/bin/mtk"})
+        self.assertFalse(plan.viable)
+        self.assertEqual(plan.route, "driver")
+        self.assertIn("WinUSB", plan.reason)
+
+    def test_a_bound_port_still_builds_the_engine_plan(self):
+        entry = {"mode": "mtk_preloader", "label": "MediaTek Preloader",
+                 "vid": "0e8d", "pid": "2000", "bound": True}
+        plan = physical.build_plan({"family": "mediatek"}, [entry],
+                                   {"mtkclient": "/bin/mtk"})
+        self.assertTrue(plan.viable)
+        self.assertEqual(plan.route, "mtkclient")
+
+
+class EngineLockTest(unittest.TestCase):
+    """Two engines on one boot-mode port make both fail the handshake."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self._original = physical.ENGINE_LOCK
+        physical.ENGINE_LOCK = Path(self.tmp.name) / "engine.lock"
+        self.addCleanup(lambda: setattr(physical, "ENGINE_LOCK", self._original))
+
+    def test_the_first_caller_takes_the_lock(self):
+        self.assertIsNone(physical.acquire_engine_lock())
+        self.assertTrue(physical.ENGINE_LOCK.exists())
+        physical.release_engine_lock()
+        self.assertFalse(physical.ENGINE_LOCK.exists())
+
+    def test_a_live_holder_is_reported(self):
+        physical.ENGINE_LOCK.write_text(str(os.getpid()), encoding="utf-8")
+        self.assertEqual(physical.acquire_engine_lock(), os.getpid())
+
+    def test_a_stale_lock_is_reclaimed(self):
+        physical.ENGINE_LOCK.write_text("999999999", encoding="utf-8")
+        self.assertIsNone(physical.acquire_engine_lock())
+        self.assertEqual(physical.ENGINE_LOCK.read_text(encoding="utf-8"),
+                         str(os.getpid()))
+        physical.release_engine_lock()
+
+    def test_a_second_run_is_refused_instead_of_failing_the_handshake(self):
+        physical.ENGINE_LOCK.write_text(str(os.getpid()), encoding="utf-8")
+        result = physical.run_acquisition(
+            physical.Plan(route="mtkclient", viable=True, reason="",
+                          argv=["mtk", "rl", "out"]))
+        self.assertFalse(result["ok"])
+        self.assertIn("already running", result["message"])
+
+
 class PlanTest(unittest.TestCase):
     def setUp(self):
         self.mediatek = {"family": "mediatek"}

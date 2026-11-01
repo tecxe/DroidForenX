@@ -1,4 +1,6 @@
 """Stage 2: Data Acquisition — full forensic extraction."""
+import subprocess
+import sys
 import uuid
 import hashlib
 import re
@@ -2212,6 +2214,13 @@ class AcquirePage(QWidget):
         self.btn_phys_stop.setEnabled(False)
         self.btn_phys_stop.clicked.connect(self._stop_physical)
         run_row.addWidget(self.btn_phys_stop)
+        # Shown only when Windows has enumerated the boot-mode device but bound
+        # no driver to it: the one fault the operator has to fix by hand.
+        self.btn_phys_driver = QPushButton("🔌 Install USB Driver…")
+        self.btn_phys_driver.setFixedHeight(36)
+        self.btn_phys_driver.setVisible(False)
+        self.btn_phys_driver.clicked.connect(self._open_driver_helper)
+        run_row.addWidget(self.btn_phys_driver)
         run_row.addStretch()
         outer.addLayout(run_row)
 
@@ -2231,6 +2240,45 @@ class AcquirePage(QWidget):
         self._phys_soc = {}
         self._phys_detected_serial = ""
         return group
+
+    def _open_driver_helper(self):
+        """Start the signed-driver installer for the boot-mode USB endpoint.
+
+        Windows must have a function driver on the raw BootROM/Preloader node
+        before any engine can read it, and that install needs administrator
+        rights. Zadig is the tool mtkclient's own documentation points at, so
+        the app starts it rather than describing a path the operator has to
+        hunt for.
+        """
+        from ...core import physical
+        zadig = physical.find_zadig()
+        if not zadig:
+            self.console.log(
+                "Zadig is not installed. Download it from https://zadig.akeo.ie "
+                "and place zadig.exe beside the app or in ~/droidforenx-tools.",
+                "warning")
+            QMessageBox.information(
+                self, "Driver installer not found",
+                "Zadig installs the WinUSB driver that a raw BootROM/Preloader "
+                "port needs.\n\nDownload it from https://zadig.akeo.ie and put "
+                "zadig.exe beside DroidForenX.exe or in "
+                "%USERPROFILE%\\droidforenx-tools, then click again.")
+            return
+        try:
+            if sys.platform.startswith("win"):
+                subprocess.Popen(
+                    ["powershell", "-NoProfile", "-Command",
+                     f"Start-Process -FilePath '{zadig}' -Verb RunAs"],
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            else:
+                subprocess.Popen([zadig])
+        except OSError as exc:
+            self.console.log(f"Could not start {zadig}: {exc}", "error")
+            return
+        self.console.log(
+            f"Started {zadig}. Plug the powered-off handset in, then choose "
+            "Options > List All Devices > the MediaTek port > WinUSB > "
+            "Replace Driver.", "info")
 
     def _browse_loader(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -2267,12 +2315,19 @@ class AcquirePage(QWidget):
                 "Boot mode detected: "
                 + ", ".join(m.get("label", m.get("mode", "")) for m in imaging),
                 "success")
+            unbound = [m for m in imaging if m.get("bound") is False]
+            if unbound:
+                # Better to say it while the device is still on the bus than to
+                # let the engine fail its handshake for minutes.
+                from ...core import physical
+                self.console.log(physical.driver_message(unbound[0]), "warning")
             # Re-detect with the device now on the bus, so the engine and plan
             # are rebuilt instead of showing the stale "ADB only" reason.
             self._detect_physical()
         else:
             self.phys_mode.setText("ADB only (no boot-mode USB device present)")
             self.btn_phys_acquire.setEnabled(False)
+            self.btn_phys_driver.setVisible(False)
 
     def _on_physical_detected(self, data):
         if data.get("error"):
@@ -2310,6 +2365,9 @@ class AcquirePage(QWidget):
             if plan.get("viable") else
             "color: #f59e0b; font-size: 12px; background: transparent;")
         self.btn_phys_acquire.setEnabled(bool(plan.get("viable")))
+        # The driver button exists for exactly one situation: the chip is on
+        # the bus and Windows has no function driver on the port.
+        self.btn_phys_driver.setVisible(plan.get("route") == "driver")
 
     def _acquire_physical(self):
         if self._phys_worker is not None and self._phys_worker.isRunning():

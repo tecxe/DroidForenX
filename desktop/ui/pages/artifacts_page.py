@@ -4429,7 +4429,8 @@ class ArtifactsPage(QWidget):
         self.conv_count.setText(f"{len(media)} tiles")
         self.view_hint.setText(
             "" if media else "No pictures in this category - try Table or Folder.")
-        self.thumb_gallery.set_serial(self.device_bar.get_first_serial() or self.serial or "")
+        self.thumb_gallery.set_serial(
+            self.device_bar.get_first_serial() or getattr(self, "serial", "") or "")
         self.thumb_gallery.load(app_def.get("name", ""), media)
         self.conv_stack.setCurrentIndex(1)
 
