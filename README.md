@@ -190,10 +190,11 @@ run on import and need a connected handset, not a test runner.
 
 ![Test suite finishing, one test skipped](docs/images/tests.png)
 
-The run above is v1.0.32: 450 tests with one skip — 16 for case editing and
+The run above is v1.0.33: 463 tests with two skips — 16 for case editing and
 deletion, 30 for WhatsApp parsing, deleted-entry recovery and freelist salvage,
-18 for Telegram exports, chat kinds, cache schemas and notifications, 24 for the
-media gallery, Telegram viewer, view modes and back-arrow behaviour, 40 for
+18 for Telegram exports, chat kinds, cache schemas and notifications, 25 for the
+media gallery, Telegram viewer and back-arrow behaviour, 22 for the artifact
+table and its empty states, 42 for
 physical-acquisition detection and image validation, 18 for
 percentage progress,
 30 for SIM parsing and storage, 63 for the report composer and its artifact
@@ -607,26 +608,22 @@ stays out of reach without root; the loader says so instead of returning zero.
 Covered by `desktop/tests/test_telegram.py` (18 tests) and the viewer tests in
 `desktop/tests/test_media_gallery.py`.
 
-### Table, thumbnail, folder and gallery views
+### Artifact views
 
-Every artifact category can be read four ways from the bar under its header,
-without re-running the extractor:
+A category has one projection: the curated table for that category (message
+tables, chat lists, call log, generic rows). The old Table / Thumbnail / Folder /
+Gallery bar is gone — four ways to read the same records meant four places for a
+rendering bug to hide, and the folder grouping was rebuilt from string paths that
+the extractor already recorded.
 
-- **Table** — the curated view for that category (message tables, chat lists,
-  call log, generic rows).
-- **Thumbnail** — the category's pictures as tiles, with the tile-size control;
-  the gallery's own header and footer are hidden because the category already
-  has one.
-- **Folder** — items grouped by the directory they were found in, largest
-  folder first, with the device path preserved as POSIX (`/sdcard/...`) rather
-  than Windows-rewritten.
-- **Gallery** — the full-screen gallery, with back returning to the mode you
-  left.
+Media categories (WhatsApp, Telegram, Photos) still open into the thumbnail
+gallery, because that is how pictures are shown, and the back arrow returns to
+the category you came from. A category with no media stays on its list instead of
+opening an empty grid, and a regression test pins that.
 
-The back arrow was reading a stale return index, so a click could land on the
-page already showing. It now distinguishes "leaving the gallery" (restore the
-previous mode and re-render the category) from "leaving the category" (return to
-the app grid), and a regression test pins the stale-index case.
+The back arrow distinguishes "leaving the gallery" (re-render the open category)
+from "leaving the category" (return to the app grid), and a regression test pins
+the stale-index case that used to make a click land on the page already showing.
 
 `is_device_rooted()` and `device_root_summary()` in `adb_manager.py` perform
 root detection so the tool knows its own ceiling before interpreting results.
@@ -685,6 +682,16 @@ fail their handshake, which looks exactly like a broken handset. A lock in
 `~/.droidforenx/engine.lock` refuses a second run, and a stale lock from a crash
 is reclaimed rather than blocking every future attempt.
 
+The panel is a small state machine rather than a set of independent buttons:
+
+- a detection requested while another detection is still running is queued and
+  replayed when the worker retires, so a preloader that appears mid-scan is not
+  missed;
+- a failed detection clears the plan and disables **Acquire** instead of leaving
+  the previous route's button live;
+- **Acquire** follows the last viable route, so a finished or failed run cannot
+  leave it enabled when there is nothing to run against.
+
 The MediaTek route needs no loader file. The Qualcomm route does: a secure-boot
 chip accepts only the firehose programmer that matches it, so **Acquire** stays
 disabled until a `.mbn`/`.elf` is chosen in the panel. That is a property of the
@@ -717,7 +724,7 @@ volumes, and an integrity-bound copy of the ciphertext for a laboratory holding
 the key material. The panel and the report say which of these applies instead
 of implying the messages are in there somewhere.
 
-Covered by `desktop/tests/test_physical.py` (40 tests): chipset naming from
+Covered by `desktop/tests/test_physical.py` (42 tests): chipset naming from
 Transsion property layouts, FBE/FDE labels, three USB-inventory formats, plan
 selection and every refusal path, GPT/MBR/sparse parsing, partition slicing and
 hash agreement.
@@ -806,7 +813,7 @@ by anyone. `test_reproducible_build.py` compares the installed environment
 against the lock, and the full two-build byte comparison runs only with
 `DROIDFORENX_SLOW_TESTS=1`.
 
-450 tests, no device required. They cover the properties that matter:
+463 tests, no device required. They cover the properties that matter:
 
 - an acquired artifact survives being read (the original bug was that 11
   loaders deleted evidence after parsing)

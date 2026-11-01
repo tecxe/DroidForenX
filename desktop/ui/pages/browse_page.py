@@ -465,13 +465,30 @@ class BrowsePage(QWidget):
         self.total_size_label.setText(self.current_serial)
 
     def _load_remote_dir(self, parent_item, remote_path):
+        # Every load supersedes the previous one. A refresh can clear the tree
+        # while an earlier listing is still in flight, which leaves the finished
+        # handler holding a C++ object that has already been deleted - the source
+        # of the "wrapped C/C++ object ... has been deleted" crash. Tag each load
+        # with a generation and drop any reply that is no longer current.
+        self._scan_generation = getattr(self, "_scan_generation", 0) + 1
+        generation = self._scan_generation
         self.adb_worker = AdbListWorker(self.current_serial, remote_path)
-        self.adb_worker.finished.connect(lambda entries: self._on_dir_loaded(parent_item, entries))
+        self.adb_worker.finished.connect(
+            lambda entries, g=generation: self._on_dir_loaded(parent_item, entries, g))
         self.adb_worker.error.connect(lambda err: self._on_dir_error(err))
         self.adb_worker.start()
         self.adb_worker.wait(15000)
 
-    def _on_dir_loaded(self, parent_item, entries):
+    def _on_dir_loaded(self, parent_item, entries, generation=None):
+        if generation is not None and generation != getattr(self, "_scan_generation", 0):
+            return
+        try:
+            self._populate_dir(parent_item, entries)
+        except RuntimeError:
+            # The tree was rebuilt under this reply; the newer load owns it now.
+            return
+
+    def _populate_dir(self, parent_item, entries):
         for entry in entries:
             item = QTreeWidgetItem(parent_item)
             item.setText(0, entry["name"])

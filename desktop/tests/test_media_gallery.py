@@ -315,34 +315,38 @@ class TelegramViewerTest(unittest.TestCase):
         self.assertIn("1 channels", text)
         self.assertIn("3 chats", text)
 
-    def test_view_modes_reproject_the_open_category(self):
-        self.page._set_view_mode("thumbnail")
-        self.assertEqual(self.page.conv_stack.currentIndex(), 1)
-        self.assertEqual(self.page._view_mode, "thumbnail")
+    def test_the_view_switcher_is_gone(self):
+        """One projection only: the curated table."""
+        self.assertFalse(hasattr(self.page, "view_bar"))
+        self.assertFalse(hasattr(self.page, "_view_buttons"))
+        self.assertFalse(hasattr(self.page, "_set_view_mode"))
 
-        self.page._set_view_mode("folder")
+    def test_a_category_opens_as_a_table(self):
         self.assertEqual(self.page.conv_stack.currentIndex(), 0)
-        self.assertEqual(self.page._view_mode, "folder")
+        self.assertEqual(self.page.stacked.currentIndex(), 1)
+        self.assertEqual(self.page._view_mode, "table")
 
-        self.page._set_view_mode("gallery")
-        self.assertEqual(self.page.stacked.currentIndex(), 3)
-
-    def test_folder_view_groups_by_directory(self):
-        self.page._set_view_mode("folder")
-        labels = [w.text() for w in
-                  self.page.conv_list_layout.parentWidget().findChildren(QLabel)]
-        self.assertIn("2 folders", self.page.conv_count.text())
-        self.assertTrue(any("/sdcard/Android/data/org.telegram.messenger" in text
-                            for text in labels),
-                        "the media directory was not named")
-
-    def test_back_from_gallery_restores_the_previous_mode(self):
-        self.page._set_view_mode("folder")
-        self.page._set_view_mode("gallery")
+    def test_a_media_category_still_opens_the_gallery_and_comes_back(self):
+        # The switcher is gone, but a media category still has to show pictures.
+        self.page.all_artifacts = [
+            {"category": "Photos", "type": "Image", "summary": "IMG_0001.jpg",
+             "_data": {"path": "/sdcard/DCIM/IMG_0001.jpg",
+                       "filename": "IMG_0001.jpg"}}]
+        self.page._on_app_clicked(
+            {"name": "Photos", "category": "Photos", "type": "media",
+             "color": "#3b82f6"})
+        _pump(self._app)
         self.assertEqual(self.page.stacked.currentIndex(), 3)
         self.page._go_back_to_grid()
         self.assertEqual(self.page.stacked.currentIndex(), 1)
-        self.assertEqual(self.page._view_mode, "folder")
+
+    def test_a_media_category_without_pictures_stays_on_the_list(self):
+        self.page.all_artifacts = []
+        self.page._on_app_clicked(
+            {"name": "Photos", "category": "Photos", "type": "media",
+             "color": "#3b82f6"})
+        _pump(self._app)
+        self.assertEqual(self.page.stacked.currentIndex(), 1)
 
     def test_back_from_the_category_header_returns_to_the_grid(self):
         self.page.stacked.setCurrentIndex(1)

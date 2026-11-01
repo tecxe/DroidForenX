@@ -191,6 +191,25 @@ class DriverBindingTest(unittest.TestCase):
         self.assertTrue(plan.viable)
         self.assertEqual(plan.route, "mtkclient")
 
+    def test_an_empty_probe_is_an_answer_not_a_reason_to_spawn_powershell(self):
+        """The preloader lives for seconds; a subprocess per poll misses it."""
+        from unittest import mock
+        with mock.patch.object(physical.sys, "platform", "win32"), \
+                mock.patch.object(physical, "_windows_usb_probe", return_value=[]), \
+                mock.patch.object(physical, "_run") as shell:
+            self.assertEqual(physical.detect_usb_modes(), [])
+        shell.assert_not_called()
+
+    def test_a_broken_probe_falls_back_to_the_powershell_inventory(self):
+        from unittest import mock
+        text = ("USB\\VID_0E8D&PID_2000\\5&1|MT65xx Preloader||Error|28")
+        with mock.patch.object(physical.sys, "platform", "win32"), \
+                mock.patch.object(physical, "_windows_usb_probe",
+                                  side_effect=OSError("no setupapi")), \
+                mock.patch.object(physical, "_run_pnp_inventory", return_value=text):
+            modes = physical.detect_usb_modes()
+        self.assertEqual([m["mode"] for m in modes], ["mtk_preloader"])
+
 
 class EngineLockTest(unittest.TestCase):
     """Two engines on one boot-mode port make both fail the handshake."""

@@ -2790,39 +2790,6 @@ class ArtifactsPage(QWidget):
 
         outer.addWidget(header)
 
-        # Projection bar. Every category can be read four ways without leaving
-        # it: the curated table, tiles, the folder tree the files came from, or
-        # the full-screen gallery.
-        self.view_bar = QFrame()
-        self.view_bar.setStyleSheet(
-            "QFrame { background: #0d1117; border-bottom: 1px solid #1e293b; }")
-        self.view_bar.setFixedHeight(38)
-        view_layout = QHBoxLayout(self.view_bar)
-        view_layout.setContentsMargins(16, 4, 16, 4)
-        view_layout.setSpacing(6)
-        self._view_buttons = {}
-        for key, label in (("table", "Table"), ("thumbnail", "Thumbnail"),
-                           ("folder", "Folder"), ("gallery", "Gallery")):
-            btn = QPushButton(label)
-            btn.setCheckable(True)
-            btn.setFixedHeight(26)
-            btn.setStyleSheet(
-                "QPushButton { background: transparent; color: #94a3b8;"
-                " border: 1px solid transparent; border-radius: 6px;"
-                " font-size: 11px; font-weight: 600; padding: 0 12px; }"
-                "QPushButton:hover { background: #1e293b; color: #e2e8f0; }"
-                "QPushButton:checked { background: #1e293b; color: #60a5fa;"
-                " border: 1px solid #334155; }")
-            btn.clicked.connect(lambda _checked=False, m=key: self._set_view_mode(m))
-            view_layout.addWidget(btn)
-            self._view_buttons[key] = btn
-        view_layout.addStretch()
-        self.view_hint = QLabel("")
-        self.view_hint.setStyleSheet(
-            "color: #475569; font-size: 11px; background: transparent; border: none;")
-        view_layout.addWidget(self.view_hint)
-        outer.addWidget(self.view_bar)
-
         self.conv_scroll = QScrollArea()
         self.conv_scroll.setWidgetResizable(True)
         self.conv_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -2906,9 +2873,6 @@ class ArtifactsPage(QWidget):
         self._current_app = app_def
         self._view_mode = "table"
         self._gallery_prev_mode = "table"
-        self._sync_view_buttons()
-        if hasattr(self, "view_hint"):
-            self.view_hint.setText("")
         category = app_def["category"]
         app_type = app_def.get("type", "list")
 
@@ -2932,11 +2896,11 @@ class ArtifactsPage(QWidget):
             self._show_media_gallery(category, app_def)
         else:
             self._show_generic_list(category, app_def)
-        # A media category opens straight into the gallery; the bar should say so.
+        # A media category opens straight into the gallery, so remember that the
+        # back button has somewhere to return to.
         if self.stacked.currentIndex() == 3:
             self._view_mode = "gallery"
             self._gallery_prev_mode = "table"
-            self._sync_view_buttons()
 
     def _show_sms_conversations(self):
         self.conv_title.setText("Messages")
@@ -4355,42 +4319,20 @@ class ArtifactsPage(QWidget):
                 self._gallery_prev_mode = self._view_mode
         self.stacked.setCurrentIndex(3)
 
-    # -- view modes ---------------------------------------------------------
-
-    def _sync_view_buttons(self) -> None:
-        for key, btn in getattr(self, "_view_buttons", {}).items():
-            btn.setChecked(key == self._view_mode)
-
-    def _set_view_mode(self, mode: str) -> None:
-        """Reproject the open category without re-running the extractor."""
-        if not self._current_app:
-            self._sync_view_buttons()
-            return
-        if mode == "gallery" and self._view_mode != "gallery":
-            self._gallery_prev_mode = self._view_mode
-        self._view_mode = mode
-        self._sync_view_buttons()
-        self._render_current_view()
+    # -- rendering ----------------------------------------------------------
 
     def _render_current_view(self) -> None:
+        """Draw the open category. There is one projection: the curated table.
+
+        Media categories still pass through the gallery on the way in, because
+        that is how their pictures are shown; everything else is a list or a
+        conversation view chosen by category.
+        """
         app_def = self._current_app
         if not app_def:
             return
-        category = app_def.get("category", "")
-        items = [a for a in self.all_artifacts if a.get("category") == category]
-        mode = self._view_mode
-        if mode == "table":
-            self.conv_stack.setCurrentIndex(0)
-            self._render_table_view(app_def)
-        elif mode == "thumbnail":
-            self._render_thumbnail_view(app_def, items)
-        elif mode == "folder":
-            self._render_folder_view(app_def, items)
-        elif mode == "gallery":
-            media = self._media_items_for(items)
-            self._render_table_view(app_def)
-            self._open_gallery(f"{app_def.get('name', category)} \u2014 Gallery", media)
-            return
+        self.conv_stack.setCurrentIndex(0)
+        self._render_table_view(app_def)
         self.stacked.setCurrentIndex(1)
 
     def _render_table_view(self, app_def) -> None:
@@ -4422,107 +4364,6 @@ class ArtifactsPage(QWidget):
         return [a for a in items
                 if a.get("type") in MEDIA_TYPES
                 or media_kind(str(a.get("_data", {}).get("path") or a.get("source") or ""))]
-
-    def _render_thumbnail_view(self, app_def, items) -> None:
-        media = self._media_items_for(items)
-        self.conv_title.setText(app_def.get("name", app_def.get("category", "")))
-        self.conv_count.setText(f"{len(media)} tiles")
-        self.view_hint.setText(
-            "" if media else "No pictures in this category - try Table or Folder.")
-        self.thumb_gallery.set_serial(
-            self.device_bar.get_first_serial() or getattr(self, "serial", "") or "")
-        self.thumb_gallery.load(app_def.get("name", ""), media)
-        self.conv_stack.setCurrentIndex(1)
-
-    def _render_folder_view(self, app_def, items) -> None:
-        """Group the category by the directory each artefact lives in."""
-        from collections import defaultdict
-
-        self.conv_stack.setCurrentIndex(0)
-        self._clear_layout(self.conv_list_layout)
-        self.conv_title.setText(app_def.get("name", app_def.get("category", "")))
-        self.view_hint.setText("")
-
-        buckets = defaultdict(list)
-        for item in items:
-            data = item.get("_data") or {}
-            location = str(data.get("path") or item.get("source") or "")
-            if location.startswith("/"):
-                # Device paths are POSIX; Windows' Path would turn the parents
-                # into backslashes and make an Android folder unreadable.
-                folder = location.rsplit("/", 1)[0] or "/"
-            elif location:
-                folder = str(Path(location).parent)
-            else:
-                folder = "(no path recorded)"
-            buckets[folder].append(item)
-
-        self.conv_count.setText(f"{len(buckets)} folders \u00b7 {len(items)} items")
-        if not items:
-            self._add_empty(self.conv_list_layout,
-                            "Nothing in this category to group into folders.")
-            return
-
-        accent = app_def.get("color", "#3b82f6")
-        for folder in sorted(buckets, key=lambda p: (-len(buckets[p]), p.lower())):
-            entries = buckets[folder]
-            header = QFrame()
-            header.setStyleSheet(
-                "QFrame { background: #111827; border-radius: 8px;"
-                " border: 1px solid #1e293b; }")
-            header.setFixedHeight(44)
-            row = QHBoxLayout(header)
-            row.setContentsMargins(12, 6, 12, 6)
-            icon = QLabel("DIR")
-            icon.setFixedWidth(34)
-            icon.setStyleSheet(
-                f"color: {accent}; font-size: 10px; font-weight: 700;"
-                " background: transparent; border: none;")
-            row.addWidget(icon)
-            path_lbl = QLabel(folder[:110])
-            path_lbl.setStyleSheet(
-                "color: #e2e8f0; font-size: 12px; background: transparent;"
-                " border: none;")
-            path_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            row.addWidget(path_lbl, 1)
-            count = QLabel(f"{len(entries)}")
-            count.setStyleSheet(
-                f"color: {accent}; font-size: 11px; font-weight: 700;"
-                " background: transparent; border: none;")
-            row.addWidget(count)
-            self.conv_list_layout.insertWidget(
-                self.conv_list_layout.count() - 1, header)
-
-            for item in entries[:40]:
-                data = item.get("_data") or {}
-                name = (data.get("filename") or data.get("chat")
-                        or item.get("summary") or "")
-                line = QFrame()
-                line.setStyleSheet("QFrame { background: transparent; }")
-                line.setFixedHeight(30)
-                line_row = QHBoxLayout(line)
-                line_row.setContentsMargins(46, 0, 12, 0)
-                label = QLabel(str(name)[:90])
-                label.setStyleSheet(
-                    "color: #94a3b8; font-size: 11px; background: transparent;"
-                    " border: none;")
-                label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-                line_row.addWidget(label, 1)
-                kind = QLabel(item.get("type", ""))
-                kind.setStyleSheet(
-                    "color: #475569; font-size: 10px; background: transparent;"
-                    " border: none;")
-                line_row.addWidget(kind)
-                self.conv_list_layout.insertWidget(
-                    self.conv_list_layout.count() - 1, line)
-
-            if len(entries) > 40:
-                more = QLabel(f"  + {len(entries) - 40} more in this folder")
-                more.setStyleSheet(
-                    "color: #475569; font-size: 11px; padding: 2px 0 8px 46px;"
-                    " background: transparent; border: none;")
-                self.conv_list_layout.insertWidget(
-                    self.conv_list_layout.count() - 1, more)
 
     def _capture_screen(self) -> None:
         """Grab the handset's screen over ADB and file it as evidence."""
@@ -4627,8 +4468,6 @@ class ArtifactsPage(QWidget):
         self.progress_frame.setVisible(False)
         if self.stacked.currentIndex() == 3:
             target = getattr(self, "_gallery_return", 1)
-            self._view_mode = getattr(self, "_gallery_prev_mode", "table") or "table"
-            self._sync_view_buttons()
             self.stacked.setCurrentIndex(target if target in (0, 1) else 0)
             if target == 1 and self._current_app:
                 self._render_current_view()

@@ -31,6 +31,65 @@ except Exception:
     _CUSTODY = None
 
 
+def _count(results, key: str) -> int:
+    """A count out of an acquisition result, whether or not it is there.
+
+    The result dict is filled by phases that can each be skipped, cancelled or
+    fail, so every reader has to tolerate a missing key. Hard-indexing one was
+    enough to take the finish handler down with a KeyError.
+    """
+    try:
+        return int((results or {}).get(key, 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _summary_rows(results) -> list:
+    """``(label, count, detail)`` for every tally an acquisition produced.
+
+    This is the single source for the closing summary: the console block and the
+    on-screen table both render this list, so the two can never drift apart. A
+    phase that was skipped, cancelled or failed simply contributes nothing
+    instead of raising on a key it never wrote.
+    """
+    def megabytes(key: str) -> float:
+        return _count(results, key) / (1024 * 1024)
+
+    rows = [
+        ("Contacts", _count(results, "contacts"), ""),
+        ("SMS Messages", _count(results, "sms"), ""),
+        ("Call Log Entries", _count(results, "calls"), ""),
+        ("Calendar Events", _count(results, "calendar"), ""),
+        ("Browser History", _count(results, "browser"), ""),
+        ("App Databases", _count(results, "databases"), ""),
+        ("Media Files", _count(results, "media_files"), ""),
+        ("Documents", _count(results, "documents"), ""),
+        ("App Data (Social)", _count(results, "app_data"), ""),
+        ("Device Info", _count(results, "device_info"), ""),
+    ]
+
+    # Whole-image and bulk phases: only worth a line when they actually ran.
+    for label, count_key, byte_key in (
+            ("Full Storage Image", "full_storage_files", "full_storage_bytes"),
+            ("App Data Deep", "app_data_deep_files", "app_data_deep_bytes"),
+            ("ADB Backups", "backup_files", "backup_bytes"),
+            ("Recovered Files", "recovered_files", "recovered_bytes")):
+        count = _count(results, count_key)
+        if count:
+            rows.append((label, count, f"{megabytes(byte_key):.1f} MB"))
+
+    for label, key in (("File Signatures", "signatures_found"),
+                       ("Email Messages", "emails"),
+                       ("Document Metadata", "document_metadata"),
+                       ("Browser Bookmarks", "browser_bookmarks"),
+                       ("Partitions", "partitions")):
+        count = _count(results, key)
+        if count:
+            rows.append((label, count, ""))
+
+    return rows
+
+
 def _sha256(filepath: str) -> str:
     h = hashlib.sha256()
     try:
@@ -75,7 +134,11 @@ class PhysicalWatchWorker(QThread):
 
     changed = Signal(list)
 
-    INTERVAL = 2.5
+    #: The preloader can live for two seconds, so the probe has to be both
+    #: in-process and frequent. SetupAPI enumeration costs about a fifth of a
+    #: millisecond; the old subprocess probe cost a second and missed the
+    #: window outright.
+    INTERVAL = 0.4
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -398,38 +461,21 @@ class AcquisitionWorker(QThread):
 
         self._complete_session(results)
         audit_log("acquisition_completed", "examiner", self.serial,
-                  json.dumps({"files": results["files"], "bytes": results["bytes"]}))
+                  json.dumps({"files": _count(results, 'files'), "bytes": _count(results, 'bytes')}))
 
         self._log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "info")
-        self._log(f"ACQUISITION COMPLETE", "success")
-        self._log(f"  Total files:      {results['files']}", "success")
-        self._log(f"  Total size:       {results['bytes']:,} bytes ({results['bytes'] / (1024*1024):.1f} MB)", "success")
-        self._log(f"  Contacts:         {results['contacts']}", "success")
-        self._log(f"  SMS messages:     {results['sms']}", "success")
-        self._log(f"  Call log entries:  {results['calls']}", "success")
-        self._log(f"  Calendar events:  {results['calendar']}", "success")
-        self._log(f"  Media files:      {results['media_files']}", "success")
-        self._log(f"  Documents:        {results['documents']}", "success")
-        self._log(f"  App databases:    {results['databases']}", "success")
-        self._log(f"  Browser history:  {results['browser']}", "success")
-        if results.get("full_storage_files"):
-            self._log(f"  Full storage:     {results['full_storage_files']} files ({results['full_storage_bytes'] / (1024*1024):.1f} MB)", "success")
-        if results.get("app_data_deep_files"):
-            self._log(f"  App data deep:    {results['app_data_deep_files']} files ({results['app_data_deep_bytes'] / (1024*1024):.1f} MB)", "success")
-        if results.get("backup_files"):
-            self._log(f"  ADB backups:      {results['backup_files']} files ({results['backup_bytes'] / (1024*1024):.1f} MB)", "success")
-        if results.get("recovered_files"):
-            self._log(f"  Recovered files:  {results['recovered_files']} ({results['recovered_bytes'] / (1024*1024):.1f} MB)", "success")
-        if results.get("emails"):
-            self._log(f"  Emails:           {results['emails']}", "success")
-        if results.get("document_metadata"):
-            self._log(f"  Doc metadata:     {results['document_metadata']} documents", "success")
-        if results.get("browser_bookmarks"):
-            self._log(f"  Bookmarks:        {results['browser_bookmarks']}", "success")
-        if results.get("signatures_found"):
-            self._log(f"  Signatures found: {results['signatures_found']}", "success")
-        if results.get("partitions"):
-            self._log(f"  Partitions:       {results['partitions']}", "success")
+        self._log("ACQUISITION COMPLETE", "success")
+        self._log(f"  Total files:      {_count(results, 'files')}", "success")
+        self._log(f"  Total size:       {_count(results, 'bytes'):,} bytes "
+                  f"({_count(results, 'bytes') / (1024*1024):.1f} MB)", "success")
+        for label, value, detail in _summary_rows(results):
+            line = f"  {label + ':':<18}{value}"
+            if detail:
+                line += f" ({detail})"
+            self._log(line, "success")
+        errors = _count(results, "errors")
+        if errors:
+            self._log(f"  Errors:           {errors}", "warning")
         self._log(f"  Evidence root:    {evidence_root}", "success")
         self._log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "success")
 
@@ -463,7 +509,7 @@ class AcquisitionWorker(QThread):
                 "INSERT INTO acquisition_profiles (id, session_id, primary_mode, hash_algorithm, status, "
                 "total_files, total_bytes, started_at, completed_at) VALUES (?, ?, ?, ?, 'completed', ?, ?, ?, ?)",
                 (str(uuid.uuid4()), self._session_id, f"level_{self.level}", self.hash_algo,
-                 results["files"], results["bytes"],
+                 _count(results, 'files'), _count(results, 'bytes'),
                  datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()),
             )
             conn.commit()
@@ -1263,11 +1309,11 @@ class AcquisitionWorker(QThread):
         except Exception as e:
             self._log(f"  Filesystem info: {e}", "warning")
 
-        self._log(f"  Full storage total: {results['full_storage_files']} files "
+        self._log(f"  Full storage total: {_count(results, 'full_storage_files')} files "
                   f"({results['full_storage_bytes'] / (1024*1024):.1f} MB)", "success")
 
         results["phases"]["full_storage"] = {
-            "files": results["full_storage_files"],
+            "files": _count(results, 'full_storage_files'),
             "bytes": results["full_storage_bytes"],
         }
 
@@ -1402,7 +1448,7 @@ class AcquisitionWorker(QThread):
             "data_packages_pulled": pulled_count,
             "media_packages_pulled": media_count,
             "backups_successful": backup_success,
-            "files": results["app_data_deep_files"],
+            "files": _count(results, 'app_data_deep_files'),
             "bytes": results["app_data_deep_bytes"],
         }
 
@@ -1526,7 +1572,7 @@ class AcquisitionWorker(QThread):
             "sqlite_journals": wal_pulled,
             "signatures_found": signatures_found,
             "documents": docs_pulled,
-            "files": results["recovered_files"],
+            "files": _count(results, 'recovered_files'),
             "bytes": results["recovered_bytes"],
         }
 
@@ -1572,35 +1618,35 @@ class AcquisitionWorker(QThread):
             "acquisition_date": datetime.now(timezone.utc).isoformat(),
             "tool": "DroidForenX v1.0",
             "examiner_notes": "",
-            "total_files": results["files"],
-            "total_bytes": results["bytes"],
+            "total_files": _count(results, 'files'),
+            "total_bytes": _count(results, 'bytes'),
             "phases": {
                 "phase_1_device_properties": results.get("device_info", 0),
                 "phase_2_logical": {
-                    "contacts": results["contacts"],
-                    "sms": results["sms"],
-                    "calls": results["calls"],
-                    "calendar": results["calendar"],
+                    "contacts": _count(results, 'contacts'),
+                    "sms": _count(results, 'sms'),
+                    "calls": _count(results, 'calls'),
+                    "calendar": _count(results, 'calendar'),
                 },
-                "phase_3_browser": results["browser"],
-                "phase_4_app_databases": results["databases"],
-                "phase_5_filesystem": results["media_files"],
-                "phase_6_social_apps": results["app_data"],
+                "phase_3_browser": _count(results, 'browser'),
+                "phase_4_app_databases": _count(results, 'databases'),
+                "phase_5_filesystem": _count(results, 'media_files'),
+                "phase_6_social_apps": _count(results, 'app_data'),
                 "phase_7_deleted": results.get("recovered_files", 0),
                 "phase_8_physical": results.get("partitions", 0),
                 "phase_9_full_storage": {
-                    "files": results["full_storage_files"],
+                    "files": _count(results, 'full_storage_files'),
                     "bytes": results["full_storage_bytes"],
                 },
                 "phase_10_app_data_deep": {
-                    "files": results["app_data_deep_files"],
+                    "files": _count(results, 'app_data_deep_files'),
                     "bytes": results["app_data_deep_bytes"],
-                    "backups": results["backup_files"],
+                    "backups": _count(results, 'backup_files'),
                 },
                 "phase_11_recovered": {
-                    "files": results["recovered_files"],
+                    "files": _count(results, 'recovered_files'),
                     "bytes": results["recovered_bytes"],
-                    "signatures": results["signatures_found"],
+                    "signatures": _count(results, 'signatures_found'),
                 },
                 "phase_12_packaging": "complete",
             },
@@ -1658,9 +1704,9 @@ class AcquisitionWorker(QThread):
             "case_id": self.case_id,
             "level": self.level,
             "results": {
-                "total_files": results["files"],
-                "total_bytes": results["bytes"],
-                "errors": results["errors"],
+                "total_files": _count(results, 'files'),
+                "total_bytes": _count(results, 'bytes'),
+                "errors": _count(results, "errors"),
             },
         }
         audit_path = evidence_root / "AUDIT_TRAIL.json"
@@ -1913,17 +1959,17 @@ class AcquisitionWorker(QThread):
                 details=json.dumps({
                     "serial": self.serial,
                     "level": self.level,
-                    "total_files": results["files"],
-                    "total_bytes": results["bytes"],
-                    "contacts": results["contacts"],
-                    "sms": results["sms"],
-                    "calls": results["calls"],
+                    "total_files": _count(results, 'files'),
+                    "total_bytes": _count(results, 'bytes'),
+                    "contacts": _count(results, 'contacts'),
+                    "sms": _count(results, 'sms'),
+                    "calls": _count(results, 'calls'),
                     "emails": results.get("emails", 0),
                     "document_metadata": results.get("document_metadata", 0),
                     "browser_bookmarks": results.get("browser_bookmarks", 0),
-                    "full_storage": results["full_storage_files"],
-                    "app_data_deep": results["app_data_deep_files"],
-                    "recovered": results["recovered_files"],
+                    "full_storage": _count(results, 'full_storage_files'),
+                    "app_data_deep": _count(results, 'app_data_deep_files'),
+                    "recovered": _count(results, 'recovered_files'),
                 }),
             )
             self._log("  Chain of custody entry recorded", "success")
@@ -1941,16 +1987,16 @@ class AcquisitionWorker(QThread):
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "tool": "DroidForenX v1.0",
             "results_summary": {
-                "total_files": results["files"],
-                "total_bytes": results["bytes"],
-                "contacts": results["contacts"],
-                "sms_messages": results["sms"],
-                "call_log_entries": results["calls"],
-                "calendar_events": results["calendar"],
-                "media_files": results["media_files"],
-                "documents": results["documents"],
-                "app_databases": results["databases"],
-                "browser_history": results["browser"],
+                "total_files": _count(results, 'files'),
+                "total_bytes": _count(results, 'bytes'),
+                "contacts": _count(results, 'contacts'),
+                "sms_messages": _count(results, 'sms'),
+                "call_log_entries": _count(results, 'calls'),
+                "calendar_events": _count(results, 'calendar'),
+                "media_files": _count(results, 'media_files'),
+                "documents": _count(results, 'documents'),
+                "app_databases": _count(results, 'databases'),
+                "browser_history": _count(results, 'browser'),
             },
         }
         manifest_path = evidence_root / "ACQUISITION_MANIFEST.json"
@@ -2239,6 +2285,13 @@ class AcquirePage(QWidget):
         self._phys_modes = []
         self._phys_soc = {}
         self._phys_detected_serial = ""
+        # Whether the last detection found a route worth offering. The Acquire
+        # button follows this, so a finished run cannot leave it enabled when
+        # there is nothing to run against.
+        self._phys_plan_viable = False
+        # A boot mode can appear while Detect is still in flight; remember the
+        # request so it is honoured when that worker retires instead of dropped.
+        self._phys_redetect_pending = False
         return group
 
     def _open_driver_helper(self):
@@ -2289,15 +2342,25 @@ class AcquirePage(QWidget):
 
     def _detect_physical(self):
         if self._phys_detect_worker is not None and self._phys_detect_worker.isRunning():
+            # A preloader or BootROM port can come and go faster than a detection
+            # finishes. Queue the request rather than dropping it.
+            self._phys_redetect_pending = True
             return
+        self._phys_redetect_pending = False
         serial = self._serial or self.device_bar.get_first_serial()
         self.phys_reason.setText("Detecting...")
         self.btn_phys_detect.setEnabled(False)
         worker = PhysicalDetectWorker(serial, self.phys_loader.text().strip(), self)
         worker.done.connect(self._on_physical_detected)
-        worker.finished.connect(lambda: self.btn_phys_detect.setEnabled(True))
+        worker.finished.connect(self._on_detect_worker_finished)
         self._phys_detect_worker = worker
         worker.start()
+
+    def _on_detect_worker_finished(self):
+        self.btn_phys_detect.setEnabled(True)
+        if self._phys_redetect_pending:
+            self._phys_redetect_pending = False
+            self._detect_physical()
 
     def _on_boot_mode_changed(self, modes):
         """The phone entered or left a boot mode while the page was open."""
@@ -2331,7 +2394,12 @@ class AcquirePage(QWidget):
 
     def _on_physical_detected(self, data):
         if data.get("error"):
+            self._phys_plan_viable = False
             self.phys_reason.setText(f"Detection failed: {data['error']}")
+            self.phys_reason.setStyleSheet(
+                "color: #f59e0b; font-size: 12px; background: transparent;")
+            self.btn_phys_acquire.setEnabled(False)
+            self.btn_phys_driver.setVisible(False)
             return
         profile = data.get("profile") or {}
         soc = profile.get("soc") or {}
@@ -2365,6 +2433,7 @@ class AcquirePage(QWidget):
             if plan.get("viable") else
             "color: #f59e0b; font-size: 12px; background: transparent;")
         self.btn_phys_acquire.setEnabled(bool(plan.get("viable")))
+        self._phys_plan_viable = bool(plan.get("viable"))
         # The driver button exists for exactly one situation: the chip is on
         # the bus and Windows has no function driver on the port.
         self.btn_phys_driver.setVisible(plan.get("route") == "driver")
@@ -2391,7 +2460,7 @@ class AcquirePage(QWidget):
 
     def _on_physical_finished(self, result):
         self.btn_phys_stop.setEnabled(False)
-        self.btn_phys_acquire.setEnabled(True)
+        self.btn_phys_acquire.setEnabled(self._phys_plan_viable)
         if not result.get("ok"):
             self.console.log(
                 f"Physical image not acquired: {result.get('message', 'unknown')}",
@@ -2517,51 +2586,18 @@ class AcquirePage(QWidget):
         self.btn_stop.setEnabled(False)
         self.progress_bar.setValue(100)
         self.progress_label.setText("Acquisition complete!")
-        total_mb = results['bytes'] / (1024 * 1024)
+        total_mb = _count(results, 'bytes') / (1024 * 1024)
         self.progress_label.setText(
-            f"Complete — {results['files']:,} files, {total_mb:.1f} MB extracted")
+            f"Complete — {_count(results, 'files'):,} files, {total_mb:.1f} MB extracted")
 
-        rows = [
-            ("Contacts", str(results["contacts"]), ""),
-            ("SMS Messages", str(results["sms"]), ""),
-            ("Call Log Entries", str(results["calls"]), ""),
-            ("Calendar Events", str(results["calendar"]), ""),
-            ("Browser History", str(results["browser"]), ""),
-            ("App Databases", str(results["databases"]), ""),
-            ("Media Files", str(results["media_files"]), ""),
-            ("Documents", str(results["documents"]), ""),
-            ("App Data (Social)", str(results["app_data"]), ""),
-            ("Device Info", str(results["device_info"]), ""),
-        ]
-
-        if results.get("full_storage_files"):
-            rows.append(("Full Storage Image", str(results["full_storage_files"]),
-                         f"{results['full_storage_bytes'] / (1024*1024):.1f} MB"))
-        if results.get("app_data_deep_files"):
-            rows.append(("App Data Deep", str(results["app_data_deep_files"]),
-                         f"{results['app_data_deep_bytes'] / (1024*1024):.1f} MB"))
-        if results.get("backup_files"):
-            rows.append(("ADB Backups", str(results["backup_files"]),
-                         f"{results['backup_bytes'] / (1024*1024):.1f} MB"))
-        if results.get("recovered_files"):
-            rows.append(("Recovered Files", str(results["recovered_files"]),
-                         f"{results['recovered_bytes'] / (1024*1024):.1f} MB"))
-        if results.get("signatures_found"):
-            rows.append(("File Signatures", str(results["signatures_found"]), ""))
-        if results.get("emails"):
-            rows.append(("Email Messages", str(results["emails"]), ""))
-        if results.get("document_metadata"):
-            rows.append(("Document Metadata", str(results["document_metadata"]), ""))
-        if results.get("browser_bookmarks"):
-            rows.append(("Browser Bookmarks", str(results["browser_bookmarks"]), ""))
-        if results.get("partitions"):
-            rows.append(("Partitions", str(results["partitions"]), ""))
-
+        rows = [(label, str(value), detail)
+                for label, value, detail in _summary_rows(results)]
         rows.append(("━━━━━━━━━━━━━━━", "━━━━━━━━", "━━━━━━━━"))
-        rows.append(("TOTAL FILES", str(results["files"]), f"{total_mb:.1f} MB"))
-        rows.append(("Errors", str(results["errors"]), ""))
+        rows.append(("TOTAL FILES", str(_count(results, "files")), f"{total_mb:.1f} MB"))
+        rows.append(("Errors", str(_count(results, "errors")), ""))
         self.results_table.load_data(rows)
         self.results_frame.setVisible(True)
 
-        if results["errors"] > 0:
-            self.console.log(f"⚠ {results['errors']} errors occurred during acquisition", "warning")
+        errors = _count(results, "errors")
+        if errors:
+            self.console.log(f"⚠ {errors} errors occurred during acquisition", "warning")

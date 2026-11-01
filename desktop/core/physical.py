@@ -46,6 +46,10 @@ import struct
 import subprocess
 import sys
 import threading
+try:
+    import ctypes
+except ImportError:  # pragma: no cover - never on the platforms we ship
+    ctypes = None
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Callable, Iterable, Optional
@@ -228,9 +232,22 @@ def _run(argv: list, timeout: int = 20) -> str:
 
 
 def detect_usb_modes() -> list[dict]:
-    """Ask the host which boot-mode USB devices are present right now."""
+    """Ask the host which boot-mode USB devices are present right now.
+
+    On Windows the enumeration is done in-process through SetupAPI. Spawning
+    PowerShell costs up to a second and a half per call, and a preloader is on
+    the bus for only two or three seconds, so the subprocess route silently
+    misses the window it is supposed to catch.
+    """
+    modes = []
     if sys.platform.startswith("win"):
-        modes = parse_pnp_binding(_run_pnp_inventory())
+        try:
+            modes = _windows_usb_probe()
+        except Exception:
+            # Only a broken probe falls back; an empty result is a real answer
+            # ("no boot-mode device") and must not cost a subprocess.
+            logger.debug("SetupAPI probe unavailable", exc_info=True)
+            modes = parse_pnp_binding(_run_pnp_inventory())
     elif sys.platform == "darwin":
         modes = parse_usb_listing(
             _run(["system_profiler", "SPUSBDataType"]), "system_profiler")
@@ -241,6 +258,124 @@ def detect_usb_modes() -> list[dict]:
     for entry in modes:
         by_mode.setdefault(entry["mode"], entry)
     return list(by_mode.values())
+
+
+# --- Windows: SetupAPI enumeration -----------------------------------------
+#
+# DIGCF_PRESENT | DIGCF_ALLCLASSES over the "USB" enumerator. Each node yields
+# its instance ID, the friendly name, the function driver it is bound to, and
+# the Config Manager problem number, which is all the plan needs to know.
+
+_DIGCF_PRESENT = 0x02
+_DIGCF_ALLCLASSES = 0x04
+_SPDRP_DEVICEDESC = 0x00
+_SPDRP_SERVICE = 0x04
+_SPDRP_FRIENDLYNAME = 0x0C
+_KEY_READ = 0x20019
+
+
+class _GUID(ctypes.Structure):
+    _fields_ = [("Data1", ctypes.c_ulong), ("Data2", ctypes.c_ushort),
+                ("Data3", ctypes.c_ushort), ("Data4", ctypes.c_ubyte * 8)]
+
+
+class _SP_DEVINFO_DATA(ctypes.Structure):
+    _fields_ = [("cbSize", ctypes.c_ulong), ("ClassGuid", _GUID),
+                ("DevInst", ctypes.c_ulong),
+                ("Reserved", ctypes.c_void_p)]
+
+
+def _setupapi():
+    """Load and sign the two libraries once. Returns (setupapi, cfgmgr32)."""
+    global _SETUPAPI
+    if _SETUPAPI is None:
+        setupapi = ctypes.WinDLL("setupapi", use_last_error=True)
+        cfgmgr = ctypes.WinDLL("cfgmgr32", use_last_error=True)
+        setupapi.SetupDiGetClassDevsW.restype = ctypes.c_void_p
+        setupapi.SetupDiGetClassDevsW.argtypes = [
+            ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_ulong]
+        setupapi.SetupDiEnumDeviceInfo.argtypes = [
+            ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(_SP_DEVINFO_DATA)]
+        setupapi.SetupDiGetDeviceInstanceIdW.argtypes = [
+            ctypes.c_void_p, ctypes.POINTER(_SP_DEVINFO_DATA),
+            ctypes.c_wchar_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong)]
+        setupapi.SetupDiGetDeviceRegistryPropertyW.argtypes = [
+            ctypes.c_void_p, ctypes.POINTER(_SP_DEVINFO_DATA), ctypes.c_ulong,
+            ctypes.POINTER(ctypes.c_ulong), ctypes.c_void_p, ctypes.c_ulong,
+            ctypes.POINTER(ctypes.c_ulong)]
+        setupapi.SetupDiDestroyDeviceInfoList.argtypes = [ctypes.c_void_p]
+        cfgmgr.CM_Get_DevNode_Status.argtypes = [
+            ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong),
+            ctypes.c_ulong, ctypes.c_ulong]
+        _SETUPAPI = (setupapi, cfgmgr)
+    return _SETUPAPI
+
+
+_SETUPAPI = None
+
+
+def _devnode_string(setupapi, info, prop: int) -> str:
+    buffer = ctypes.create_unicode_buffer(1024)
+    required = ctypes.c_ulong(0)
+    ok = setupapi.SetupDiGetDeviceRegistryPropertyW(
+        None, ctypes.byref(info), prop, None, buffer,
+        ctypes.sizeof(buffer), ctypes.byref(required))
+    if not ok:
+        return ""
+    return buffer.value.strip()
+
+
+def _windows_usb_probe() -> list[dict]:
+    """Present USB nodes with the driver Windows bound to each."""
+    setupapi, cfgmgr = _setupapi()
+    handle = setupapi.SetupDiGetClassDevsW(
+        None, "USB", None, _DIGCF_PRESENT | _DIGCF_ALLCLASSES)
+    if not handle or handle == ctypes.c_void_p(-1).value:
+        return []
+    found = []
+    seen = set()
+    try:
+        index = 0
+        while True:
+            info = _SP_DEVINFO_DATA()
+            info.cbSize = ctypes.sizeof(_SP_DEVINFO_DATA)
+            if not setupapi.SetupDiEnumDeviceInfo(handle, index, ctypes.byref(info)):
+                break
+            index += 1
+            name_buffer = ctypes.create_unicode_buffer(512)
+            required = ctypes.c_ulong(0)
+            if not setupapi.SetupDiGetDeviceInstanceIdW(
+                    handle, ctypes.byref(info), name_buffer,
+                    ctypes.sizeof(name_buffer), ctypes.byref(required)):
+                continue
+            match = re.search(r"VID_([0-9A-Fa-f]{4})&PID_([0-9A-Fa-f]{4})",
+                              name_buffer.value)
+            if not match:
+                continue
+            pair = (match.group(1).lower(), match.group(2).lower())
+            if pair not in USB_MODES or pair in seen:
+                continue
+            seen.add(pair)
+            status_bits = ctypes.c_ulong(0)
+            problem = ctypes.c_ulong(0)
+            cfgmgr.CM_Get_DevNode_Status(
+                ctypes.byref(status_bits), ctypes.byref(problem), info.DevInst, 0)
+            service = _devnode_string(setupapi, info, _SPDRP_SERVICE).lower()
+            name = (_devnode_string(setupapi, info, _SPDRP_FRIENDLYNAME)
+                    or _devnode_string(setupapi, info, _SPDRP_DEVICEDESC))
+            kind, label = USB_MODES[pair]
+            found.append({
+                "vid": pair[0], "pid": pair[1], "mode": kind, "label": label,
+                "device": name, "source": "Windows SetupAPI",
+                "driver": service,
+                "status": "Error" if problem.value else "OK",
+                "problem": problem.value != 0,
+                "bound": bool(service) and problem.value == 0,
+            })
+    finally:
+        setupapi.SetupDiDestroyDeviceInfoList(
+            ctypes.c_void_p(handle) if not isinstance(handle, int) else handle)
+    return found
 
 
 def _run_pnp_inventory() -> str:
