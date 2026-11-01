@@ -490,6 +490,8 @@ SWATCH = {
     # accents, each darkened one step so it holds up on white
     "#2563eb": "#2563eb",  # primary already clears AA on white; kept identical
     "#3b82f6": "#2563eb",
+    "#60a5fa": "#1d4ed8",
+    "#2b9fd8": "#0369a1",
     "#1d4ed8": "#1e40af",
     "#1e40af": "#1e3a8a",
     "#06b6d4": "#0891b2",

@@ -368,6 +368,19 @@ class MediaGallery(QWidget):
         self.scroll.verticalScrollBar().valueChanged.connect(self._maybe_load_more)
 
     # -- data ------------------------------------------------------------
+    def set_chrome_visible(self, visible: bool) -> None:
+        """Hide the gallery's own header/footer when it is embedded in a page.
+
+        The artifact view already has a category header, so an embedded grid
+        should show only tiles instead of a second title bar and back button.
+        """
+        if not hasattr(self, "_chrome_header"):
+            self._chrome_header = self.findChild(QFrame, "galleryHeader")
+            self._chrome_footer = self.findChild(QFrame, "galleryFooter")
+        for widget in (self._chrome_header, self._chrome_footer):
+            if widget is not None:
+                widget.setVisible(visible)
+
     def set_serial(self, serial: str) -> None:
         self.serial = serial or ""
 

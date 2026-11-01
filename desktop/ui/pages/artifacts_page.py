@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QScrollArea, QGridLayout, QLineEdit)
+    QFrame, QScrollArea, QGridLayout, QLineEdit, QStackedWidget)
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer
 from PyQt6.QtGui import QFont
 from pathlib import Path
@@ -7,6 +7,7 @@ import re, logging, json
 from datetime import datetime, timezone
 from ...core import adb_manager as adb
 from ...core import whatsapp as wa_core
+from ...core import telegram as tg_core
 from ...core import evidence_store
 from ..widgets.media_gallery import MediaGallery, media_kind
 
@@ -560,35 +561,129 @@ class LoadWorker(QThread):
             f"{data.get('stats', {}).get('sealed_backups', 0)} sealed backups)")
 
     def _telegram(self, r):
-        self.progress.emit("Extracting Telegram cache files...")
-        ok, output = adb.adb_shell(self.serial,
-            'find /sdcard/Android/data/org.telegram.messenger/ -type f 2>/dev/null', timeout=15)
+        self.progress.emit("Reading Telegram chats, groups, channels and media...")
         c = 0
-        if ok and output:
-            for line in output.splitlines():
-                line = line.strip()
-                if not line or "Permission denied" in line or line.endswith(".nomedia"):
-                    continue
-                fname = Path(line).name
-                ext = Path(line).suffix.lower()
-                ftype = "Image" if ext in ('.jpg', '.jpeg', '.png', '.webp') else (
-                    "Sticker (Animated)" if ext == '.tgs' else
-                    ("Video Thumbnail" if ext == '.tgv' else
-                    ("Profile Photo" if ext == '.pt' else
-                    ("Video" if ext in ('.mp4', '.3gp') else
-                    ("Preload Cache" if ext == '.preload' else
-                    ("Temp File" if ext == '.temp' else
-                    ("Animation Cache" if ext == '.pcache2' else
-                    "Cache File")))))))
-                r.append({
-                    "type": ftype, "category": "Telegram", "date": "",
-                    "summary": fname, "source": line,
-                    "_data": {"filename": fname, "path": line, "type": ftype, "size": ""}
-                })
-                c += 1
-                if c >= 5000:
-                    break
-        self.progress.emit(f"Loaded {c} Telegram files")
+
+        # Same rule as WhatsApp: a parsed export is produced from bytes kept in
+        # the evidence root, so the result can be re-derived, not just trusted.
+        workdir = evidence_store.EVIDENCE_ROOT / "_telegram" / (self.serial or "device")[:32]
+        try:
+            workdir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.warning("Telegram workdir unavailable: %s", exc)
+            workdir = Path(__import__("tempfile").mkdtemp(prefix="dfx-tg-"))
+
+        try:
+            data = tg_core.collect(self.serial, workdir)
+        except Exception as exc:
+            logger.error("Telegram collection failed: %s", exc)
+            data = {"chats": [], "messages": [], "media": [],
+                    "notifications": [], "notes": [str(exc)], "stats": {}}
+
+        # The chat list first: private chats, groups and channels are the thing
+        # an examiner opens the tile for.
+        for chat in data.get("chats", []):
+            r.append({
+                "type": f"Chat - {chat.get('type', 'Other')}",
+                "category": "Telegram",
+                "date": "",
+                "summary": chat.get("name", ""),
+                "source": chat.get("source", ""),
+                "_data": {
+                    "chat": chat.get("name", ""),
+                    "chat_id": chat.get("id"),
+                    "chat_type": chat.get("type", ""),
+                    "raw_type": chat.get("raw_type", ""),
+                    "message_count": chat.get("message_count", 0),
+                    "source": chat.get("source", ""),
+                },
+            })
+            c += 1
+
+        for msg in data.get("messages", []):
+            text = msg.get("text") or ""
+            kind = msg.get("kind", "text")
+            label = text or (f"<{kind.lower()}: {Path(str(msg.get('file') or '')).name}>"
+                             if msg.get("file") else "")
+            if msg.get("service"):
+                label = f"[service] {msg.get('action', 'event')}"
+            status = ("Service event" if msg.get("service")
+                      else "Forwarded" if msg.get("forwarded_from")
+                      else "In export" if msg.get("source", "").endswith(".json")
+                      else "Present")
+            r.append({
+                "type": "Deleted Message" if kind == "deleted" else "Message",
+                "category": "Telegram",
+                "date": msg.get("date_unixtime") or msg.get("date", ""),
+                "summary": (label or "(no body)")[:120],
+                "source": msg.get("source", ""),
+                "_data": {
+                    "chat": msg.get("chat", ""),
+                    "chat_type": msg.get("chat_type", ""),
+                    "sender": msg.get("sender", ""),
+                    "from_id": msg.get("from_id", ""),
+                    "message_id": msg.get("message_id"),
+                    "text": text,
+                    "kind": kind,
+                    "media_type": msg.get("media_type", ""),
+                    "file": msg.get("file", ""),
+                    "forwarded_from": msg.get("forwarded_from", ""),
+                    "reply_to": msg.get("reply_to"),
+                    "edited": msg.get("edited", False),
+                    "service": msg.get("service", False),
+                    "action": msg.get("action", ""),
+                    "date": msg.get("date_unixtime") or msg.get("date", ""),
+                    "source": msg.get("source", ""),
+                    "status": status,
+                },
+            })
+            c += 1
+
+        for note in data.get("notifications", []):
+            r.append({
+                "type": "Notification",
+                "category": "Telegram",
+                "date": note.get("date", ""),
+                "summary": (note.get("text") or "")[:120],
+                "source": note.get("source", ""),
+                "_data": {
+                    "chat": note.get("chat", ""),
+                    "chat_type": "Notification",
+                    "sender": note.get("sender", ""),
+                    "text": note.get("text", ""),
+                    "date": note.get("date", ""),
+                    "source": note.get("source", ""),
+                    "status": "Notification remnant (survives chat deletion)",
+                    "kind": "notification",
+                },
+            })
+            c += 1
+
+        for media in data.get("media", []):
+            r.append({
+                "type": media.get("type", "Cache File"),
+                "category": "Telegram",
+                "date": "",
+                "summary": media.get("name", ""),
+                "source": media.get("path", ""),
+                "_data": {
+                    "filename": media.get("name", ""),
+                    "path": media.get("path", ""),
+                    "type": media.get("type", ""),
+                    "size": "",
+                    "status": "Shared storage / media cache",
+                },
+            })
+            c += 1
+
+        for note in data.get("notes", []):
+            self.progress.emit(f"  {note}")
+
+        stats = data.get("stats", {})
+        self.progress.emit(
+            f"Loaded {c} Telegram artifacts ({stats.get('messages', 0)} messages "
+            f"in {stats.get('chats', 0)} chats, {stats.get('groups', 0)} groups, "
+            f"{stats.get('channels', 0)} channels, {stats.get('media', 0)} media)")
 
     # -- social storage ------------------------------------------------------
 
@@ -2517,6 +2612,10 @@ class ArtifactsPage(QWidget):
         self._contacts = []
         self._conversations = {}
         self._current_app = None
+        #: How the open category is projected: table, thumbnail, folder, gallery.
+        self._view_mode = "table"
+        #: Mode to restore when the full-screen gallery is closed.
+        self._gallery_prev_mode = "table"
         #: Active case session; findings are only written to the case when the
         #: window has one (the artifact rows require a session and a timestamp).
         self._session_id = ""
@@ -2691,6 +2790,39 @@ class ArtifactsPage(QWidget):
 
         outer.addWidget(header)
 
+        # Projection bar. Every category can be read four ways without leaving
+        # it: the curated table, tiles, the folder tree the files came from, or
+        # the full-screen gallery.
+        self.view_bar = QFrame()
+        self.view_bar.setStyleSheet(
+            "QFrame { background: #0d1117; border-bottom: 1px solid #1e293b; }")
+        self.view_bar.setFixedHeight(38)
+        view_layout = QHBoxLayout(self.view_bar)
+        view_layout.setContentsMargins(16, 4, 16, 4)
+        view_layout.setSpacing(6)
+        self._view_buttons = {}
+        for key, label in (("table", "Table"), ("thumbnail", "Thumbnail"),
+                           ("folder", "Folder"), ("gallery", "Gallery")):
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setFixedHeight(26)
+            btn.setStyleSheet(
+                "QPushButton { background: transparent; color: #94a3b8;"
+                " border: 1px solid transparent; border-radius: 6px;"
+                " font-size: 11px; font-weight: 600; padding: 0 12px; }"
+                "QPushButton:hover { background: #1e293b; color: #e2e8f0; }"
+                "QPushButton:checked { background: #1e293b; color: #60a5fa;"
+                " border: 1px solid #334155; }")
+            btn.clicked.connect(lambda _checked=False, m=key: self._set_view_mode(m))
+            view_layout.addWidget(btn)
+            self._view_buttons[key] = btn
+        view_layout.addStretch()
+        self.view_hint = QLabel("")
+        self.view_hint.setStyleSheet(
+            "color: #475569; font-size: 11px; background: transparent; border: none;")
+        view_layout.addWidget(self.view_hint)
+        outer.addWidget(self.view_bar)
+
         self.conv_scroll = QScrollArea()
         self.conv_scroll.setWidgetResizable(True)
         self.conv_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -2700,7 +2832,17 @@ class ArtifactsPage(QWidget):
         self.conv_list_layout.setSpacing(6)
         self.conv_list_layout.addStretch()
         self.conv_scroll.setWidget(self.conv_list_widget)
-        outer.addWidget(self.conv_scroll, 1)
+
+        # Tiles live in their own pane so the category scroll area is not asked
+        # to host a second scroll area inside itself.
+        self.thumb_gallery = MediaGallery()
+        self.thumb_gallery.set_chrome_visible(False)
+        self.thumb_gallery.item_activated.connect(self._open_media_viewer)
+
+        self.conv_stack = QStackedWidget()
+        self.conv_stack.addWidget(self.conv_scroll)
+        self.conv_stack.addWidget(self.thumb_gallery)
+        outer.addWidget(self.conv_stack, 1)
 
         return page
 
@@ -2762,6 +2904,11 @@ class ArtifactsPage(QWidget):
 
     def _on_app_clicked(self, app_def):
         self._current_app = app_def
+        self._view_mode = "table"
+        self._gallery_prev_mode = "table"
+        self._sync_view_buttons()
+        if hasattr(self, "view_hint"):
+            self.view_hint.setText("")
         category = app_def["category"]
         app_type = app_def.get("type", "list")
 
@@ -2785,6 +2932,11 @@ class ArtifactsPage(QWidget):
             self._show_media_gallery(category, app_def)
         else:
             self._show_generic_list(category, app_def)
+        # A media category opens straight into the gallery; the bar should say so.
+        if self.stacked.currentIndex() == 3:
+            self._view_mode = "gallery"
+            self._gallery_prev_mode = "table"
+            self._sync_view_buttons()
 
     def _show_sms_conversations(self):
         self.conv_title.setText("Messages")
@@ -3057,35 +3209,176 @@ class ArtifactsPage(QWidget):
         self.stacked.setCurrentIndex(1)
 
     def _show_telegram_conversations(self):
-        self.conv_title.setText("Telegram")
-        tg_items = [a for a in self.all_artifacts if a.get("category") == "Telegram"]
-        self.conv_count.setText(f"{len(tg_items)} files")
-        self._set_media_actions([a for a in tg_items if a.get("type") in MEDIA_TYPES],
-                                "Telegram media")
+        """Telegram as an examiner reads it: chats, then messages, then media.
 
+        A raw cache-file list answered "what files exist" and nothing else. The
+        three things that matter are the chat list with its type (private chat,
+        group, channel), the messages inside those chats with sender and date,
+        and the media that came with them.
+        """
+        from PyQt6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
+        from PyQt6.QtGui import QColor
+
+        tg_items = [a for a in self.all_artifacts if a.get("category") == "Telegram"]
+        chats = [a for a in tg_items if str(a.get("type", "")).startswith("Chat - ")]
+        messages = [a for a in tg_items
+                    if a.get("type") in ("Message", "Deleted Message", "Notification")]
+        media = [a for a in tg_items if a not in chats and a not in messages]
+
+        groups = sum(1 for a in chats if a.get("_data", {}).get("chat_type") == "Group")
+        channels = sum(1 for a in chats if a.get("_data", {}).get("chat_type") == "Channel")
+        direct = sum(1 for a in chats
+                     if a.get("_data", {}).get("chat_type") == "Private chat")
+
+        self.conv_title.setText("Telegram")
+        self.conv_count.setText(
+            f"{len(chats)} chats \u00b7 {groups} groups \u00b7 {channels} channels \u00b7 "
+            f"{len(messages)} messages \u00b7 {len(media)} files")
+        self._set_media_actions([a for a in media if a.get("type") in MEDIA_TYPES],
+                                "Telegram media")
         self._clear_layout(self.conv_list_layout)
 
         if not tg_items:
-            self._add_empty(self.conv_list_layout, "No Telegram data accessible.")
+            self._add_empty(
+                self.conv_list_layout,
+                "No Telegram data was readable on this device.\n\n"
+                "Without root the live cache4.db is out of reach, but Telegram's "
+                "own export is not: Settings \u2192 Advanced \u2192 Export chat "
+                "history writes result.json to shared storage. Media in "
+                "Android/data/org.telegram.messenger and any message previews in "
+                "the notification dump are read either way.")
             self.stacked.setCurrentIndex(1)
             return
 
-        type_groups = {}
-        for item in tg_items:
-            ftype = item.get("type", "Cache File")
-            if ftype not in type_groups:
-                type_groups[ftype] = []
-            type_groups[ftype].append(item)
+        table_style = """
+            QTableWidget { background: #111827; border: 1px solid #1e293b;
+                border-radius: 8px; gridline-color: #1e293b; font-size: 12px; }
+            QTableWidget::item { padding: 7px 10px; }
+            QTableWidget::item:selected { background: rgba(37,99,235,0.25); }
+            QHeaderView::section { background: #1a2234; color: #94a3b8;
+                border: none; border-bottom: 2px solid #1e293b;
+                font-size: 11px; font-weight: 700; padding: 9px; }
+        """
 
-        for ftype in ["Image", "Video", "Sticker (Animated)", "Profile Photo", "Audio", "Cache File"]:
+        def section(text):
+            header = QLabel(text)
+            header.setStyleSheet(
+                "color: #2b9fd8; font-size: 12px; font-weight: 700;"
+                " padding: 10px 0 4px 0; background: transparent; border: none;")
+            self.conv_list_layout.insertWidget(
+                self.conv_list_layout.count() - 1, header)
+
+        # -- chats ---------------------------------------------------------
+        if chats:
+            section(f"  Chats ({len(chats)}) \u2014 {direct} private, "
+                    f"{groups} groups, {channels} channels")
+            table = QTableWidget()
+            headers = ["Name", "Type", "Messages", "Source"]
+            table.setColumnCount(len(headers))
+            table.setHorizontalHeaderLabels(headers)
+            table.setRowCount(len(chats))
+            table.setSortingEnabled(False)
+            table.verticalHeader().setVisible(False)
+            table.setShowGrid(False)
+            table.setAlternatingRowColors(True)
+            table.setStyleSheet(table_style)
+            order = {"Private chat": 0, "Group": 1, "Channel": 2}
+            ordered_chats = sorted(
+                chats, key=lambda a: (order.get(a.get("_data", {}).get("chat_type"), 9),
+                                      str(a.get("summary") or "").lower()))
+            colour_for = {"Group": "#93c5fd", "Channel": "#f59e0b"}
+            for row, artifact in enumerate(ordered_chats[:5000]):
+                data = artifact.get("_data", {})
+                cells = [data.get("chat", ""), data.get("chat_type", ""),
+                         str(data.get("message_count", 0)), data.get("source", "")]
+                for column, value in enumerate(cells):
+                    item = QTableWidgetItem(str(value))
+                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    tint = colour_for.get(data.get("chat_type", ""))
+                    if tint:
+                        item.setForeground(QColor(tint))
+                    table.setItem(row, column, item)
+            hv = table.horizontalHeader()
+            hv.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            for column in range(1, len(headers)):
+                hv.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+            table.setMinimumHeight(min(420, 60 + 28 * len(ordered_chats)))
+            self.conv_list_layout.insertWidget(
+                self.conv_list_layout.count() - 1, table)
+
+        # -- messages ------------------------------------------------------
+        if messages:
+            section(f"  Messages ({len(messages)})")
+            table = QTableWidget()
+            headers = ["Chat", "Type", "Sender", "Date & Time", "Message", "Status"]
+            table.setColumnCount(len(headers))
+            table.setHorizontalHeaderLabels(headers)
+            table.setRowCount(len(messages))
+            table.setSortingEnabled(False)
+            table.verticalHeader().setVisible(False)
+            table.setShowGrid(False)
+            table.setAlternatingRowColors(True)
+            table.setStyleSheet(table_style)
+            ordered = sorted(messages, key=lambda a: str(a.get("date") or ""), reverse=True)
+            for row, artifact in enumerate(ordered[:5000]):
+                data = artifact.get("_data", {})
+                is_deleted = artifact.get("type") == "Deleted Message"
+                is_notif = artifact.get("type") == "Notification"
+                kind = data.get("kind", "text")
+                body = data.get("text") or ""
+                if not body:
+                    body = (f"<{str(kind).lower()}: "
+                            f"{Path(str(data.get('file') or '')).name}>"
+                            if data.get("file") else "(no body stored)")
+                status = data.get("status", "")
+                if data.get("forwarded_from"):
+                    status = f"Forwarded from {data['forwarded_from']}"
+                elif data.get("edited"):
+                    status = status + " \u00b7 edited"
+                cells = [
+                    data.get("chat") or "(unknown chat)",
+                    data.get("chat_type") or kind,
+                    data.get("sender") or "",
+                    data.get("date", ""),
+                    body.replace("\n", " "),
+                    status,
+                ]
+                for column, value in enumerate(cells):
+                    item = QTableWidgetItem(str(value))
+                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    if is_deleted:
+                        item.setForeground(QColor("#f87171"))
+                    elif is_notif:
+                        item.setForeground(QColor("#f59e0b"))
+                    elif kind not in ("text", "Other"):
+                        item.setForeground(QColor("#93c5fd"))
+                    table.setItem(row, column, item)
+            hv = table.horizontalHeader()
+            for column, mode in ((0, QHeaderView.ResizeMode.ResizeToContents),
+                                 (1, QHeaderView.ResizeMode.ResizeToContents),
+                                 (2, QHeaderView.ResizeMode.ResizeToContents),
+                                 (3, QHeaderView.ResizeMode.ResizeToContents),
+                                 (4, QHeaderView.ResizeMode.Stretch),
+                                 (5, QHeaderView.ResizeMode.ResizeToContents)):
+                hv.setSectionResizeMode(column, mode)
+            table.setMinimumHeight(460)
+            self.conv_list_layout.insertWidget(
+                self.conv_list_layout.count() - 1, table)
+
+        # -- media ---------------------------------------------------------
+        type_groups = {}
+        for item in media:
+            ftype = item.get("type", "Cache File")
+            type_groups.setdefault(ftype, []).append(item)
+
+        for ftype in ["Image", "Video", "Sticker (Animated)", "GIF", "Audio",
+                      "Document", "Profile Photo", "Cache File"]:
             items = type_groups.get(ftype, [])
             if not items:
                 continue
-            header = QLabel(f"  {ftype} ({len(items)})")
-            header.setStyleSheet(f"color: #0088cc; font-size: 12px; font-weight: 700; padding: 8px 0 4px 0; background: transparent; border: none;")
-            self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, header)
-
+            section(f"  {ftype} ({len(items)})")
             for item in items[:200]:
+                data = item.get("_data", {})
                 item_frame = QFrame()
                 item_frame.setStyleSheet("""
                     QFrame { background: #111827; border-radius: 8px; border: 1px solid #1e293b; }
@@ -3094,26 +3387,22 @@ class ArtifactsPage(QWidget):
                 item_frame.setFixedHeight(44)
                 item_layout = QHBoxLayout(item_frame)
                 item_layout.setContentsMargins(12, 6, 12, 6)
-
-                fname = item.get("_data", {}).get("filename", "")
-                sz = item.get("_data", {}).get("size", "")
-                name_lbl = QLabel(fname[:50])
-                name_lbl.setStyleSheet("color: #e2e8f0; font-size: 12px; background: transparent; border: none;")
-                name_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                name_lbl = QLabel(str(data.get("filename", ""))[:60])
+                name_lbl.setStyleSheet(
+                    "color: #e2e8f0; font-size: 12px; background: transparent;"
+                    " border: none;")
+                name_lbl.setTextInteractionFlags(
+                    Qt.TextInteractionFlag.TextSelectableByMouse)
                 item_layout.addWidget(name_lbl, 1)
-
-                if sz:
-                    sz_lbl = QLabel(sz)
-                    sz_lbl.setStyleSheet("color: #64748b; font-size: 11px; background: transparent; border: none;")
-                    item_layout.addWidget(sz_lbl)
-
-                if ftype in ("Image", "Video", "Profile Photo"):
+                if ftype in ("Image", "Video", "GIF", "Profile Photo"):
                     view_btn = self._media_button("View", "#0088cc")
-                    remote_path = item.get("_data", {}).get("path", "")
-                    view_btn.clicked.connect(lambda checked, p=remote_path, t=ftype: self._open_media_viewer(p, t))
+                    remote_path = data.get("path", "")
+                    view_btn.clicked.connect(
+                        lambda checked, p=remote_path, t=ftype:
+                        self._open_media_viewer(p, t))
                     item_layout.addWidget(view_btn)
-
-                self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, item_frame)
+                self.conv_list_layout.insertWidget(
+                    self.conv_list_layout.count() - 1, item_frame)
 
         self.stacked.setCurrentIndex(1)
 
@@ -4062,7 +4351,177 @@ class ArtifactsPage(QWidget):
         self.gallery_view.load(title, items)
         if self.stacked.currentIndex() != 3:
             self._gallery_return = self.stacked.currentIndex()
+            if self._view_mode != "gallery":
+                self._gallery_prev_mode = self._view_mode
         self.stacked.setCurrentIndex(3)
+
+    # -- view modes ---------------------------------------------------------
+
+    def _sync_view_buttons(self) -> None:
+        for key, btn in getattr(self, "_view_buttons", {}).items():
+            btn.setChecked(key == self._view_mode)
+
+    def _set_view_mode(self, mode: str) -> None:
+        """Reproject the open category without re-running the extractor."""
+        if not self._current_app:
+            self._sync_view_buttons()
+            return
+        if mode == "gallery" and self._view_mode != "gallery":
+            self._gallery_prev_mode = self._view_mode
+        self._view_mode = mode
+        self._sync_view_buttons()
+        self._render_current_view()
+
+    def _render_current_view(self) -> None:
+        app_def = self._current_app
+        if not app_def:
+            return
+        category = app_def.get("category", "")
+        items = [a for a in self.all_artifacts if a.get("category") == category]
+        mode = self._view_mode
+        if mode == "table":
+            self.conv_stack.setCurrentIndex(0)
+            self._render_table_view(app_def)
+        elif mode == "thumbnail":
+            self._render_thumbnail_view(app_def, items)
+        elif mode == "folder":
+            self._render_folder_view(app_def, items)
+        elif mode == "gallery":
+            media = self._media_items_for(items)
+            self._render_table_view(app_def)
+            self._open_gallery(f"{app_def.get('name', category)} \u2014 Gallery", media)
+            return
+        self.stacked.setCurrentIndex(1)
+
+    def _render_table_view(self, app_def) -> None:
+        category = app_def.get("category", "")
+        app_type = app_def.get("type", "list")
+        if category == "SMS":
+            self._show_sms_conversations()
+        elif category == "Calls":
+            self._show_call_conversations()
+        elif category == "WhatsApp":
+            self._show_whatsapp_conversations()
+        elif category == "Telegram":
+            self._show_telegram_conversations()
+        elif category == "Deleted Files":
+            self._show_deleted_files()
+        elif category == "Documents":
+            self._show_documents()
+        elif category == "Emails & Accounts":
+            self._show_emails()
+        elif category == "System Info":
+            self._show_system()
+        elif app_type == "media":
+            self._show_media_gallery(category, app_def)
+        else:
+            self._show_generic_list(category, app_def)
+
+    @staticmethod
+    def _media_items_for(items):
+        return [a for a in items
+                if a.get("type") in MEDIA_TYPES
+                or media_kind(str(a.get("_data", {}).get("path") or a.get("source") or ""))]
+
+    def _render_thumbnail_view(self, app_def, items) -> None:
+        media = self._media_items_for(items)
+        self.conv_title.setText(app_def.get("name", app_def.get("category", "")))
+        self.conv_count.setText(f"{len(media)} tiles")
+        self.view_hint.setText(
+            "" if media else "No pictures in this category - try Table or Folder.")
+        self.thumb_gallery.set_serial(self.device_bar.get_first_serial() or self.serial or "")
+        self.thumb_gallery.load(app_def.get("name", ""), media)
+        self.conv_stack.setCurrentIndex(1)
+
+    def _render_folder_view(self, app_def, items) -> None:
+        """Group the category by the directory each artefact lives in."""
+        from collections import defaultdict
+
+        self.conv_stack.setCurrentIndex(0)
+        self._clear_layout(self.conv_list_layout)
+        self.conv_title.setText(app_def.get("name", app_def.get("category", "")))
+        self.view_hint.setText("")
+
+        buckets = defaultdict(list)
+        for item in items:
+            data = item.get("_data") or {}
+            location = str(data.get("path") or item.get("source") or "")
+            if location.startswith("/"):
+                # Device paths are POSIX; Windows' Path would turn the parents
+                # into backslashes and make an Android folder unreadable.
+                folder = location.rsplit("/", 1)[0] or "/"
+            elif location:
+                folder = str(Path(location).parent)
+            else:
+                folder = "(no path recorded)"
+            buckets[folder].append(item)
+
+        self.conv_count.setText(f"{len(buckets)} folders \u00b7 {len(items)} items")
+        if not items:
+            self._add_empty(self.conv_list_layout,
+                            "Nothing in this category to group into folders.")
+            return
+
+        accent = app_def.get("color", "#3b82f6")
+        for folder in sorted(buckets, key=lambda p: (-len(buckets[p]), p.lower())):
+            entries = buckets[folder]
+            header = QFrame()
+            header.setStyleSheet(
+                "QFrame { background: #111827; border-radius: 8px;"
+                " border: 1px solid #1e293b; }")
+            header.setFixedHeight(44)
+            row = QHBoxLayout(header)
+            row.setContentsMargins(12, 6, 12, 6)
+            icon = QLabel("DIR")
+            icon.setFixedWidth(34)
+            icon.setStyleSheet(
+                f"color: {accent}; font-size: 10px; font-weight: 700;"
+                " background: transparent; border: none;")
+            row.addWidget(icon)
+            path_lbl = QLabel(folder[:110])
+            path_lbl.setStyleSheet(
+                "color: #e2e8f0; font-size: 12px; background: transparent;"
+                " border: none;")
+            path_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            row.addWidget(path_lbl, 1)
+            count = QLabel(f"{len(entries)}")
+            count.setStyleSheet(
+                f"color: {accent}; font-size: 11px; font-weight: 700;"
+                " background: transparent; border: none;")
+            row.addWidget(count)
+            self.conv_list_layout.insertWidget(
+                self.conv_list_layout.count() - 1, header)
+
+            for item in entries[:40]:
+                data = item.get("_data") or {}
+                name = (data.get("filename") or data.get("chat")
+                        or item.get("summary") or "")
+                line = QFrame()
+                line.setStyleSheet("QFrame { background: transparent; }")
+                line.setFixedHeight(30)
+                line_row = QHBoxLayout(line)
+                line_row.setContentsMargins(46, 0, 12, 0)
+                label = QLabel(str(name)[:90])
+                label.setStyleSheet(
+                    "color: #94a3b8; font-size: 11px; background: transparent;"
+                    " border: none;")
+                label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                line_row.addWidget(label, 1)
+                kind = QLabel(item.get("type", ""))
+                kind.setStyleSheet(
+                    "color: #475569; font-size: 10px; background: transparent;"
+                    " border: none;")
+                line_row.addWidget(kind)
+                self.conv_list_layout.insertWidget(
+                    self.conv_list_layout.count() - 1, line)
+
+            if len(entries) > 40:
+                more = QLabel(f"  + {len(entries) - 40} more in this folder")
+                more.setStyleSheet(
+                    "color: #475569; font-size: 11px; padding: 2px 0 8px 46px;"
+                    " background: transparent; border: none;")
+                self.conv_list_layout.insertWidget(
+                    self.conv_list_layout.count() - 1, more)
 
     def _capture_screen(self) -> None:
         """Grab the handset's screen over ADB and file it as evidence."""
@@ -4160,10 +4619,20 @@ class ArtifactsPage(QWidget):
         sb.setValue(sb.maximum())
 
     def _go_back_to_grid(self):
-        # The gallery is reachable from the conversation list as well as from the
-        # app grid, so "back" returns to whatever view opened it.
-        target = getattr(self, "_gallery_return", 0)
-        self.stacked.setCurrentIndex(target if target != 3 else 0)
+        # The gallery is reachable from a category as well as from the app grid,
+        # so "back" has to know where it came from. Reading a stale return index
+        # made a click land on the page already open, which looked like a dead
+        # arrow.
+        self.progress_frame.setVisible(False)
+        if self.stacked.currentIndex() == 3:
+            target = getattr(self, "_gallery_return", 1)
+            self._view_mode = getattr(self, "_gallery_prev_mode", "table") or "table"
+            self._sync_view_buttons()
+            self.stacked.setCurrentIndex(target if target in (0, 1) else 0)
+            if target == 1 and self._current_app:
+                self._render_current_view()
+            return
+        self.stacked.setCurrentIndex(0)
 
     def _go_back_to_conversations(self):
         self.stacked.setCurrentIndex(1)

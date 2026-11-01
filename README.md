@@ -17,8 +17,9 @@ copy, and records an append-only chain of custody for every action.
 > | RAW / ZIP image output, including streamed ZIP for logical images | **Tested** - writers, recording and the Create Image dialog, no device needed |
 > | 24 acquisition loaders implemented | **Code complete** |
 > | Device-verified loaders | **14 of 24** |
-> | Root-gated, reported `NOT_ACCESSIBLE` | **8 of 24** |
+> | Root-gated, reported `NOT_ACCESSIBLE` | **7 of 24** |
 > | WhatsApp and Deleted Data: shared-storage path on an unrooted handset | **Code complete** - fixture-tested, awaiting a handset run |
+> | Telegram chats, groups, channels, media: export + cache + notifications | **Code complete** - fixture-tested, awaiting a handset run |
 >
 > **Verified device:** TECNO TECNO KL6 (Tecno Spark 30), Android 14 (API 34),
 > serial `13276374A7004073`, build `TECNO/KL6-OP/TECNO-KL6:14/UP1A.231005.007/260709V1745:user/release-keys`,
@@ -187,12 +188,13 @@ run on import and need a connected handset, not a test runner.
 
 ![Test suite finishing with 384 tests passed and two skipped](docs/images/tests.png)
 
-The run above is v1.0.28: 384 tests with two skips — 16 for case editing and
+The run above is v1.0.29: 411 tests with two skips — 16 for case editing and
 deletion, 30 for WhatsApp parsing, deleted-entry recovery and freelist salvage,
-18 for percentage progress,
-30 for SIM parsing and storage, 15 for the media gallery, call-log table and
-device card, 63 for the report composer and its artifact views, and the rest
-accumulated across earlier releases.
+18 for Telegram exports, chat kinds, cache schemas and notifications, 24 for the
+media gallery, Telegram viewer, view modes and back-arrow behaviour, 18 for
+percentage progress,
+30 for SIM parsing and storage, 63 for the report composer and its artifact
+views, and the rest accumulated across earlier releases.
 
 ---
 
@@ -367,6 +369,7 @@ desktop/
     sim_forensics.py          SIM / UICC extraction over ADB
     cases.py                  case records: create, edit, delete
     whatsapp.py               WhatsApp exports/backups/media, deleted traces
+    telegram.py               Telegram exports, chats/groups/channels, media
   ui/
     main_window.py            window shell, stage navigation
     theme.py                  palette and typography
@@ -529,20 +532,21 @@ a live read-only query on the TECNO KL6 above; observed volumes are in
 `gps` · `wifi` · `bluetooth` · `apps` · `installed_apps` (423 packages) ·
 `app_permissions` · `clipboard` · `notifications` · `usage_stats` · `notes`
 
-**Root-gated — confirmed `NOT_ACCESSIBLE`** (8). They read app-private
+**Root-gated — confirmed `NOT_ACCESSIBLE`** (7). They read app-private
 `/data/data/<pkg>` or keystore `/data/misc/wifi` paths, and Android denies the
 shell. The probe confirmed `permission denied` on every one; they are recorded
 and surfaced, never silently dropped:
 
-`telegram` · `instagram` · `snapchat` · `tiktok` · `facebook` ·
+`instagram` · `snapchat` · `tiktok` · `facebook` ·
 `transactions` · `browser` · `wifi_passwords`
 
-### WhatsApp and deleted data without root
+### WhatsApp, Telegram and deleted data without root
 
-`whatsapp` and `deleted` moved out of that list. Both now read the shared storage
-an unrooted handset actually exposes, and state what they could not reach
-instead of returning a reassuring zero. `desktop/core/whatsapp.py` handles the
-work:
+`whatsapp`, `telegram` and `deleted` moved out of that list. All three now read
+the shared storage an unrooted handset actually exposes, and state what they
+could not reach instead of returning a reassuring zero.
+
+`desktop/core/whatsapp.py` handles WhatsApp and the deletion traces:
 
 - **Chat exports** (`WhatsApp Chat with X.txt`, `_chat.txt`) are pulled and
   parsed in full: sender, side, timestamp, multi-line bodies, media
@@ -575,6 +579,50 @@ Deleted data has its own honest ladder:
 Nothing is labelled "recovered" unless a file or a decoded record exists behind
 it. The two loaders are covered by `desktop/tests/test_whatsapp.py` (30 tests).
 
+### Telegram: chats, groups, channels
+
+`desktop/core/telegram.py` reads the same shared-storage surface, with the chat
+list as the first-class result:
+
+| Source | What comes out |
+|---|---|
+| `result.json` from Settings → Advanced → Export chat history | Every chat, its type (private chat, group, channel, saved messages, bot), and the full message list: sender, timestamp, text, forward origin, reply target, edit flag and service events |
+| Media cache in `Android/data/org.telegram.messenger` | Images, video, voice notes, stickers and documents under Telegram's own file names |
+| `dumpsys notification --noredact` | Message previews, including chats already cleared in the app |
+| A plain `cache4.db` | Messages under either the `messages_v2` or `messages` schema, read by introspecting the columns the file actually has |
+
+The viewer opens with a chats table (Name · Type · Messages · Source) sorted
+private chat → group → channel, then a message table (Chat · Type · Sender ·
+Date · Message · Status) with forwarded and edited messages marked, then media
+grouped by kind. Group and channel rows are tinted so the type is visible
+without reading the column.
+
+The live `cache4.db` in `/data/data/org.telegram.messenger` is app-private and
+stays out of reach without root; the loader says so instead of returning zero.
+Covered by `desktop/tests/test_telegram.py` (18 tests) and the viewer tests in
+`desktop/tests/test_media_gallery.py`.
+
+### Table, thumbnail, folder and gallery views
+
+Every artifact category can be read four ways from the bar under its header,
+without re-running the extractor:
+
+- **Table** — the curated view for that category (message tables, chat lists,
+  call log, generic rows).
+- **Thumbnail** — the category's pictures as tiles, with the tile-size control;
+  the gallery's own header and footer are hidden because the category already
+  has one.
+- **Folder** — items grouped by the directory they were found in, largest
+  folder first, with the device path preserved as POSIX (`/sdcard/...`) rather
+  than Windows-rewritten.
+- **Gallery** — the full-screen gallery, with back returning to the mode you
+  left.
+
+The back arrow was reading a stale return index, so a click could land on the
+page already showing. It now distinguishes "leaving the gallery" (restore the
+previous mode and re-render the category) from "leaving the category" (return to
+the app grid), and a regression test pins the stale-index case.
+
 `is_device_rooted()` and `device_root_summary()` in `adb_manager.py` perform
 root detection so the tool knows its own ceiling before interpreting results.
 
@@ -596,8 +644,9 @@ capability, integrity and chain of custody only.
 State these in any report; they are properties of Android, not bugs to be
 "fixed" by this tool.
 
-The unrooted ceiling for these two loaders is implemented in
-`desktop/core/whatsapp.py`. Its limits are Android's, not bugs:
+The unrooted ceiling for these loaders is implemented in
+`desktop/core/whatsapp.py` and `desktop/core/telegram.py`. Their limits are
+Android's, not bugs:
 
 - An unrooted handset does **not** expose the live WhatsApp `msgstore.db`. The
   database is app-private and sealed with crypt15. What the tool can read is
@@ -657,7 +706,7 @@ by anyone. `test_reproducible_build.py` compares the installed environment
 against the lock, and the full two-build byte comparison runs only with
 `DROIDFORENX_SLOW_TESTS=1`.
 
-384 tests, no device required. They cover the properties that matter:
+411 tests, no device required. They cover the properties that matter:
 
 - an acquired artifact survives being read (the original bug was that 11
   loaders deleted evidence after parsing)

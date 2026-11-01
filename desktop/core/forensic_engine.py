@@ -498,57 +498,89 @@ def analyze_whatsapp(serial, evidence_root=None):
 
 
 def analyze_telegram(serial, evidence_root=None):
-    results = {"messages": [], "stats": {}}
+    """Telegram: shared storage first, app-private cache when rooted.
+
+    A stock handset cannot hand over ``cache4.db``, so the loader does not lead
+    with it. It reads Telegram's own export, the media cache and notification
+    previews, and only then looks for a plain database. Each source reports
+    what it produced, and a source that produced nothing says why.
+    """
+    from . import telegram as tg
+
     _ensure_evidence_dir()
     base = evidence_root or EVIDENCE_ROOT
-    cache_paths = [
-        "/data/data/org.telegram.messenger/files/cache4.db",
-        "/data/data/org.telegram.messenger/databases/cache4.db",
-    ]
-    userconfig_paths = [
-        "/data/data/org.telegram.messenger/files/userconfig.sql",
-        "/data/data/org.telegram.messenger/shared_prefs/userconfig.xml",
-    ]
-    local_cache = None
-    for remote in cache_paths:
-        local_cache = _safe_pull_db(serial, remote, f"telegram_cache_{serial[:8]}.db", base)
-        if local_cache:
+    workdir = base / "_telegram" / (str(serial or "device")[:32])
+    results = {"messages": [], "chats": [], "media": [], "notifications": [],
+               "notes": [], "user_config": {}, "stats": {}}
+
+    # Rooted handsets (or an examiner-provided copy) still get the live cache.
+    for remote in ("/data/data/org.telegram.messenger/files/cache4.db",
+                   "/data/data/org.telegram.messenger/databases/cache4.db"):
+        local_cache = _safe_pull_db(
+            serial, remote, f"telegram_cache_{str(serial)[:8]}.db", base)
+        if not local_cache:
+            continue
+        parsed = tg.cache_messages(local_cache)
+        if parsed.get("readable") and parsed.get("messages"):
+            for message in parsed["messages"]:
+                message["direction"] = (
+                    "outgoing" if message.get("sender") == "me" else "incoming")
+                message["date_readable"] = message.get("date", "")
+            results["messages"].extend(parsed["messages"])
+            results["notes"].append(
+                "Read cache4.db over root (%s schema, %d messages)"
+                % (parsed.get("schema", "unknown"), len(parsed["messages"])))
             break
-    if local_cache:
-        try:
-            tables = _query_db(local_cache, "SELECT name FROM sqlite_master WHERE type='table'")
-            table_names = [t.get("name", "") for t in tables]
-            messages = []
-            if "messages_v2" in table_names:
-                messages = _query_db(local_cache, "SELECT mid, uid, message, date, out, media, reply_to_mid, forward_mid FROM messages_v2 ORDER BY date DESC LIMIT 10000")
-            elif "messages" in table_names:
-                messages = _query_db(local_cache, "SELECT mid, uid, message, date, out, media FROM messages ORDER BY date DESC LIMIT 10000")
-            for msg in messages:
-                msg["date_readable"] = _ts_to_str(msg.get("date", 0))
-                msg["direction"] = "outgoing" if msg.get("out") == 1 else "incoming"
-            results["messages"] = messages
-        except Exception as e:
-            logger.error(f"Telegram cache4 parse error: {e}")
-    for remote in userconfig_paths:
-        local_conf = _safe_pull_db(serial, remote, f"telegram_userconfig_{serial[:8]}.xml", base)
+
+    try:
+        shared = tg.collect(serial, workdir)
+    except Exception as exc:
+        logger.warning("Telegram shared-storage collection failed: %s", exc)
+        shared = {}
+
+    results["messages"].extend(shared.get("messages", []))
+    results["chats"].extend(shared.get("chats", []))
+    results["media"].extend(shared.get("media", []))
+    results["notifications"].extend(shared.get("notifications", []))
+    results["notes"].extend(shared.get("notes", []))
+
+    for remote in ("/data/data/org.telegram.messenger/files/userconfig.sql",
+                   "/data/data/org.telegram.messenger/shared_prefs/userconfig.xml"):
+        local_conf = _safe_pull_db(
+            serial, remote, f"telegram_userconfig_{str(serial)[:8]}.xml", base)
         if local_conf:
             try:
-                with open(local_conf, "r", errors="replace") as f:
-                    content = f.read()
-                    phone_m = re.search(r'phone="([^"]+)"', content)
-                    name_m = re.search(r'auth_name="([^"]+)"', content)
-                    results["user_config"] = {
-                        "phone": phone_m.group(1) if phone_m else "",
-                        "name": name_m.group(1) if name_m else "",
-                    }
-            except Exception:
+                with open(local_conf, "r", errors="replace") as handle:
+                    content = handle.read()
+                phone_m = re.search(r'phone="([^"]+)"', content)
+                name_m = re.search(r'auth_name="([^"]+)"', content)
+                results["user_config"] = {
+                    "phone": phone_m.group(1) if phone_m else "",
+                    "name": name_m.group(1) if name_m else "",
+                }
+            except OSError:
                 pass
             break
+
+    chats = results["chats"]
     results["stats"] = {
+        "chats": len(chats),
+        "groups": sum(1 for c in chats if c.get("type") == "Group"),
+        "channels": sum(1 for c in chats if c.get("type") == "Channel"),
+        "private_chats": sum(1 for c in chats if c.get("type") == "Private chat"),
         "total_messages": len(results["messages"]),
-        "incoming": sum(1 for m in results["messages"] if m.get("direction") == "incoming"),
-        "outgoing": sum(1 for m in results["messages"] if m.get("direction") == "outgoing"),
+        "incoming": sum(1 for m in results["messages"]
+                        if m.get("direction") == "incoming"),
+        "outgoing": sum(1 for m in results["messages"]
+                        if m.get("direction") == "outgoing"),
+        "media": len(results["media"]),
+        "notifications": len(results["notifications"]),
     }
+    if not results["messages"] and not results["chats"] and not results["media"]:
+        results["notes"].append(
+            "No Telegram artefacts were readable. The live cache4.db is "
+            "app-private; an in-app export to shared storage is what fills "
+            "this loader without root.")
     return results
 
 
@@ -985,12 +1017,12 @@ ANALYSIS_MODULES = {
 #: (``/data/misc/wifi``) paths. Android exposes these to root only, so on an
 #: unrooted device they cannot succeed. The tool reports NOT_ACCESSIBLE with
 #: that reason rather than returning an empty result that reads as success.
-#: WhatsApp and Deleted Data are no longer here: both now read the shared
-#: storage an unrooted handset exposes (chat exports, plain msgstore, backup
-#: inventory, trash entries and journal sidecars) and say plainly what they
-#: could not reach.
+#: WhatsApp, Telegram and Deleted Data are no longer here: all three read the
+#: shared storage an unrooted handset exposes (chat exports, plain databases,
+#: backup inventory, media caches, trash entries and journal sidecars) and say
+#: plainly what they could not reach.
 ROOT_REQUIRED_MODULES = frozenset({
-    "telegram", "instagram", "snapchat", "tiktok", "facebook",
+    "instagram", "snapchat", "tiktok", "facebook",
     "transactions", "browser", "wifi_passwords",
 })
 
