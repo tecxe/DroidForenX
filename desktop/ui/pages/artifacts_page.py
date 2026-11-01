@@ -1,5 +1,6 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QScrollArea, QGridLayout, QLineEdit, QStackedWidget)
+    QFrame, QScrollArea, QGridLayout, QLineEdit, QStackedWidget, QSplitter,
+    QTableWidget)
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer
 from PyQt6.QtGui import QFont
 from pathlib import Path
@@ -10,6 +11,8 @@ from ...core import whatsapp as wa_core
 from ...core import telegram as tg_core
 from ...core import evidence_store
 from ..widgets.media_gallery import MediaGallery, media_kind
+from ..widgets.structure_tree import StructureTree
+from ..widgets.properties_pane import PropertiesPane
 
 logger = logging.getLogger(__name__)
 
@@ -2629,107 +2632,138 @@ class ArtifactsPage(QWidget):
         self.evidence_root = Path(path) if path else None
 
     def _setup_ui(self):
-        from PyQt6.QtWidgets import QStackedWidget
         ml = QVBoxLayout(self)
         ml.setContentsMargins(0, 0, 0, 0)
         ml.setSpacing(0)
 
-        self.stacked = QStackedWidget()
-        ml.addWidget(self.stacked)
+        from ..widgets.device_status_bar import DeviceStatusBar
+        self.device_bar = DeviceStatusBar()
+        self.device_bar.device_connected.connect(self._on_device_connected)
+        ml.addWidget(self.device_bar)
 
-        self.app_grid_view = self._build_app_grid()
+        ml.addWidget(self._build_toolbar())
+        ml.addWidget(self._build_progress_bar())
+
         self.conversation_view = self._build_conversation_view()
         self.chat_view = self._build_chat_view()
 
-        self.stacked.addWidget(self.app_grid_view)
+        # Index order is load-bearing: several renderers end by showing the
+        # category page (1), a conversation (2) or the gallery (3), and the
+        # back arrow maps between them.
+        self.stacked = QStackedWidget()
+        self.stacked.addWidget(self._build_overview())
         self.stacked.addWidget(self.conversation_view)
         self.stacked.addWidget(self.chat_view)
 
-        # Thumbnail gallery, index 3. Kept as its own page so the list views can
-        # stay lists: a call log belongs in a table, a cache of screenshots
-        # belongs in a grid, and forcing both into one widget made both worse.
         self.gallery_view = MediaGallery()
         self.gallery_view.back_requested.connect(self._go_back_to_grid)
         self.gallery_view.item_activated.connect(self._open_media_viewer)
         self.stacked.addWidget(self.gallery_view)
 
-    def _build_app_grid(self):
-        page = QWidget()
-        page.setStyleSheet("background: #0a0e17;")
-        outer = QVBoxLayout(page)
-        outer.setContentsMargins(24, 20, 24, 20)
-        outer.setSpacing(16)
+        # Three panes, the way evidence is actually read: where it lives, what
+        # it says, what it is.
+        self.structure = StructureTree()
+        self.structure.category_selected.connect(self._open_category)
+        self.properties_pane = PropertiesPane()
 
-        from ..widgets.device_status_bar import DeviceStatusBar
-        self.device_bar = DeviceStatusBar()
-        self.device_bar.device_connected.connect(self._on_device_connected)
-        outer.addWidget(self.device_bar)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setObjectName("artifactSplitter")
+        splitter.setHandleWidth(1)
+        splitter.setChildrenCollapsible(False)
+        splitter.addWidget(self.structure)
+        splitter.addWidget(self.stacked)
+        splitter.addWidget(self.properties_pane)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 0)
+        splitter.setSizes([262, 700, 300])
+        self.splitter = splitter
+        ml.addWidget(splitter, 1)
 
-        header = QHBoxLayout()
-        header.setSpacing(12)
-        title = QLabel("DroidForenX")
-        title.setStyleSheet("color: #2563eb; font-size: 18px; font-weight: 700; background: transparent; border: none;")
-        header.addWidget(title)
-        subtitle = QLabel("Artifact Viewer")
-        subtitle.setStyleSheet("color: #64748b; font-size: 13px; background: transparent; border: none;")
-        header.addWidget(subtitle)
-        header.addStretch()
+        self.stats_label = QLabel("")
+        self.stats_label.setStyleSheet(
+            "color: #475569; font-size: 11px; padding: 6px 12px;"
+            " background: #0d1117; border-top: 1px solid #1e293b;")
+        ml.addWidget(self.stats_label)
+
+    def _build_toolbar(self):
+        bar = QFrame()
+        bar.setStyleSheet(
+            "QFrame { background: #0d1117; border-bottom: 1px solid #1e293b; }")
+        bar.setFixedHeight(48)
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(16, 0, 16, 0)
+        row.setSpacing(10)
+
+        title = QLabel("Artifacts")
+        title.setStyleSheet(
+            "color: #e2e8f0; font-size: 14px; font-weight: 700;"
+            " background: transparent; border: none;")
+        row.addWidget(title)
+        row.addStretch()
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search artifacts...")
+        self.search_input.setPlaceholderText("Filter structure and items...")
         self.search_input.setFixedWidth(260)
+        self.search_input.setFixedHeight(30)
         self.search_input.textChanged.connect(self._filter_apps)
-        header.addWidget(self.search_input)
+        row.addWidget(self.search_input)
 
         self.refresh_btn = QPushButton("Extract All")
         self.refresh_btn.setFixedWidth(110)
-        # Flat by design, but its text has to be themed: it sits on the page
-        # background with no fill, and the inherited white was invisible once
-        # that background stopped being near-black.
+        self.refresh_btn.setFixedHeight(30)
         self.refresh_btn.setStyleSheet(
-            "QPushButton { background: transparent; border: none; color: #e2e8f0;"
-            " font-weight: 600; font-size: 13px; padding: 6px 10px; }"
-            "QPushButton:hover { color: #3b82f6; }"
+            "QPushButton { background: #2563eb; border: none; color: white;"
+            " font-weight: 600; font-size: 12px; border-radius: 6px; padding: 0; }"
+            "QPushButton:hover { background: #1d4ed8; }"
+            "QPushButton:disabled { background: #1e293b; color: #475569; }"
         )
         self.refresh_btn.clicked.connect(self._on_refresh)
-        header.addWidget(self.refresh_btn)
-        outer.addLayout(header)
+        row.addWidget(self.refresh_btn)
+        return bar
 
+    def _build_progress_bar(self):
         self.progress_frame = QFrame()
-        self.progress_frame.setStyleSheet("background: #111827; border-radius: 8px;")
+        self.progress_frame.setStyleSheet(
+            "QFrame { background: #111827; border-bottom: 1px solid #1e293b; }")
         pf_layout = QHBoxLayout(self.progress_frame)
-        pf_layout.setContentsMargins(16, 10, 16, 10)
+        pf_layout.setContentsMargins(16, 6, 16, 6)
         self.progress_label = QLabel("Connecting to device...")
-        self.progress_label.setStyleSheet("color: #94a3b8; font-size: 12px; background: transparent; border: none;")
+        self.progress_label.setStyleSheet(
+            "color: #94a3b8; font-size: 11px; background: transparent; border: none;")
         pf_layout.addWidget(self.progress_label)
         pf_layout.addStretch()
         self.progress_frame.setVisible(False)
-        outer.addWidget(self.progress_frame)
+        return self.progress_frame
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll_content = QWidget()
-        self.app_grid_layout = QGridLayout(scroll_content)
-        self.app_grid_layout.setSpacing(12)
-        self.app_grid_layout.setContentsMargins(0, 0, 0, 0)
+    def _build_overview(self):
+        """The centre pane before a category is chosen."""
+        page = QWidget()
+        page.setStyleSheet("background: #0a0e17;")
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(48, 48, 48, 48)
+        outer.setSpacing(10)
+        outer.addStretch()
 
-        self.app_icon_widgets = {}
-        for i, app_def in enumerate(APP_DEFS):
-            icon = AppIconWidget(app_def, 0)
-            icon.clicked.connect(self._on_app_clicked)
-            row = i // 5
-            col = i % 5
-            self.app_grid_layout.addWidget(icon, row, col)
-            self.app_icon_widgets[app_def["category"]] = icon
+        heading = QLabel("Choose a category in the structure")
+        heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        heading.setStyleSheet(
+            "color: #94a3b8; font-size: 16px; font-weight: 600;"
+            " background: transparent; border: none;")
+        outer.addWidget(heading)
 
-        scroll.setWidget(scroll_content)
-        outer.addWidget(scroll, 1)
-
-        self.stats_label = QLabel("")
-        self.stats_label.setStyleSheet("color: #475569; font-size: 11px; padding: 8px 0; background: transparent; border: none;")
-        outer.addWidget(self.stats_label)
-
+        body = QLabel(
+            "Artifacts are grouped the way an analysis is read, not the way the "
+            "extractor is written. Counts fill in as extraction runs, and the "
+            "properties of whatever you select appear on the right.\n\n"
+            "A leaf shown grey with a dash is a section this build does not "
+            "collect yet; it is listed rather than hidden so the gap is visible.")
+        body.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        body.setWordWrap(True)
+        body.setStyleSheet(
+            "color: #475569; font-size: 12px; background: transparent; border: none;")
+        outer.addWidget(body)
+        outer.addStretch()
         return page
 
     def _build_conversation_view(self):
@@ -2860,14 +2894,17 @@ class ArtifactsPage(QWidget):
         return page
 
     def _filter_apps(self, text):
-        query = text.strip().lower()
-        for cat, widget in self.app_icon_widgets.items():
-            if not query:
-                widget.setVisible(True)
-            else:
-                app_def = widget.app_def
-                match = query in app_def["name"].lower() or query in app_def["desc"].lower()
-                widget.setVisible(match)
+        """The toolbar search drives the structure tree, not a grid of tiles."""
+        self.structure.search.setText(text or "")
+
+    def _open_category(self, category: str):
+        """A leaf in the structure tree was chosen."""
+        app_def = next((d for d in APP_DEFS if d["category"] == category), None)
+        if app_def is None:
+            self.properties_pane.clear(
+                "No extractor is registered for this category in this build.")
+            return
+        self._on_app_clicked(app_def)
 
     def _on_app_clicked(self, app_def):
         self._current_app = app_def
@@ -2875,6 +2912,9 @@ class ArtifactsPage(QWidget):
         self._gallery_prev_mode = "table"
         category = app_def["category"]
         app_type = app_def.get("type", "list")
+
+        self.structure.select_category(category)
+        self._show_category_properties(app_def)
 
         if category == "SMS":
             self._show_sms_conversations()
@@ -3000,6 +3040,7 @@ class ArtifactsPage(QWidget):
         for column in range(1, len(headers)):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         table.setMinimumHeight(480)
+        self._wire_table(table, calls)
         self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, table)
 
         self.stacked.setCurrentIndex(1)
@@ -3097,6 +3138,7 @@ class ArtifactsPage(QWidget):
             header_view.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
             header_view.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
             table.setMinimumHeight(420)
+            self._wire_table(table, ordered)
             self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, table)
 
         if backups:
@@ -3267,6 +3309,7 @@ class ArtifactsPage(QWidget):
             for column in range(1, len(headers)):
                 hv.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
             table.setMinimumHeight(min(420, 60 + 28 * len(ordered_chats)))
+            self._wire_table(table, ordered_chats)
             self.conv_list_layout.insertWidget(
                 self.conv_list_layout.count() - 1, table)
 
@@ -3326,6 +3369,7 @@ class ArtifactsPage(QWidget):
                                  (5, QHeaderView.ResizeMode.ResizeToContents)):
                 hv.setSectionResizeMode(column, mode)
             table.setMinimumHeight(460)
+            self._wire_table(table, messages)
             self.conv_list_layout.insertWidget(
                 self.conv_list_layout.count() - 1, table)
 
@@ -3762,6 +3806,7 @@ class ArtifactsPage(QWidget):
                     view_btn.clicked.connect(lambda checked, p=remote_path, t=media_type: self._open_media_viewer(p, t))
                     item_layout.addWidget(view_btn)
 
+                self._wire_row(item_frame, item)
                 self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, item_frame)
 
         self.stacked.setCurrentIndex(1)
@@ -4139,6 +4184,7 @@ class ArtifactsPage(QWidget):
                     view_btn.clicked.connect(lambda checked, p=remote_path, t="PDF": self._open_media_viewer(p, t))
                     item_layout.addWidget(view_btn)
 
+                self._wire_row(item_frame, item)
                 self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, item_frame)
 
         self.stacked.setCurrentIndex(1)
@@ -4264,6 +4310,7 @@ class ArtifactsPage(QWidget):
             summary_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             item_layout.addWidget(summary_lbl, 1)
 
+            self._wire_row(item_frame, item_data)
             self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, item_frame)
 
         self.stacked.setCurrentIndex(1)
@@ -4334,6 +4381,56 @@ class ArtifactsPage(QWidget):
         self.conv_stack.setCurrentIndex(0)
         self._render_table_view(app_def)
         self.stacked.setCurrentIndex(1)
+
+    # -- properties ---------------------------------------------------------
+
+    def _show_category_properties(self, app_def):
+        category = app_def.get("category", "")
+        items = [a for a in self.all_artifacts if a.get("category") == category]
+        media = sum(1 for a in items if a.get("type") in MEDIA_TYPES)
+        self.properties_pane.show_summary(
+            app_def.get("name", category), category, len(items), media)
+
+    def _show_artifact_properties(self, artifact):
+        if artifact:
+            self.properties_pane.show_item(artifact)
+
+    def _wire_row(self, frame, artifact):
+        """Make a list row selectable: a click fills the properties pane."""
+        frame.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        def _clicked(_event, _artifact=artifact, _frame=frame):
+            self._select_row(_frame)
+            self._show_artifact_properties(_artifact)
+
+        frame.mousePressEvent = _clicked
+
+    def _select_row(self, frame) -> None:
+        """Outline the chosen row so the properties pane has a visible subject."""
+        previous = getattr(self, "_selected_row", None)
+        if previous is not None and previous is not frame:
+            try:
+                previous.setStyleSheet(previous.property("rowStyle") or "")
+            except RuntimeError:
+                pass
+        frame.setProperty("rowStyle", frame.styleSheet())
+        frame.setStyleSheet(
+            frame.styleSheet()
+            + " QFrame { border: 1px solid #2563eb; }")
+        self._selected_row = frame
+
+    def _wire_table(self, table, items):
+        """Selecting a table row shows the artifact behind that row."""
+        table.setSelectionBehavior(
+            table.SelectionBehavior.SelectRows)
+        table.setSelectionMode(table.SelectionMode.SingleSelection)
+
+        def _changed(_rows=None, _items=items, _table=table):
+            row = _table.currentRow()
+            if 0 <= row < len(_items):
+                self._show_artifact_properties(_items[row])
+
+        table.itemSelectionChanged.connect(_changed)
 
     def _render_table_view(self, app_def) -> None:
         category = app_def.get("category", "")
@@ -4408,10 +4505,12 @@ class ArtifactsPage(QWidget):
         self.all_artifacts.append(artifact)
         self._persist_artifacts([artifact])
 
-        widget = self.app_icon_widgets.get("Screenshots")
-        if widget is not None:
-            count = sum(1 for a in self.all_artifacts if a.get("category") == "Screenshots")
-            widget.update_count(count)
+        # A capture changes one category's count; refresh the whole tree so the
+        # Screenshots leaf does not lag behind the artifact list.
+        self.structure.set_counts({
+            app_def["category"]: sum(1 for a in self.all_artifacts
+                                     if a.get("category") == app_def["category"])
+            for app_def in APP_DEFS})
 
         self._flash_capture(f"Saved {target.name}")
 
@@ -4438,6 +4537,23 @@ class ArtifactsPage(QWidget):
         display_name = contact if contact else phone if phone else "Unknown"
         messages = conversation.get("messages", [])
 
+        # The properties pane follows the conversation into the transcript, so
+        # the right-hand side never shows a stale record from the list behind.
+        first = messages[0] if messages else {}
+        self.properties_pane.show_item({
+            "type": "Conversation",
+            "category": (self._current_app or {}).get("category", ""),
+            "summary": display_name,
+            "timestamp": first.get("date", ""),
+            "_data": {
+                "contact_name": contact,
+                "phone": phone,
+                "message_count": len(messages),
+                "first_message": first.get("date", ""),
+                "last_message": messages[-1].get("date", "") if messages else "",
+            },
+        })
+
         self.chat_contact_name.setText(display_name)
         self.chat_msg_count.setText(f"{len(messages)} messages")
 
@@ -4461,7 +4577,7 @@ class ArtifactsPage(QWidget):
         sb.setValue(sb.maximum())
 
     def _go_back_to_grid(self):
-        # The gallery is reachable from a category as well as from the app grid,
+        # The gallery is reachable from a category as well as from the overview,
         # so "back" has to know where it came from. Reading a stale return index
         # made a click land on the page already open, which looked like a dead
         # arrow.
@@ -4473,6 +4589,8 @@ class ArtifactsPage(QWidget):
                 self._render_current_view()
             return
         self.stacked.setCurrentIndex(0)
+        self.properties_pane.clear(
+            "Select a category in the structure, then an item.")
 
     def _go_back_to_conversations(self):
         self.stacked.setCurrentIndex(1)
@@ -4513,12 +4631,11 @@ class ArtifactsPage(QWidget):
         self._worker.start()
 
     def _on_counts_updated(self, counts):
-        for app_def in APP_DEFS:
-            cat = app_def["category"]
-            count = counts.get(cat, 0)
-            if cat in self.app_icon_widgets:
-                self.app_icon_widgets[cat].update_count(count)
-        total = sum(counts.values())
+        counts = counts or {}
+        self.structure.set_counts(
+            {app_def["category"]: counts.get(app_def["category"], 0)
+             for app_def in APP_DEFS})
+        total = sum(int(v or 0) for v in counts.values())
         self.progress_label.setText(f"Extracting... {total} artifacts found so far")
 
     def _on_finished(self, results):
@@ -4529,19 +4646,24 @@ class ArtifactsPage(QWidget):
         self._contacts = [a for a in results if a.get("category") == "Contacts"]
         self._build_sms_conversations(results)
 
+        counts = {}
         for app_def in APP_DEFS:
             cat = app_def["category"]
-            count = sum(1 for a in results if a.get("category") == cat)
-            if cat in self.app_icon_widgets:
-                self.app_icon_widgets[cat].update_count(count)
+            counts[cat] = sum(1 for a in results if a.get("category") == cat)
+        self.structure.set_counts(counts)
 
         total = len(results)
-        sms_count = sum(1 for a in results if a.get("category") == "SMS")
-        call_count = sum(1 for a in results if a.get("category") == "Calls")
-        contact_count = sum(1 for a in results if a.get("category") == "Contacts")
+        sms_count = counts.get("SMS", 0)
+        call_count = counts.get("Calls", 0)
+        contact_count = counts.get("Contacts", 0)
         self.stats_label.setText(
             f"{total} total artifacts  |  {sms_count} SMS  |  {call_count} calls  |  {contact_count} contacts"
         )
+
+        # Re-read the open category so its property summary reflects the new
+        # counts instead of the zeroes it showed while extraction was running.
+        if self._current_app:
+            self._show_category_properties(self._current_app)
 
         self._persist_artifacts(results)
 
