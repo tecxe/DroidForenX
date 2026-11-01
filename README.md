@@ -188,7 +188,7 @@ python -m unittest `
 manual device probes (`test_full_adb.py`, `test_quick.py`, `test_deep.py`) that
 run on import and need a connected handset, not a test runner.
 
-![Test suite finishing with 384 tests passed and two skipped](docs/images/tests.png)
+![Test suite finishing with 437 tests passed and one skipped](docs/images/tests.png)
 
 The run above is v1.0.30: 437 tests with one skip — 16 for case editing and
 deletion, 30 for WhatsApp parsing, deleted-entry recovery and freelist salvage,

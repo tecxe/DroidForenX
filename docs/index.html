@@ -119,11 +119,11 @@
 </nav>
 
 <section class="hero">
-    <div class="badge"><span class="dot"></span> v1.0.26 - Latest Release</div>
+    <div class="badge"><span class="dot"></span> v1.0.30 - Latest Release</div>
     <h1>Professional Mobile<br>Digital Forensics</h1>
-    <p>Standalone desktop toolkit for Android device forensic analysis. 4-stage forensic workflow, 24 artifact loaders, selectable Raw (dd) / ZIP image output, court-ready reporting. Single .exe, no installation.</p>
+    <p>Standalone desktop toolkit for Android device forensic analysis. 4-stage forensic workflow, 24 artifact loaders, WhatsApp and Telegram without root, selectable Raw (dd) / ZIP image output, court-ready reporting. Single .exe, no installation.</p>
     <div class="hero-btns">
-        <a class="btn btn-primary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.26/DroidForenX.exe" download>
+        <a class="btn btn-primary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.30/DroidForenX.exe" download>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Download DroidForenX.exe
         </a>
@@ -135,15 +135,15 @@
 </section>
 
 <div class="stats">
-    <div class="stat"><div class="stat-val">62.9 MB</div><div class="stat-label">File Size</div></div>
+    <div class="stat"><div class="stat-val">61.0 MB</div><div class="stat-label">File Size</div></div>
     <div class="stat"><div class="stat-val">4</div><div class="stat-label">Forensic Stages</div></div>
     <div class="stat"><div class="stat-val">24</div><div class="stat-label">Artifact Loaders</div></div>
     <div class="stat"><div class="stat-val">0</div><div class="stat-label">Dependencies Required</div></div>
 </div>
 
 <p style="text-align:center;color:var(--muted);font-size:12px;margin-top:14px;padding:0 24px">
-    14 of 24 loaders are device-verified on an unrooted Android 14 handset. The other 10 read app-private
-    paths and are reported as NOT_ACCESSIBLE without root &mdash; never silently dropped.
+    14 of 24 loaders are device-verified on an unrooted Android 14 handset. Seven read app-private paths and
+    are reported as NOT_ACCESSIBLE without root; the rest report their own state &mdash; nothing is silently dropped.
 </p>
 
 <section class="section" id="features">
@@ -190,6 +190,26 @@
             <div class="feature-icon" style="background:rgba(16,185,129,0.15);color:var(--green)">&#128247;</div>
             <h3>Thumbnail Grid &amp; Screen Capture</h3>
             <p>Media categories open as a Cellebrite-style thumbnail grid at three tile sizes, pulled in the background and cached for display only. Capture Screen takes a PNG of whatever is on the handset over <code>adb exec-out screencap</code>, hashes it, and files it as a finding &mdash; the way to preserve a conversation the tool cannot read natively.</p>
+        </div>
+        <div class="feature">
+            <div class="feature-icon" style="background:rgba(56,189,248,0.15);color:#38bdf8">&#128172;</div>
+            <h3>WhatsApp Without Root</h3>
+            <p>Chat exports, a plain <code>msgstore.db</code>, crypt15 inventory for the encrypted store, and notification previews &mdash; with WhatsApp's own "this message was deleted" markers and <code>.trashed-*</code> recovery kept as findings. What the handset will not expose is listed as unreachable instead of reported as zero.</p>
+        </div>
+        <div class="feature">
+            <div class="feature-icon" style="background:rgba(14,165,233,0.15);color:#0ea5e9">&#9992;&#65039;</div>
+            <h3>Telegram, Read Honestly</h3>
+            <p>Chats, groups, channels and media from a Telegram export or a readable cache, plus notifications captured on the device. Four artifact view modes &mdash; table, timeline, thread and raw &mdash; let the same evidence be read the way the question needs it.</p>
+        </div>
+        <div class="feature">
+            <div class="feature-icon" style="background:rgba(168,85,247,0.15);color:#a855f7">&#128421;&#65039;</div>
+            <h3>Physical Image Without Root</h3>
+            <p>BootROM/EDL detection, a driven extraction engine and the validation that follows it, for handsets that can be imaged at the chip level. Every image is hashed and re-checked, and the route taken is written into the report.</p>
+        </div>
+        <div class="feature">
+            <div class="feature-icon" style="background:rgba(239,68,68,0.15);color:#ef4444">&#128221;</div>
+            <h3>Cases You Can Correct</h3>
+            <p>A mistyped case number, title, investigator or status is fixable from Case Management, and a case opened by mistake can be deleted &mdash; with a separate question about whether the evidence folder goes with it. Folders are left alone unless you say otherwise.</p>
         </div>
         <div class="feature">
             <div class="feature-icon" style="background:rgba(245,158,11,0.15);color:var(--orange)">&#127991;&#65039;</div>
@@ -245,17 +265,17 @@
             </div>
             <div class="info-card">
                 <div class="label">File Size</div>
-                <div class="value">62.9 MB</div>
+                <div class="value">61.0 MB</div>
             </div>
             <div class="info-card">
                 <div class="label">Version</div>
-                <div class="value">v1.0.26</div>
+                <div class="value">v1.0.30</div>
             </div>
         </div>
 
         <h3 style="margin-bottom:12px">SHA-256 Hash</h3>
         <div class="hash-box">
-            <code id="hash">9c89c8d4f97bd4d77612a4e97798394553c616410528fceaf5b33041b63622e4</code>
+            <code id="hash">f8a03c82f9ec781e256aae580c1617b53ab9c872d5947351c43fe6c54b127fd1</code>
             <button class="copy-btn" onclick="copyHash()">Copy Hash</button>
         </div>
 
@@ -297,7 +317,7 @@
 </section>
 
 <footer>
-    <p>DroidForenX v1.0.26 &middot; Built by <a href="https://github.com/tecxe" target="_blank">tecxe</a> &middot; <a href="https://github.com/tecxe/DroidForenX" target="_blank">Source on GitHub</a></p>
+    <p>DroidForenX v1.0.30 &middot; Built by <a href="https://github.com/tecxe" target="_blank">tecxe</a> &middot; <a href="https://github.com/tecxe/DroidForenX" target="_blank">Source on GitHub</a></p>
 </footer>
 
 <script>
