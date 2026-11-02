@@ -2737,33 +2737,111 @@ class ArtifactsPage(QWidget):
         return self.progress_frame
 
     def _build_overview(self):
-        """The centre pane before a category is chosen."""
+        """The centre pane before a category is chosen.
+
+        This used to be two centred paragraphs on an empty page, which told an
+        examiner what the tool was thinking but not what to do. It is now a
+        card: what this pane is for, one sentence of orientation, and buttons
+        straight into the five categories most cases start with. The tree and
+        the properties pane keep their own empty states, so no panel is ever a
+        bare rectangle with no explanation.
+        """
         page = QWidget()
         page.setStyleSheet("background: #0a0e17;")
         outer = QVBoxLayout(page)
-        outer.setContentsMargins(48, 48, 48, 48)
-        outer.setSpacing(10)
-        outer.addStretch()
+        outer.setContentsMargins(40, 32, 40, 32)
+        outer.setSpacing(0)
+        outer.addStretch(1)
 
-        heading = QLabel("Choose a category in the structure")
-        heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        card = QFrame()
+        card.setObjectName("overviewCard")
+        card.setMaximumWidth(660)
+        card.setStyleSheet(
+            "QFrame#overviewCard { background: #111827; border: 1px solid #1e293b;"
+            " border-radius: 14px; }"
+            "QLabel { background: transparent; border: none; }")
+        inner = QVBoxLayout(card)
+        inner.setContentsMargins(34, 30, 34, 30)
+        inner.setSpacing(0)
+
+        eyebrow = QLabel("ARTIFACT WORKSPACE")
+        eyebrow.setStyleSheet(
+            "color: #60a5fa; font-size: 10px; font-weight: 700;"
+            " letter-spacing: 2px; background: transparent; border: none;")
+        inner.addWidget(eyebrow)
+        inner.addSpacing(8)
+
+        heading = QLabel("Start with a section")
         heading.setStyleSheet(
-            "color: #94a3b8; font-size: 16px; font-weight: 600;"
+            "color: #e2e8f0; font-size: 19px; font-weight: 700;"
             " background: transparent; border: none;")
-        outer.addWidget(heading)
+        inner.addWidget(heading)
+        inner.addSpacing(6)
 
         body = QLabel(
-            "Artifacts are grouped the way an analysis is read, not the way the "
-            "extractor is written. Counts fill in as extraction runs, and the "
-            "properties of whatever you select appear on the right.\n\n"
-            "A leaf shown grey with a dash is a section this build does not "
-            "collect yet; it is listed rather than hidden so the gap is visible.")
-        body.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            "The structure on the left is the whole device, grouped the way an "
+            "analysis is read. Chats open as threads, pictures open as a grid, "
+            "and everything else is a plain table of the fields the extractor "
+            "recorded. Whatever you select fills the inspector on the right.")
         body.setWordWrap(True)
         body.setStyleSheet(
-            "color: #475569; font-size: 12px; background: transparent; border: none;")
-        outer.addWidget(body)
-        outer.addStretch()
+            "color: #94a3b8; font-size: 12px; background: transparent;"
+            " border: none;")
+        inner.addWidget(body)
+        inner.addSpacing(22)
+
+        quick = QLabel("JUMP STRAIGHT IN")
+        quick.setStyleSheet(
+            "color: #64748b; font-size: 9px; font-weight: 700;"
+            " letter-spacing: 1.5px; background: transparent; border: none;")
+        inner.addWidget(quick)
+        inner.addSpacing(8)
+
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(8)
+        shortcuts = [
+            ("WhatsApp", "WhatsApp"),
+            ("Text Messages", "SMS"),
+            ("Call Log", "Calls"),
+            ("Media", "Media"),
+            ("Documents", "Documents"),
+            ("Contacts", "Contacts"),
+        ]
+        for index, (label, category) in enumerate(shortcuts):
+            button = QPushButton(label)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setFixedHeight(32)
+            button.setStyleSheet(
+                "QPushButton { background: #1e293b; color: #e2e8f0;"
+                " border: 1px solid #334155; border-radius: 8px;"
+                " font-size: 12px; font-weight: 600; padding: 0 14px; }"
+                "QPushButton:hover { background: #334155; border-color: #475569; }"
+                "QPushButton:pressed { background: #1e3a8a; }")
+            button.clicked.connect(
+                lambda _checked=False, key=category: self._open_category(key))
+            grid.addWidget(button, index // 3, index % 3)
+        inner.addLayout(grid)
+        inner.addSpacing(20)
+
+        footnote = QLabel(
+            "Counts fill in as extraction runs. A grey leaf with a dash is a "
+            "section this build does not collect yet \u2014 listed, not hidden, "
+            "so the gap stays visible.")
+        footnote.setWordWrap(True)
+        footnote.setStyleSheet(
+            "color: #475569; font-size: 10px; background: transparent;"
+            " border: none;")
+        inner.addWidget(footnote)
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addStretch(1)
+        row.addWidget(card)
+        row.addStretch(1)
+        outer.addLayout(row)
+        outer.addStretch(1)
         return page
 
     def _build_conversation_view(self):

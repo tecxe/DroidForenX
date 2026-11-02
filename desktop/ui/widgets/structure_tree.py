@@ -13,8 +13,12 @@ of reading the evidence honestly.
 """
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QPushButton,
-                             QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+from PyQt6.QtGui import QBrush, QColor
+from PyQt6.QtWidgets import (QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+                             QPushButton, QTreeWidget, QTreeWidgetItem,
+                             QTreeWidgetItemIterator, QVBoxLayout, QWidget)
+
+from ..theme import colour, theme
 
 #: ``(section, [(label, category) | (label, [(label, category), ...])])``.
 #: ``category`` is the key used by :data:`desktop.ui.pages.artifacts_page.APP_DEFS`;
@@ -65,6 +69,12 @@ STRUCTURE_SPEC = [
 COL_NAME = 0
 COL_COUNT = 1
 
+#: Role carrying the dark-authored colour an item was painted with. Item
+#: brushes are not stylesheets, so the theme manager cannot translate them
+#: after the fact; keeping the source here lets the tree repaint itself when
+#: the mode changes instead of staying dark on a white panel.
+ROLE_COLOUR = 0x0101
+
 
 class StructureTree(QWidget):
     """A category tree with counts, searchable, emitting the chosen category."""
@@ -74,39 +84,49 @@ class StructureTree(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("structureTree")
+        self.setMinimumWidth(210)
         self.setStyleSheet(
             "#structureTree { background: #0d1117; border-right: 1px solid #1e293b; }"
             "QLabel { background: transparent; border: none; }"
             "QLineEdit { background: #111827; border: 1px solid #1e293b;"
-            " border-radius: 6px; color: #e2e8f0; font-size: 11px; padding: 4px 8px; }"
+            " border-radius: 7px; color: #e2e8f0; font-size: 11px;"
+            " padding: 5px 9px; }"
+            "QLineEdit:focus { border: 1px solid #2563eb; }"
             "QTreeWidget { background: transparent; border: none; color: #cbd5e1;"
-            " font-size: 12px; }"
-            "QTreeWidget::item { height: 24px; border-radius: 4px; }"
+            " font-size: 12px; outline: 0; }"
+            "QTreeWidget::item { height: 26px; border-radius: 5px; }"
             "QTreeWidget::item:hover { background: #1e293b; }"
-            "QTreeWidget::item:selected { background: #1e3a8a; color: #ffffff; }"
+            "QTreeWidget::item:selected { background: #1e3a8a; color: #e2e8f0; }"
+            "QTreeWidget::branch { background: transparent; }"
             "QHeaderView::section { background: #0d1117; border: none; color: #475569; }")
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
+        # -- header: the pane's name, and the one action that shortens a
+        #    long tree. The old control was a bare en dash, which read as a
+        #    broken minus sign rather than "fold this up".
         bar = QWidget()
         bar_layout = QHBoxLayout(bar)
-        bar_layout.setContentsMargins(10, 8, 10, 6)
+        bar_layout.setContentsMargins(12, 10, 12, 8)
         bar_layout.setSpacing(6)
-        self.title = QLabel("Structure")
+        self.title = QLabel("STRUCTURE")
         self.title.setStyleSheet(
-            "color: #94a3b8; font-size: 11px; font-weight: 700;"
+            "color: #94a3b8; font-size: 10px; font-weight: 700;"
             " letter-spacing: 1px; background: transparent; border: none;")
         bar_layout.addWidget(self.title)
         bar_layout.addStretch()
-        self.collapse_btn = QPushButton("\u2013")
-        self.collapse_btn.setFixedSize(20, 20)
+        self.collapse_btn = QPushButton("Collapse")
+        self.collapse_btn.setFixedHeight(22)
+        self.collapse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.collapse_btn.setToolTip("Collapse every section")
         self.collapse_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #64748b; border: none;"
-            " font-size: 13px; padding: 0; }"
-            "QPushButton:hover { color: #e2e8f0; }")
+            "QPushButton { background: #111827; color: #94a3b8;"
+            " border: 1px solid #1e293b; border-radius: 11px; font-size: 10px;"
+            " font-weight: 600; padding: 0 10px; }"
+            "QPushButton:hover { background: #1e293b; color: #e2e8f0;"
+            " border-color: #334155; }")
         self.collapse_btn.clicked.connect(self.collapse_all)
         bar_layout.addWidget(self.collapse_btn)
         outer.addWidget(bar)
@@ -114,42 +134,44 @@ class StructureTree(QWidget):
         self.search = QLineEdit()
         self.search.setPlaceholderText("Filter structure...")
         self.search.setClearButtonEnabled(True)
+        self.search.setFixedHeight(28)
         self.search.textChanged.connect(self._apply_filter)
         search_row = QWidget()
         search_layout = QHBoxLayout(search_row)
-        search_layout.setContentsMargins(8, 0, 8, 8)
+        search_layout.setContentsMargins(12, 0, 12, 10)
         search_layout.addWidget(self.search)
         outer.addWidget(search_row)
 
         self.tree = QTreeWidget()
         self.tree.setColumnCount(2)
         self.tree.setHeaderHidden(True)
-        self.tree.setIndentation(14)
+        self.tree.setIndentation(16)
         self.tree.setRootIsDecorated(True)
         self.tree.setUniformRowHeights(True)
-        self.tree.setColumnWidth(COL_COUNT, 46)
+        self.tree.setAnimated(True)
+        self.tree.setColumnWidth(COL_COUNT, 52)
         self.tree.header().setStretchLastSection(False)
-        self.tree.header().setSectionResizeMode(COL_NAME, self._stretch())
+        self.tree.header().setSectionResizeMode(COL_NAME, QHeaderView.ResizeMode.Stretch)
         self.tree.itemClicked.connect(self._on_item_clicked)
         self.tree.itemActivated.connect(self._on_item_clicked)
         outer.addWidget(self.tree, 1)
 
         self.footer = QLabel("No artifact loaded")
-        self.footer.setStyleSheet(
-            "color: #475569; font-size: 10px; padding: 6px 10px;"
-            " background: transparent; border: none;")
         self.footer.setWordWrap(True)
+        self.footer.setStyleSheet(
+            "color: #64748b; font-size: 10px; padding: 8px 12px;"
+            " background: #0d1117; border-top: 1px solid #1e293b;")
         outer.addWidget(self.footer)
 
         #: category -> leaf item, so extraction counts can land on the tree.
         self._leaves: dict[str, QTreeWidgetItem] = {}
         self._build()
 
-    # -- construction -------------------------------------------------------
+        # Brushes are painted by hand, so a mode switch has to be answered
+        # here; the stylesheet side of the pane is handled by ThemeManager.
+        theme.changed.connect(self._retint)
 
-    def _stretch(self):
-        from PyQt6.QtWidgets import QHeaderView
-        return QHeaderView.ResizeMode.Stretch
+    # -- construction -------------------------------------------------------
 
     def _build(self):
         for section, children in STRUCTURE_SPEC:
@@ -159,13 +181,13 @@ class StructureTree(QWidget):
             font = top.font(COL_NAME)
             font.setBold(True)
             top.setFont(COL_NAME, font)
-            top.setForeground(COL_NAME, self._colour("#e2e8f0"))
+            self._paint(top, COL_NAME, "#e2e8f0")
             for label, target in children:
                 if isinstance(target, list):
                     group = QTreeWidgetItem(top)
                     group.setText(COL_NAME, label)
                     group.setFlags(Qt.ItemFlag.ItemIsEnabled)
-                    group.setForeground(COL_NAME, self._colour("#94a3b8"))
+                    self._paint(group, COL_NAME, "#94a3b8")
                     for sub_label, sub_category in target:
                         self._add_leaf(group, sub_label, sub_category)
                 else:
@@ -180,13 +202,13 @@ class StructureTree(QWidget):
             # findings means zero data on the handset.
             leaf.setFlags(Qt.ItemFlag.NoItemFlags)
             leaf.setText(COL_COUNT, "\u2013")
-            leaf.setForeground(COL_NAME, self._colour("#475569"))
+            self._paint(leaf, COL_NAME, "#475569")
             leaf.setToolTip(COL_NAME, "Not collected by this build")
             leaf.setData(COL_NAME, Qt.ItemDataRole.UserRole, None)
             return
         leaf.setData(COL_NAME, Qt.ItemDataRole.UserRole, category)
         leaf.setText(COL_COUNT, "0")
-        leaf.setForeground(COL_COUNT, self._colour("#64748b"))
+        self._paint(leaf, COL_COUNT, "#64748b")
         leaf.setTextAlignment(COL_COUNT, Qt.AlignmentFlag.AlignRight
                               | Qt.AlignmentFlag.AlignVCenter)
         self._leaves[category] = leaf
@@ -194,14 +216,21 @@ class StructureTree(QWidget):
     # -- public API ---------------------------------------------------------
 
     def set_counts(self, counts: dict) -> None:
+        filled = 0
         for category, leaf in self._leaves.items():
             count = int(counts.get(category, 0) or 0)
+            if count:
+                filled += 1
             leaf.setText(COL_COUNT, f"{count:,}")
-            leaf.setForeground(
-                COL_COUNT,
-                self._colour("#60a5fa" if count else "#475569"))
+            self._paint(leaf, COL_COUNT, "#60a5fa" if count else "#475569")
         total = sum(int(v or 0) for v in (counts or {}).values())
-        self.footer.setText(f"{total:,} items across {len(self._leaves)} categories")
+        if total:
+            self.footer.setText(
+                f"{total:,} items \u00b7 {filled} of {len(self._leaves)} "
+                "categories hold data")
+        else:
+            self.footer.setText(
+                "No artifact loaded \u2014 counts fill in as extraction runs")
 
     def select_category(self, category: str) -> None:
         leaf = self._leaves.get(category)
@@ -237,7 +266,17 @@ class StructureTree(QWidget):
             node.setExpanded(True)
         return visible or match
 
-    @staticmethod
-    def _colour(hex_code: str):
-        from PyQt6.QtGui import QBrush, QColor
-        return QBrush(QColor(hex_code))
+    def _paint(self, item, column: int, dark_hex: str) -> None:
+        item.setData(column, ROLE_COLOUR, dark_hex)
+        item.setForeground(column, QBrush(QColor(colour(dark_hex))))
+
+    def _retint(self, _mode=None) -> None:
+        """Repaint every item that carries a remembered colour."""
+        iterator = QTreeWidgetItemIterator(self.tree)
+        while iterator.value() is not None:
+            item = iterator.value()
+            for column in (COL_NAME, COL_COUNT):
+                dark = item.data(column, ROLE_COLOUR)
+                if dark:
+                    item.setForeground(column, QBrush(QColor(colour(dark))))
+            iterator += 1

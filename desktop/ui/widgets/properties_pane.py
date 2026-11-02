@@ -6,12 +6,17 @@ grouped, with the raw keys the extractor wrote rather than a hand-picked few.
 
 The pane deliberately shows nothing it was not given. A missing field is
 omitted, not rendered as a dash, so an empty properties table means the record
-carries no metadata - not that the pane failed to load.
+carries no metadata - not that the pane failed to load. Before anything is
+selected it says so in plain words instead of leaving a blank black rectangle
+where an examiner expects an answer.
 """
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QTreeWidgetItem, QTreeWidget,
-                             QVBoxLayout, QWidget)
+from PyQt6.QtGui import QBrush, QColor
+from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QStackedWidget, QTreeWidgetItem,
+                             QTreeWidget, QVBoxLayout, QWidget)
+
+from ..theme import colour, theme
 
 #: Keys that describe the record itself and belong above the extractor's own.
 LEADING_FIELDS = (
@@ -63,6 +68,12 @@ FIELD_LABELS = {
 #: Values that are noise in a properties table.
 _HIDDEN_KEYS = {"_data", "_raw"}
 
+#: What the pane says before it has a subject.
+DEFAULT_EMPTY = (
+    "Pick a category in the structure on the left, then a row in the centre. "
+    "Every field the extractor recorded into that record is listed here, raw "
+    "key included, in the order it was written.")
+
 
 class PropertiesPane(QWidget):
     """Two-column property/value table for the selected artifact."""
@@ -70,16 +81,23 @@ class PropertiesPane(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("propertiesPane")
-        self.setMinimumWidth(220)
+        self.setMinimumWidth(230)
         self.setStyleSheet(
             "#propertiesPane { background: #0d1117; border-left: 1px solid #1e293b; }"
             "QLabel { background: transparent; border: none; }"
             "QTreeWidget { background: transparent; border: none; color: #cbd5e1;"
-            " font-size: 11px; }"
-            "QTreeWidget::item { height: 22px; }"
-            "QTreeWidget::item:selected { background: #1e3a8a; color: #ffffff; }"
+            " font-size: 11px; outline: 0; }"
+            "QTreeWidget::item { height: 24px; }"
+            "QTreeWidget::item:hover { background: #111827; }"
+            "QTreeWidget::item:selected { background: #1e3a8a; color: #e2e8f0; }"
+            "QTreeWidget::branch { background: transparent; }"
             "QHeaderView::section { background: #0d1117; border: none;"
-            " color: #475569; font-size: 10px; padding: 3px 6px; }")
+            " border-bottom: 1px solid #1e293b; color: #475569; font-size: 10px;"
+            " font-weight: 700; padding: 4px 6px; }")
+
+        #: The render that produced the current table, replayed after a theme
+        #: switch so hand-painted row brushes follow the mode.
+        self._last = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -87,42 +105,102 @@ class PropertiesPane(QWidget):
 
         bar = QWidget()
         bar_layout = QHBoxLayout(bar)
-        bar_layout.setContentsMargins(12, 8, 12, 6)
-        title = QLabel("Properties")
+        bar_layout.setContentsMargins(12, 10, 12, 8)
+        bar_layout.setSpacing(8)
+        title = QLabel("PROPERTIES")
         title.setStyleSheet(
-            "color: #94a3b8; font-size: 11px; font-weight: 700;"
+            "color: #94a3b8; font-size: 10px; font-weight: 700;"
             " letter-spacing: 1px; background: transparent; border: none;")
         bar_layout.addWidget(title)
         bar_layout.addStretch()
+        self.header_note = QLabel("")
+        self.header_note.setStyleSheet(
+            "color: #64748b; font-size: 10px; background: transparent; border: none;")
+        bar_layout.addWidget(self.header_note)
         outer.addWidget(bar)
 
+        self.stack = QStackedWidget()
+
+        self.empty = QWidget()
+        empty_layout = QVBoxLayout(self.empty)
+        empty_layout.setContentsMargins(24, 24, 24, 24)
+        empty_layout.setSpacing(8)
+        empty_layout.addStretch()
+
+        eyebrow = QLabel("INSPECTOR")
+        eyebrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        eyebrow.setStyleSheet(
+            "color: #60a5fa; font-size: 9px; font-weight: 700;"
+            " letter-spacing: 2px; background: transparent; border: none;")
+        empty_layout.addWidget(eyebrow)
+
+        self.empty_heading = QLabel("Nothing selected")
+        self.empty_heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_heading.setStyleSheet(
+            "color: #e2e8f0; font-size: 14px; font-weight: 700;"
+            " background: transparent; border: none;")
+        empty_layout.addWidget(self.empty_heading)
+
+        self.empty_body = QLabel(DEFAULT_EMPTY)
+        self.empty_body.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_body.setWordWrap(True)
+        self.empty_body.setStyleSheet(
+            "color: #64748b; font-size: 11px; background: transparent; border: none;")
+        empty_layout.addWidget(self.empty_body)
+
+        note = QLabel("Values are shown as recorded, never reformatted.")
+        note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        note.setWordWrap(True)
+        note.setStyleSheet(
+            "color: #475569; font-size: 10px; padding-top: 10px;"
+            " background: transparent; border: none;")
+        empty_layout.addWidget(note)
+
+        empty_layout.addStretch()
+        self.stack.addWidget(self.empty)
+
+        table_page = QWidget()
+        table_layout = QVBoxLayout(table_page)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+        table_layout.setSpacing(0)
         self.table = QTreeWidget()
         self.table.setColumnCount(2)
         self.table.setHeaderLabels(["Property", "Value"])
         self.table.setRootIsDecorated(True)
         self.table.setIndentation(8)
         self.table.setWordWrap(True)
-        self.table.setColumnWidth(0, 96)
+        self.table.setColumnWidth(0, 104)
         self.table.header().setStretchLastSection(True)
-        outer.addWidget(self.table, 1)
+        table_layout.addWidget(self.table, 1)
+        self.stack.addWidget(table_page)
 
-        self.hint = QLabel("Select an item to read its properties.")
+        outer.addWidget(self.stack, 1)
+
+        self.hint = QLabel("Read-only \u00b7 copied from the record")
         self.hint.setWordWrap(True)
         self.hint.setStyleSheet(
             "color: #475569; font-size: 10px; padding: 6px 12px;"
-            " background: transparent; border: none;")
+            " background: #0d1117; border-top: 1px solid #1e293b;")
         outer.addWidget(self.hint)
+
+        theme.changed.connect(self._restyle)
 
     # -- public API ---------------------------------------------------------
 
-    def clear(self, message: str = "Select an item to read its properties.") -> None:
+    def clear(self, message: str = DEFAULT_EMPTY) -> None:
         self.table.clear()
-        self.hint.setText(message)
+        self._last = None
+        self.header_note.setText("")
+        self.empty_heading.setText("Nothing selected")
+        self.empty_body.setText(message or DEFAULT_EMPTY)
+        self.hint.setText("Read-only \u00b7 copied from the record")
+        self.stack.setCurrentIndex(0)
 
     def show_summary(self, name: str, category: str, count: int,
                      media: int = 0) -> None:
         """The category itself, shown before any single item is chosen."""
         self.table.clear()
+        self._last = ("summary", (name, category, count, media))
         general = QTreeWidgetItem(self.table)
         general.setText(0, "Category")
         self._style_group(general)
@@ -135,14 +213,18 @@ class PropertiesPane(QWidget):
             self._add_row(general, label, value)
         general.setExpanded(True)
 
-        self.hint.setText("Select an item in the centre to read its fields.")
+        self.header_note.setText(f"{count:,} items")
+        self.hint.setText(
+            "Select an item in the centre to read its fields.")
+        self.stack.setCurrentIndex(1)
 
     def show_item(self, artifact: dict) -> None:
         """Render one artifact: its identity first, then every recorded field."""
         self.table.clear()
         if not artifact:
-            self.hint.setText("Select an item to read its properties.")
+            self.clear()
             return
+        self._last = ("item", artifact)
 
         data = artifact.get("_data") or {}
         general = QTreeWidgetItem(self.table)
@@ -177,11 +259,30 @@ class PropertiesPane(QWidget):
                 shown += self._add_row(other, FIELD_LABELS.get(key, _pretty(key)), value)
             other.setExpanded(True)
 
+        if shown == 1:
+            note = "1 field"
+        elif shown:
+            note = f"{shown} fields"
+        else:
+            note = "No metadata"
+        self.header_note.setText(note)
         self.hint.setText(
-            f"{shown} fields" if shown else "This record carries no metadata.")
+            "Values are shown exactly as the extractor wrote them."
+            if shown else "This record carries no metadata.")
         self.table.resizeColumnToContents(0)
+        self.stack.setCurrentIndex(1)
 
     # -- internals ----------------------------------------------------------
+
+    def _restyle(self, _mode=None) -> None:
+        """Replay the last render so hand-painted brushes pick up the mode."""
+        if not self._last:
+            return
+        kind, payload = self._last
+        if kind == "item":
+            self.show_item(payload)
+        else:
+            self.show_summary(*payload)
 
     def _add_row(self, parent, label: str, value) -> int:
         item = QTreeWidgetItem(parent)
@@ -201,8 +302,7 @@ class PropertiesPane(QWidget):
 
     @staticmethod
     def _brush(hex_code: str):
-        from PyQt6.QtGui import QBrush, QColor
-        return QBrush(QColor(hex_code))
+        return QBrush(QColor(colour(hex_code)))
 
 
 def _pretty(key: str) -> str:

@@ -531,6 +531,23 @@ def map_qss(text: str, mode: str | None = None) -> str:
     return _HEX_RE.sub(lambda m: SWATCH.get(m.group(0).lower(), m.group(0)), text)
 
 
+def colour(value: str, mode: str | None = None) -> str:
+    """Translate one dark-authored colour for the active mode.
+
+    A stylesheet is re-translated for us because the manager remembers the
+    source text. An item brush is painted by hand, so the view asks for the
+    resolved hex here and re-asks when ``theme.changed`` fires. Anything the
+    swatch does not know is returned untouched, which is what keeps brand
+    accents and the printed report's palette intact.
+    """
+    if not value:
+        return value
+    mode = mode or _current_mode
+    if mode != "light":
+        return value
+    return SWATCH.get(value.strip().lower(), value)
+
+
 def unmapped_colors(text: str) -> set[str]:
     """Hex values in ``text`` that have no light counterpart.
 
