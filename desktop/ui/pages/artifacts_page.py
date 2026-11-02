@@ -54,6 +54,51 @@ def _human_size(value) -> str:
     return f"{size:.1f} PB"
 
 
+#: Extension -> the label a file is filed under in Recent Items.
+_FILE_KINDS = {
+    ".jpg": "Image", ".jpeg": "Image", ".png": "Image", ".webp": "Image",
+    ".gif": "Image", ".bmp": "Image", ".heic": "Image", ".heif": "Image",
+    ".mp4": "Video", ".3gp": "Video", ".mkv": "Video", ".avi": "Video",
+    ".mov": "Video", ".webm": "Video",
+    ".mp3": "Audio", ".opus": "Audio", ".aac": "Audio", ".m4a": "Audio",
+    ".amr": "Audio", ".wav": "Audio", ".ogg": "Audio",
+    ".pdf": "Document", ".doc": "Document", ".docx": "Document",
+    ".xls": "Document", ".xlsx": "Document", ".ppt": "Document",
+    ".pptx": "Document", ".txt": "Document", ".csv": "Document",
+    ".rtf": "Document", ".md": "Document", ".html": "Document",
+    ".zip": "Archive", ".rar": "Archive", ".7z": "Archive", ".tar": "Archive",
+    ".gz": "Archive",
+    ".apk": "Android Package", ".xapk": "Android Package", ".obb": "Android Package",
+    ".db": "Database", ".sqlite": "Database", ".sqlite3": "Database",
+    ".vcf": "Contact Card", ".ics": "Calendar",
+}
+
+
+def _file_kind(name: str, mime: str = "") -> str:
+    """A file's presentation kind, from its MIME type first, extension second."""
+    mime = (mime or "").lower()
+    if mime.startswith("image/"):
+        return "Image"
+    if mime.startswith("video/"):
+        return "Video"
+    if mime.startswith("audio/"):
+        return "Audio"
+    if mime.startswith("text/"):
+        return "Document"
+    return _FILE_KINDS.get(Path(name).suffix.lower(), "File")
+
+
+def _folder_of(path: str) -> str:
+    """``/storage/emulated/0/DCIM/Camera/a.jpg`` -> ``DCIM/Camera``."""
+    cleaned = str(path or "")
+    for prefix in ("/storage/emulated/0/", "/storage/self/primary/", "/sdcard/"):
+        if cleaned.startswith(prefix):
+            cleaned = cleaned[len(prefix):]
+            break
+    parent = str(Path(cleaned).parent)
+    return "" if parent in (".", "") else parent
+
+
 def _ts(val, divide=True):
     if not val:
         return ""
@@ -67,6 +112,20 @@ def _ts(val, divide=True):
         except Exception:
             return val
     return val
+
+
+def _artifact_date(item) -> str:
+    """The timestamp an artifact row is stamped with, top level or in ``_data``.
+
+    Extractors drop the same fact in different places: a top level ``date``
+    for the summary rows, an extractor field such as ``modified`` or ``date``
+    for the details. One helper keeps the views from guessing which key holds
+    the truth, and keeps the date visible on rows that only ever wrote one of
+    them (last-known fixes, for instance, stamp nothing at all).
+    """
+    data = item.get("_data") or {}
+    return str(item.get("date") or data.get("date") or data.get("modified")
+              or item.get("modified") or item.get("date_added") or "")
 
 
 def _ts_relative(val, divide=True):
@@ -152,6 +211,10 @@ APP_DEFS = [
      "desc": "Contact List", "type": "list"},
     {"name": "Calendar", "color": "#06b6d4", "bg": "#0d262e", "category": "Calendar",
      "desc": "Events & Tasks", "type": "list"},
+    {"name": "Recent Items", "color": "#60a5fa", "bg": "#0f1d33",
+     "category": "Recent Items", "desc": "Recently Modified Files", "type": "recent"},
+    {"name": "Location Related", "color": "#f59e0b", "bg": "#2e220d",
+     "category": "Location Related", "desc": "Geotags & Fixes", "type": "location"},
     {"name": "Media", "color": "#8b5cf6", "bg": "#1a0d2e", "category": "Media",
      "desc": "Photos & Videos", "type": "media"},
     {"name": "Documents", "color": "#64748b", "bg": "#1a1f2e", "category": "Documents",
@@ -228,7 +291,8 @@ class LoadWorker(QThread):
     def _get_loaders(self):
         m = {
             "All": [self._emails_accounts, self._messages_chat, self._sms, self._calls,
-                    self._contacts, self._calendar, self._media, self._transactions,
+                    self._contacts, self._calendar, self._recent_items,
+                    self._location_related, self._media, self._transactions,
                     self._documents, self._timeline_intent,
                     self._whatsapp, self._telegram, self._instagram, self._twitter,
                     self._facebook, self._snapchat, self._tiktok, self._youtube,
@@ -241,6 +305,8 @@ class LoadWorker(QThread):
             "Messages & Chat": [self._messages_chat],
             "SMS": [self._sms], "Calls": [self._calls], "Contacts": [self._contacts],
             "Calendar": [self._calendar], "Media": [self._media],
+            "Recent Items": [self._recent_items],
+            "Location Related": [self._location_related],
             "Transactions": [self._transactions],
             "Documents": [self._documents],
             "Timeline & Intent": [self._timeline_intent],
@@ -1114,6 +1180,139 @@ class LoadWorker(QThread):
                 })
                 c += 1
         self.progress.emit(f"Loaded {c} timeline & intent entries")
+
+    def _recent_items(self, r):
+        """The files the device touched last, newest first.
+
+        MediaStore keeps ``date_modified`` for every file on shared storage, so
+        one sorted query answers "what did this handset use recently" without
+        walking the filesystem. Only the newest slice is kept: a recent-items
+        list that lists everything is just the file table again.
+        """
+        self.progress.emit("Reading the recent-items index...")
+        data = adb.query_content(
+            self.serial, "content://media/external/file",
+            sort="date_modified DESC LIMIT 400", timeout=45)
+        c = 0
+        seen = set()
+        for row in _parse_rows(data):
+            path = row.get("_data", "")
+            name = row.get("_display_name", "") or Path(path).name
+            key = path or name
+            if not name or key in seen:
+                continue
+            seen.add(key)
+
+            modified = row.get("date_modified") or row.get("date_added") or ""
+            stamp = _ts(modified, divide=False)
+            kind = _file_kind(name, row.get("mime_type", ""))
+            size = _human_size(row.get("_size"))
+            r.append({
+                "type": kind, "category": "Recent Items", "date": stamp,
+                "summary": f"{name}" + (f"  [{size}]" if size else ""),
+                "source": path,
+                "_data": {
+                    "filename": name, "path": path, "folder": _folder_of(path),
+                    "kind": kind, "size": size, "modified": stamp,
+                    "date_added": _ts(row.get("date_added", ""), divide=False),
+                    "mime_type": row.get("mime_type", ""),
+                    "extension": Path(name).suffix.lower(),
+                },
+            })
+            c += 1
+            if c >= 400:
+                break
+        self.progress.emit(f"Loaded {c} recent items")
+
+    def _location_related(self, r):
+        """Where the handset has been, from the two sources a stock device has.
+
+        Geotagged pictures are the reliable one: MediaStore exposes the EXIF
+        latitude and longitude it indexed, so an album becomes a set of points
+        with timestamps. The last-known fix from ``dumpsys location`` adds the
+        current position even when no photo was taken there. Neither source
+        needs root, and both are labelled so a report never implies a track.
+        """
+        self.progress.emit("Reading geotags and last-known fixes...")
+        c = 0
+        seen = set()
+        data = adb.query_content(
+            self.serial, "content://media/external/images/media",
+            sort="date_added DESC LIMIT 1000", timeout=45)
+        for row in _parse_rows(data):
+            try:
+                lat = float(row.get("latitude", ""))
+                lon = float(row.get("longitude", ""))
+            except (TypeError, ValueError):
+                continue
+            if lat == 0 and lon == 0:
+                continue
+            key = (round(lat, 5), round(lon, 5))
+            if key in seen:
+                continue
+            seen.add(key)
+
+            path = row.get("_data", "")
+            name = row.get("_display_name", "") or Path(path).name
+            stamp = _ts(row.get("date_added") or row.get("date_modified", ""),
+                        divide=False)
+            r.append({
+                "type": "Geotagged Photo", "category": "Location Related",
+                "date": stamp,
+                "summary": f"{name}  ({lat:.5f}, {lon:.5f})",
+                "source": path,
+                "_data": {
+                    "filename": name, "path": path,
+                    "latitude": f"{lat:.6f}", "longitude": f"{lon:.6f}",
+                    "provider": "MediaStore EXIF", "date": stamp,
+                    "mime_type": row.get("mime_type", ""),
+                },
+            })
+            c += 1
+            if c >= 500:
+                break
+
+        fixes = 0
+        ok, output = adb.adb_shell(
+            self.serial, "dumpsys location 2>/dev/null", timeout=20)
+        if ok and output:
+            for line in output.splitlines():
+                lat = lon = None
+                provider = "last known"
+                match = re.search(
+                    r"Location\[(\w+)\s+(-?\d+\.\d+),(-?\d+\.\d+)", line)
+                if match:
+                    provider = match.group(1)
+                    lat, lon = float(match.group(2)), float(match.group(3))
+                else:
+                    lat_m = re.search(r"lat[=:]\s*(-?\d+\.\d+)", line, re.I)
+                    lon_m = re.search(r"lon[=:]\s*(-?\d+\.\d+)", line, re.I)
+                    if lat_m and lon_m:
+                        lat, lon = float(lat_m.group(1)), float(lon_m.group(1))
+                if lat is None or lon is None:
+                    continue
+                key = (round(lat, 5), round(lon, 5))
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                accuracy = re.search(r"hAcc=([\d.]+)", line)
+                r.append({
+                    "type": "Last Known Location", "category": "Location Related",
+                    "date": "",
+                    "summary": f"{provider} fix  ({lat:.5f}, {lon:.5f})",
+                    "source": "dumpsys location",
+                    "_data": {
+                        "latitude": f"{lat:.6f}", "longitude": f"{lon:.6f}",
+                        "provider": provider, "source": "dumpsys location",
+                        "accuracy_m": accuracy.group(1) if accuracy else "",
+                    },
+                })
+                fixes += 1
+                if fixes >= 24:
+                    break
+        self.progress.emit(
+            f"Loaded {c} geotagged photos and {fixes} last-known fixes")
 
     def _media(self, r):
         self.progress.emit("Scanning ALL media files across device...")
@@ -3122,6 +3321,214 @@ class ArtifactsPage(QWidget):
         self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, table)
 
         self.stacked.setCurrentIndex(1)
+
+    def _show_recent_items(self):
+        """The newest files on the handset, as a table an examiner can scan.
+
+        This is deliberately a ranked list rather than a folder tree: the
+        question it answers is "what was touched last", and the modification
+        stamp is the column that matters. The folder is kept beside it so a
+        filename taken from a chat can be placed in context.
+        """
+        from PyQt6.QtWidgets import QTableWidgetItem, QHeaderView
+        from PyQt6.QtGui import QColor
+
+        items = [a for a in self.all_artifacts
+                 if a.get("category") == "Recent Items"]
+        items.sort(key=lambda a: _artifact_date(a), reverse=True)
+
+        self.conv_title.setText("Recent Items")
+        self.conv_count.setText(f"{len(items)} files \u00b7 newest first")
+        self._set_media_actions(
+            [a for a in items if a.get("type") in MEDIA_TYPES], "Recent items")
+        self._clear_layout(self.conv_list_layout)
+
+        if not items:
+            self._add_empty(
+                self.conv_list_layout,
+                "No recent-item index was readable on this device.\n\n"
+                "Recent Items comes from MediaStore, which indexes shared "
+                "storage. A handset whose gallery has never run may have an "
+                "empty index even though the files are present.")
+            self.stacked.setCurrentIndex(1)
+            return
+
+        kinds = {}
+        for item in items:
+            kind = item.get("type", "File")
+            kinds[kind] = kinds.get(kind, 0) + 1
+        summary = QLabel("  " + "  \u00b7  ".join(
+            f"{count} {kind.lower()}" for kind, count in
+            sorted(kinds.items(), key=lambda pair: -pair[1])))
+        summary.setStyleSheet(
+            "color: #94a3b8; font-size: 11px; padding: 4px 0 8px 0;"
+            " background: transparent; border: none;")
+        self.conv_list_layout.insertWidget(
+            self.conv_list_layout.count() - 1, summary)
+
+        colour = {"Image": "#22c55e", "Video": "#3b82f6", "Audio": "#ec4899",
+                  "Document": "#f59e0b", "Archive": "#a855f7",
+                  "Android Package": "#10b981", "Database": "#06b6d4",
+                  "Contact Card": "#06b6d4", "Calendar": "#06b6d4"}
+
+        headers = ["File", "Kind", "Size", "Modified", "Folder"]
+        table = QTableWidget()
+        table.setColumnCount(len(headers))
+        table.setHorizontalHeaderLabels(headers)
+        table.setRowCount(len(items))
+        table.setSortingEnabled(False)
+        table.verticalHeader().setVisible(False)
+        table.setShowGrid(False)
+        table.setAlternatingRowColors(True)
+        table.setStyleSheet("""
+            QTableWidget { background: #111827; border: 1px solid #1e293b; border-radius: 8px;
+                gridline-color: #1e293b; font-size: 12px; }
+            QTableWidget::item { padding: 7px 10px; }
+            QTableWidget::item:selected { background: rgba(37,99,235,0.25); }
+            QHeaderView::section { background: #1a2234; color: #94a3b8; border: none;
+                border-bottom: 2px solid #1e293b; font-size: 11px; font-weight: 700; padding: 9px; }
+        """)
+
+        for row, item in enumerate(items):
+            data = item.get("_data", {})
+            cells = [
+                data.get("filename") or item.get("summary", ""),
+                item.get("type", ""),
+                data.get("size", ""),
+                _artifact_date(item),
+                data.get("folder", ""),
+            ]
+            for column, value in enumerate(cells):
+                cell = QTableWidgetItem(str(value))
+                cell.setFlags(cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                if column == 1:
+                    cell.setForeground(
+                        QColor(colour.get(str(value), "#a8b4c4")))
+                elif column == 3:
+                    cell.setForeground(QColor("#94a3b8"))
+                table.setItem(row, column, cell)
+
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column in range(1, len(headers)):
+            header.setSectionResizeMode(
+                column, QHeaderView.ResizeMode.ResizeToContents)
+        table.setMinimumHeight(min(560, 58 + 30 * max(1, len(items))))
+        self._wire_table(table, items)
+        self.conv_list_layout.insertWidget(
+            self.conv_list_layout.count() - 1, table)
+
+        self.stacked.setCurrentIndex(1)
+
+    def _show_location_related(self):
+        """Geotags and last-known fixes, with the coordinates kept readable.
+
+        The map itself is a click away rather than embedded, because a
+        forensic table has to survive being printed and a tile server is not
+        evidence. Double-clicking a row opens OpenStreetMap at the point.
+        """
+        from PyQt6.QtWidgets import QTableWidgetItem, QHeaderView
+        from PyQt6.QtGui import QColor
+
+        items = [a for a in self.all_artifacts
+                 if a.get("category") == "Location Related"]
+        items.sort(key=lambda a: _artifact_date(a), reverse=True)
+        photos = sum(1 for a in items if a.get("type") == "Geotagged Photo")
+        fixes = len(items) - photos
+
+        self.conv_title.setText("Location Related")
+        self.conv_count.setText(
+            f"{len(items)} records \u00b7 {photos} geotagged photos \u00b7 "
+            f"{fixes} last-known fixes")
+        self._set_media_actions([])
+        self._clear_layout(self.conv_list_layout)
+
+        if not items:
+            self._add_empty(
+                self.conv_list_layout,
+                "No location records were readable on this device.\n\n"
+                "Pictures carry their coordinates in EXIF, and MediaStore "
+                "exposes the ones the gallery has indexed. A camera that was "
+                "never granted location, or a gallery that never ran, leaves "
+                "this section empty without meaning the handset never moved.")
+            self.stacked.setCurrentIndex(1)
+            return
+
+        hint = QLabel(
+            "  Coordinates are decimal degrees. Double-click a row to open "
+            "the point in OpenStreetMap.")
+        hint.setStyleSheet(
+            "color: #94a3b8; font-size: 11px; padding: 4px 0 8px 0;"
+            " background: transparent; border: none;")
+        self.conv_list_layout.insertWidget(
+            self.conv_list_layout.count() - 1, hint)
+
+        headers = ["Date", "Source", "Latitude", "Longitude", "File / Provider"]
+        table = QTableWidget()
+        table.setColumnCount(len(headers))
+        table.setHorizontalHeaderLabels(headers)
+        table.setRowCount(len(items))
+        table.setSortingEnabled(False)
+        table.verticalHeader().setVisible(False)
+        table.setShowGrid(False)
+        table.setAlternatingRowColors(True)
+        table.setStyleSheet("""
+            QTableWidget { background: #111827; border: 1px solid #1e293b; border-radius: 8px;
+                gridline-color: #1e293b; font-size: 12px; }
+            QTableWidget::item { padding: 7px 10px; }
+            QTableWidget::item:selected { background: rgba(37,99,235,0.25); }
+            QHeaderView::section { background: #1a2234; color: #94a3b8; border: none;
+                border-bottom: 2px solid #1e293b; font-size: 11px; font-weight: 700; padding: 9px; }
+        """)
+
+        for row, item in enumerate(items):
+            data = item.get("_data", {})
+            cells = [
+                _artifact_date(item),
+                item.get("type", ""),
+                data.get("latitude", ""),
+                data.get("longitude", ""),
+                data.get("filename") or data.get("provider", ""),
+            ]
+            for column, value in enumerate(cells):
+                cell = QTableWidgetItem(str(value))
+                cell.setFlags(cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                if column == 1:
+                    cell.setForeground(QColor(
+                        "#f59e0b" if value == "Geotagged Photo" else "#22d3ee"))
+                elif column in (2, 3):
+                    cell.setForeground(QColor("#60a5fa"))
+                table.setItem(row, column, cell)
+
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        for column in range(4):
+            header.setSectionResizeMode(
+                column, QHeaderView.ResizeMode.ResizeToContents)
+        table.setMinimumHeight(min(500, 58 + 30 * max(1, len(items))))
+        table.cellDoubleClicked.connect(
+            lambda row, _column, _items=items: self._open_map_for(_items[row]))
+        self._wire_table(table, items)
+        self.conv_list_layout.insertWidget(
+            self.conv_list_layout.count() - 1, table)
+
+        self.stacked.setCurrentIndex(1)
+
+    def _open_map_for(self, artifact):
+        """Open a coordinate in the browser; the table stays the evidence."""
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+
+        data = artifact.get("_data", {}) if artifact else {}
+        try:
+            latitude = float(data.get("latitude"))
+            longitude = float(data.get("longitude"))
+        except (TypeError, ValueError):
+            return
+        QDesktopServices.openUrl(QUrl(
+            "https://www.openstreetmap.org/"
+            f"?mlat={latitude:.6f}&mlon={longitude:.6f}"
+            f"#map=16/{latitude:.6f}/{longitude:.6f}"))
 
     def _whatsapp_message(self, item):
         """Normalise one WhatsApp artifact for the transcript view.

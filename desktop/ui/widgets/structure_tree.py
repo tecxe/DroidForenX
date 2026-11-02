@@ -25,11 +25,10 @@ from ..theme import colour, theme
 #: ``None`` marks a leaf with no collector in this build.
 STRUCTURE_SPEC = [
     ("Analyze Data", [
-        ("Notes", None),
         ("WhatsApp", "WhatsApp"),
         ("Device Network", "WiFi & Network"),
-        ("Recent Items", None),
-        ("Location Related", None),
+        ("Recent Items", "Recent Items"),
+        ("Location Related", "Location Related"),
         ("Media", [
             ("Images", "Media"),
             ("Video & Audio", "Recordings"),
