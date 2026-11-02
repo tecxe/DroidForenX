@@ -119,15 +119,15 @@
 </nav>
 
 <section class="hero">
-    <div class="badge"><span class="dot"></span> v1.0.35 - Latest Release</div>
+    <div class="badge"><span class="dot"></span> v1.0.36 - Latest Release</div>
     <h1>Professional Mobile<br>Digital Forensics</h1>
-    <p>Standalone desktop toolkit for Android device forensic analysis. 4-stage forensic workflow, 24 artifact loaders, WhatsApp and Telegram without root, physical imaging through MediaTek BootROM / Qualcomm EDL, selectable Raw (dd) / ZIP image output, court-ready reporting. Single self-contained .exe, wrapped in a standard setup wizard. No Python, no dependencies.</p>
+    <p>Standalone desktop toolkit for Android device forensic analysis. 4-stage forensic workflow, 24 artifact loaders, WhatsApp and Telegram without root, physical imaging on a rooted handset, selectable Raw (dd) / ZIP image output, court-ready reporting. Single self-contained .exe, wrapped in a standard setup wizard. No Python, no dependencies.</p>
     <div class="hero-btns">
-        <a class="btn btn-primary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.35/DroidForenX_Installer.exe" download>
+        <a class="btn btn-primary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.36/DroidForenX_Installer.exe" download>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Download DroidForenX_Installer.exe
         </a>
-        <a class="btn btn-secondary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.35/DroidForenX.exe" download>
+        <a class="btn btn-secondary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.36/DroidForenX.exe" download>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             DroidForenX.exe &mdash; Portable
         </a>
@@ -140,7 +140,7 @@
 </section>
 
 <div class="stats">
-    <div class="stat"><div class="stat-val">55.4 MB</div><div class="stat-label">File Size</div></div>
+    <div class="stat"><div class="stat-val">62.9 MB</div><div class="stat-label">Installer Size</div></div>
     <div class="stat"><div class="stat-val">4</div><div class="stat-label">Forensic Stages</div></div>
     <div class="stat"><div class="stat-val">24</div><div class="stat-label">Artifact Loaders</div></div>
     <div class="stat"><div class="stat-val">0</div><div class="stat-label">Dependencies Required</div></div>
@@ -208,8 +208,8 @@
         </div>
         <div class="feature">
             <div class="feature-icon" style="background:rgba(168,85,247,0.15);color:#a855f7">&#128421;&#65039;</div>
-            <h3>Physical Image Without Root</h3>
-            <p>BootROM/EDL detection, a driven extraction engine and the validation that follows it, for handsets that can be imaged at the chip level. Every image is hashed and re-checked, and the route taken is written into the report.</p>
+            <h3>Physical Image on a Rooted Handset</h3>
+            <p>The partition map is captured first, then <code>boot</code> and <code>recovery</code> are imaged over <code>dd</code>, pulled, hashed and filed as physical-image artifacts. On an unrooted handset the phase says the device refused root instead of quietly doing nothing &mdash; and the report states the honest ceiling, which is ciphertext for <code>userdata</code>.</p>
         </div>
         <div class="feature">
             <div class="feature-icon" style="background:rgba(239,68,68,0.15);color:#ef4444">&#128221;</div>
@@ -251,7 +251,7 @@
             </div>
             <div class="req-item">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                No root required &mdash; app-private data needs root and is reported as such
+                No root needed for logical acquisition &mdash; app-private data and physical imaging need root, and say so when it is refused
             </div>
         </div>
     </div>
@@ -270,19 +270,25 @@
             </div>
             <div class="info-card">
                 <div class="label">File Size</div>
-                <div class="value">55.4 MB</div>
+                <div class="value">62.9 MB</div>
             </div>
             <div class="info-card">
                 <div class="label">Version</div>
-                <div class="value">v1.0.35</div>
+                <div class="value">v1.0.36</div>
             </div>
         </div>
 
         <h3 style="margin-bottom:12px">SHA-256 Hash</h3>
         <div class="hash-box">
-            <code id="hash">88f902e127d1208ff0864796da434b44e83c94a28f2d429f14e0d35574863846</code>
+            <code id="hash">98f23376bc49b92c262e8fa5e6b75716b31c6fca0748c659f9b517ac12654a4b</code>
             <button class="copy-btn" onclick="copyHash()">Copy Hash</button>
         </div>
+
+        <p style="margin-top:16px;color:var(--muted);font-size:12px">
+            The hash above is the installer. The portable build,
+            <code style="background:var(--bg);padding:3px 8px;border-radius:4px;font-size:11px;color:var(--orange)">DroidForenX.exe</code>,
+            is <code style="background:var(--bg);padding:3px 8px;border-radius:4px;font-size:11px;color:var(--accent)">93d6b8eb63356d19214eb86ed1d0954e867bf4600bdefe679901cbe28cea830e</code>
+        </p>
 
         <h3 style="margin-bottom:4px">Hash Verification</h3>
         <p>Download the installer, then paste its SHA-256 hash below to verify authenticity.</p>
@@ -322,7 +328,7 @@
 </section>
 
 <footer>
-    <p>DroidForenX v1.0.35 &middot; Built by <a href="https://github.com/tecxe" target="_blank">tecxe</a> &middot; <a href="https://github.com/tecxe/DroidForenX" target="_blank">Source on GitHub</a></p>
+    <p>DroidForenX v1.0.36 &middot; Built by <a href="https://github.com/tecxe" target="_blank">tecxe</a> &middot; <a href="https://github.com/tecxe/DroidForenX" target="_blank">Source on GitHub</a></p>
 </footer>
 
 <script>

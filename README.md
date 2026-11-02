@@ -20,7 +20,7 @@ copy, and records an append-only chain of custody for every action.
 > | Root-gated, reported `NOT_ACCESSIBLE` | **7 of 24** |
 > | WhatsApp and Deleted Data: shared-storage path on an unrooted handset | **Code complete** - fixture-tested, awaiting a handset run |
 > | Telegram chats, groups, channels, media: export + cache + notifications | **Code complete** - fixture-tested, awaiting a handset run |
-> | Physical image without root: BootROM/EDL detection, engine drive, validation | **Code complete** - fixture-tested, awaiting a BROM/EDL handset run |
+> | Physical image (root): partition map, boot and recovery over `dd`, per-file hashing | **Code complete** - root-gated; an unrooted run states the refusal |
 >
 > **Verified device:** TECNO TECNO KL6 (Tecno Spark 30), Android 14 (API 34),
 > serial `13276374A7004073`, build `TECNO/KL6-OP/TECNO-KL6:14/UP1A.231005.007/260709V1745:user/release-keys`,
@@ -164,8 +164,8 @@ UI. No device is needed to run it:
 python -m unittest `
   desktop.tests.test_evidence_store `
   desktop.tests.test_evidence_workbook `
+  desktop.tests.test_case_management `
   desktop.tests.test_forensic_engine `
-  desktop.tests.test_physical `
   desktop.tests.test_imaging `
   desktop.tests.test_image_registry `
   desktop.tests.test_create_image_dialog `
@@ -179,8 +179,11 @@ python -m unittest `
   desktop.tests.test_device_page `
   desktop.tests.test_media_gallery `
   desktop.tests.test_acquire_page `
+  desktop.tests.test_workspace_layout `
   desktop.tests.test_main_window `
   desktop.tests.test_ui_export `
+  desktop.tests.test_whatsapp `
+  desktop.tests.test_telegram `
   desktop.tests.test_reproducible_build -v
 ```
 
@@ -190,18 +193,17 @@ run on import and need a connected handset, not a test runner.
 
 ![Test suite finishing, one test skipped](docs/images/tests.png)
 
-The run above is v1.0.35: 483 tests with a skip — 16 for case editing and
-deletion, 30 for WhatsApp parsing, deleted-entry recovery and freelist salvage,
-7 for the WhatsApp chat, group and media projection, 14 for the workspace
-skeleton (landing card shortcuts, structure tree counts and repaint, inspector
-empty state), 18 for Telegram exports,
-chat kinds, cache schemas and notifications, 32 for the media gallery, WhatsApp
-viewer, Telegram viewer and back-arrow behaviour, 22 for the artifact
-table and its empty states, 42 for
-physical-acquisition detection and image validation, 18 for
-percentage progress,
-30 for SIM parsing and storage, 63 for the report composer and its artifact
-views, and the rest accumulated across earlier releases.
+The run above is v1.0.36: 432 tests with one skip - 47 for the imaging writers
+and device sources, 32 for the media gallery, WhatsApp and Telegram viewers and
+back-arrow behaviour, 30 for SIM parsing and storage, 30 for WhatsApp parsing,
+deleted-entry recovery and freelist salvage, 28 for the report composer, 27 for
+evidence preservation, hashing and custody, 27 for theme coverage, 25 for the
+Create Image dialog, 22 for the artifact views and their appendix, 21 for the
+window shell and stage navigation, 19 for percentage progress, 18 for Telegram
+exports, chat kinds, cache schemas and notifications, 16 for case editing and
+deletion, 14 for the workspace skeleton, 13 for artifact images, 12 for
+reproducible-build pinning, and the rest across branding, UI export, the
+forensic engine, the image registry and the acquire page.
 
 ---
 
@@ -377,7 +379,6 @@ desktop/
     cases.py                  case records: create, edit, delete
     whatsapp.py               WhatsApp exports/backups/media, deleted traces
     telegram.py               Telegram exports, chats/groups/channels, media
-    physical.py               SoC/boot-mode detection, unrooted imaging, validation
     imaging/                  RAW/ZIP/streamed-ZIP writers and device sources
   ui/
     main_window.py            window shell, stage navigation
@@ -631,106 +632,37 @@ the stale-index case that used to make a click land on the page already showing.
 `is_device_rooted()` and `device_root_summary()` in `adb_manager.py` perform
 root detection so the tool knows its own ceiling before interpreting results.
 
-### Physical acquisition without root
+### Physical imaging (root required)
 
-The block devices are denied to the `adb` shell, so a physical image cannot be
-taken through Android. It is taken through the **chip**, before Android starts.
-`desktop/core/physical.py` names the SoC, finds which boot mode the handset is
-in, drives an open acquisition engine, then validates and slices what comes
-back. Two routes exist:
+The block devices are closed to an unrooted `adb` shell - 65 of 65 on the TECNO
+used for verification, `boot` included - so a physical image needs root, and on
+a rooted handset the acquisition phase takes it over `dd` from
+`/dev/block/by-name/`:
 
-| Route | SoC | Engine | How the handset enters it |
-|---|---|---|---|
-| BootROM / Preloader | MediaTek (most TECNO, Infinix, itel) | `mtkclient` | Power off, hold **Volume Up + Volume Down** while connecting USB (or short the test points) |
-| EDL (9008) | Qualcomm | `edl.py` | Power off, connect USB while holding the model's EDL key combination |
+- the partition map is captured first (`ls -la /dev/block/by-name/`), hashed and
+  filed as a `physical` artifact, so the images are interpretable later;
+- `boot` and `recovery` are imaged with `dd bs=4096` to `/sdcard/dfx_*.img`,
+  pulled, hashed and filed as `physical_image`, then removed from the handset;
+- when root is refused, the phase says so - *"Device is not rooted - physical
+  image skipped"* - and the logical extraction carries the case instead of the
+  phase quietly doing nothing.
 
-The engines are **not bundled**. They are separate open-source projects with
-their own USB drivers, and shipping someone else's GPL tree inside this
-executable would misrepresent what has been audited. Install one and either put
-it on `PATH` or point an environment variable at it:
-
-```powershell
-pip install mtkclient                      # MediaTek BootROM/Preloader
-$env:DROIDFORENX_MTKCLIENT = "C:\tools\mtk\mtk.py"
-$env:DROIDFORENX_EDL = "C:\tools\edl\edl.py"
-```
-
-The app also looks for engines without any environment setup: `tools\` beside
-the executable, `~/.droidforenx/tools/`, `~/droidforenx-tools/`, and the
-`mtkclient`/`edl` subfolders of each. Whatever it finds is remembered in
-`~/.droidforenx/tools.json` together with a Python interpreter, so a frozen
-build with no PATH configuration still runs a `.py` engine on the next click.
-
-On Windows the boot-mode device needs a libusb-compatible driver **once**.
-Windows installs the ADB driver by itself; it does not install one for a raw
-BootROM endpoint. The app reports that condition specifically — a device on the
-bus whose node has no function driver is a host fault, not a handset fault, so
-the panel stops before the engine and shows **Install USB Driver…**, which
-starts [Zadig](https://zadig.akeo.ie) (looked for beside the executable, on
-`PATH`, or in the tool folders). Pick Options -> List All Devices -> the
-MediaTek port shown in the message (`0E8D:2000` or `0E8D:0003`) -> **WinUSB** ->
-Replace Driver. The binding is permanent for that model, and every acquisition
-after it is a single click. UsbDk is *not* an alternative on current Windows
-builds: libusb accepts the option and then fails to enumerate.
-
-Boot order matters: the preloader is only on the bus for a few seconds, so the
-engine has to be waiting before the cable goes in. mtkclient does wait, which is
-why **Acquire** is enabled as soon as the SoC and engine are known: it starts
-the engine, then asks for the powered-off handset. The panel also watches the
-USB bus while it is open, so the boot mode and plan update themselves when the
-phone appears or leaves.
-
-One engine per port: a second process on the same boot-mode endpoint makes both
-fail their handshake, which looks exactly like a broken handset. A lock in
-`~/.droidforenx/engine.lock` refuses a second run, and a stale lock from a crash
-is reclaimed rather than blocking every future attempt.
-
-The panel is a small state machine rather than a set of independent buttons:
-
-- a detection requested while another detection is still running is queued and
-  replayed when the worker retires, so a preloader that appears mid-scan is not
-  missed;
-- a failed detection clears the plan and disables **Acquire** instead of leaving
-  the previous route's button live;
-- **Acquire** follows the last viable route, so a finished or failed run cannot
-  leave it enabled when there is nothing to run against.
-
-The MediaTek route needs no loader file. The Qualcomm route does: a secure-boot
-chip accepts only the firehose programmer that matches it, so **Acquire** stays
-disabled until a `.mbn`/`.elf` is chosen in the panel. That is a property of the
-device, not a missing feature.
-
-What the app does itself, with no engine present, is detect and explain:
-
-- reads the SoC from `ro.soc.*`, `ro.board.platform`, `ro.hardware` and
-  `/proc/cpuinfo` in one ADB round trip, and names the family rather than
-  guessing;
-- inventories boot-mode USB devices (Windows PnP, `lsusb`, `system_profiler`)
-  against the known vendor/product pairs — `0e8d:0003` BootROM,
-  `0e8d:2000` Preloader, `05c6:9008` EDL;
-- reads the device's own `ro.crypto.*` and states whether `userdata` is
-  ciphertext at rest;
-- builds the exact argv, or states why no route is viable — including the
-  key combination to enter BROM on a MediaTek handset that is merely powered on.
-
-After a run it hashes every file the engine wrote, identifies filesystems from
-their magic bytes (ext2/3/4, f2fs, erofs, NTFS, FAT), parses GPT and MBR
-partition tables, slices a whole-disk blob into per-partition images, recognises
-Android sparse headers, and records each file in the case manifest and custody
-log. Nothing is labelled a physical image unless bytes exist and hash.
+*Create Image* probes each partition with a one-sector read before offering it,
+so the same boundary is visible in the dialog: on an unrooted handset it reports
+`0 of 65 readable` and marks them `needs root`.
 
 **The honest ceiling.** A physical read of a modern FBE/FDE handset yields
-ciphertext for `userdata`; neither route derives the key from a locked screen
-without an exploit this project does not ship. What remains readable is the
-partition layout, boot, vendor and metadata partitions, timestamps, unencrypted
-volumes, and an integrity-bound copy of the ciphertext for a laboratory holding
-the key material. The panel and the report say which of these applies instead
-of implying the messages are in there somewhere.
+ciphertext for `userdata`; no key is derived from a locked screen here. What
+remains readable is the partition layout, boot, vendor and metadata partitions,
+timestamps, unencrypted volumes, and an integrity-bound copy of the ciphertext
+for a laboratory holding the key material. The report says which of these
+applies instead of implying the messages are in there somewhere.
 
-Covered by `desktop/tests/test_physical.py` (42 tests): chipset naming from
-Transsion property layouts, FBE/FDE labels, three USB-inventory formats, plan
-selection and every refusal path, GPT/MBR/sparse parsing, partition slicing and
-hash agreement.
+A chip-level route (MediaTek BootROM / Qualcomm EDL) was prototyped in 1.0.30
+and withdrawn in 1.0.35: it needed third-party engines this build does not
+bundle, a libusb driver installed per model, and a driver fault that reads as a
+broken handset when it is a host problem. Root over ADB is the path the tool
+stands behind.
 
 ### Reproducing the baseline
 
@@ -790,14 +722,13 @@ Android's, not bugs:
 - **Logical acquisition is not a full image.** Files not written to accessible
   storage are not recovered. A full flash image is a separate procedure with
   its own legal authorisation requirement.
-- **Physical imaging without root goes through the chip, not Android.**
-  *Create Image* probes each partition with a one-sector read before offering
-  it; on the unrooted TECNO used for verification the shell user is denied every
-  block device (65 of 65, `boot` included), so the dialog reports `0 of 65
-  readable` and marks them `needs root`. That is correct — over ADB. The
-  **Physical Image (no root)** panel takes the other route: MediaTek BootROM via
-  `mtkclient`, or Qualcomm EDL via `edl.py` with a matching firehose loader.
-  The engine is not bundled and must be installed separately.
+- **Physical imaging needs root.** The shell user is denied every block device
+  on an unrooted handset - 65 of 65 on the TECNO used for verification, `boot`
+  included - so *Create Image* probes each partition with a one-sector read and
+  reports `0 of 65 readable`, marked `needs root`. On a rooted handset the
+  acquisition phase takes the same path over `dd` and files boot and recovery
+  with hashes. A chip-level route was prototyped in 1.0.30 and withdrawn in
+  1.0.35; it needs engines this build does not ship.
 - **Encryption is the real boundary, not root.** A physical image of an FBE/FDE
   handset gives ciphertext for `userdata`. Boot, vendor, metadata and
   unencrypted volumes remain readable; message content stays sealed until the
@@ -816,7 +747,7 @@ by anyone. `test_reproducible_build.py` compares the installed environment
 against the lock, and the full two-build byte comparison runs only with
 `DROIDFORENX_SLOW_TESTS=1`.
 
-483 tests, no device required. They cover the properties that matter:
+432 tests, no device required. They cover the properties that matter:
 
 - an acquired artifact survives being read (the original bug was that 11
   loaders deleted evidence after parsing)
