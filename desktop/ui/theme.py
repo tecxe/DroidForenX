@@ -494,7 +494,9 @@ SWATCH = {
     "#2b9fd8": "#0369a1",
     "#1d4ed8": "#1e40af",
     "#1e40af": "#1e3a8a",
+    "#1e3a8a": "#dbeafe",  # selected tree row: dark blue plate -> pale tint
     "#06b6d4": "#0891b2",
+    "#22d3ee": "#0e7490",
     "#10b981": "#059669",
     "#059669": "#047857",
     "#22c55e": "#16a34a",

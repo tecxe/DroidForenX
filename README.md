@@ -190,10 +190,11 @@ run on import and need a connected handset, not a test runner.
 
 ![Test suite finishing, one test skipped](docs/images/tests.png)
 
-The run above is v1.0.33: 463 tests with two skips — 16 for case editing and
+The run above is v1.0.35: 469 tests with a skip — 16 for case editing and
 deletion, 30 for WhatsApp parsing, deleted-entry recovery and freelist salvage,
-18 for Telegram exports, chat kinds, cache schemas and notifications, 25 for the
-media gallery, Telegram viewer and back-arrow behaviour, 22 for the artifact
+7 for the WhatsApp chat, group and media projection, 18 for Telegram exports,
+chat kinds, cache schemas and notifications, 32 for the media gallery, WhatsApp
+viewer, Telegram viewer and back-arrow behaviour, 22 for the artifact
 table and its empty states, 42 for
 physical-acquisition detection and image validation, 18 for
 percentage progress,
@@ -813,7 +814,7 @@ by anyone. `test_reproducible_build.py` compares the installed environment
 against the lock, and the full two-build byte comparison runs only with
 `DROIDFORENX_SLOW_TESTS=1`.
 
-463 tests, no device required. They cover the properties that matter:
+469 tests, no device required. They cover the properties that matter:
 
 - an acquired artifact survives being read (the original bug was that 11
   loaders deleted evidence after parsing)
