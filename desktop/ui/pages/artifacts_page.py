@@ -3045,49 +3045,190 @@ class ArtifactsPage(QWidget):
 
         self.stacked.setCurrentIndex(1)
 
+    def _whatsapp_message(self, item):
+        """Normalise one WhatsApp artifact for the transcript view.
+
+        The chat view and the message bubbles were written for SMS, where the
+        body and the direction live under ``_data`` as ``body`` and ``type``.
+        WhatsApp keeps the same facts under ``text``/``direction``, so the keys
+        are mapped once here rather than teaching the UI two dialects.
+        """
+        data = dict(item.get("_data", {}) or {})
+        direction = str(data.get("direction", "")).lower()
+        deleted = bool(data.get("deleted") or item.get("type") == "Deleted Message")
+
+        body = (data.get("text") or data.get("body") or "").strip()
+        if not body:
+            if deleted:
+                body = "This message was deleted"
+            elif data.get("attachment"):
+                body = f"[{data.get('attachment')}]"
+            elif item.get("type") == "Notification":
+                body = "(notification remnant)"
+            else:
+                body = "(no body)"
+
+        stamp = data.get("date") or data.get("timestamp") or item.get("date", "")
+        data.update({
+            "body": body,
+            "text": data.get("text") or body,
+            "type": "Outgoing" if direction == "outgoing" else "Incoming",
+            "direction": direction or "incoming",
+            "date": stamp,
+            "deleted": deleted,
+        })
+
+        message = dict(item)
+        message["_data"] = data
+        message["date"] = stamp
+        return message
+
+    def _whatsapp_identity(self, chat_key, senders):
+        """Split a chat key into (display name, phone, is_group).
+
+        Exported chats arrive as a name ("Alice Mensah"); a database chat is a
+        jid ("233201234567@s.whatsapp.net") or a group id ("…@g.us"). Group
+        ids are opaque and must not be shown as a phone number.
+        """
+        chat = str(chat_key or "").strip()
+        lower = chat.lower()
+        is_group = (lower.endswith("@g.us") or "@g.us" in lower
+                    or lower.startswith("group ") or len(senders) > 1)
+
+        if is_group:
+            name = chat.split("@")[0] if "@" in chat else chat
+            if "@" in chat and name.isdigit():
+                name = f"Group {name[-6:]}"
+            return name or "Unnamed group", "", True
+
+        raw = chat.split("@")[0] if "@" in chat else chat
+        phone = raw if raw.isdigit() else ""
+        if not phone:
+            digits = re.sub(r"\D", "", raw)
+            phone = digits if len(digits) >= 7 else ""
+
+        name = _resolve_contact_name(self._contacts, phone) if phone else ""
+        if not name:
+            # A jid's only readable label is its number; an exported chat's own
+            # text is the label, even when it happens to contain digits.
+            name = phone if ("@" in chat and phone) else chat
+        return name or "Unknown chat", phone, False
+
+    def _collect_whatsapp_chats(self):
+        """Group WhatsApp artifacts into threads, media, files and backups.
+
+        Returns ``(chats, media, files, backups, notifications)``. Each chat is
+        a dict with a display name, phone, group flag, its messages newest
+        first and the first/last message date for the summary table.
+        """
+        chats, media, files, backups, notifications = {}, [], [], [], []
+
+        for item in self.all_artifacts:
+            if item.get("category") != "WhatsApp":
+                continue
+            kind = item.get("type", "")
+            data = item.get("_data", {}) or {}
+
+            if kind == "Backup":
+                backups.append(item)
+                continue
+
+            if kind in ("Message", "Deleted Message", "Notification"):
+                chat_key = str(data.get("chat") or "").strip()
+                if not chat_key:
+                    if kind == "Notification":
+                        notifications.append(item)
+                        continue
+                    chat_key = "Unknown chat"
+                conv = chats.get(chat_key)
+                if conv is None:
+                    conv = chats[chat_key] = {
+                        "chat": chat_key,
+                        "contact_name": chat_key,
+                        "phone": "",
+                        "is_group": False,
+                        "senders": set(),
+                        "messages": [],
+                    }
+                conv["messages"].append(self._whatsapp_message(item))
+                sender = str(data.get("sender") or "").strip()
+                if sender and sender.lower() not in ("me", "you"):
+                    conv["senders"].add(sender)
+                continue
+
+            path = data.get("path") or item.get("source") or ""
+            kind_by_path = media_kind(path) if path else "File"
+            if kind in MEDIA_TYPES or kind_by_path in MEDIA_TYPES:
+                media.append(item)
+            else:
+                files.append(item)
+
+        def _message_date(message):
+            return (message.get("date", "")
+                    or message.get("_data", {}).get("date", ""))
+
+        for chat_key, conv in chats.items():
+            conv["messages"].sort(key=_message_date, reverse=True)
+            first = conv["messages"][-1]["_data"].get("date", "") if conv["messages"] else ""
+            last = conv["messages"][0]["_data"].get("date", "") if conv["messages"] else ""
+            conv["first_date"], conv["last_date"] = first, last
+            name, phone, is_group = self._whatsapp_identity(
+                chat_key, conv.pop("senders"))
+            conv["contact_name"], conv["phone"], conv["is_group"] = name, phone, is_group
+
+        return chats, media, files, backups, notifications
+
     def _show_whatsapp_conversations(self):
-        from PyQt6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
+        """WhatsApp as an examiner reads a handset: chats, groups, then media.
+
+        The old view was one flat list of every message row, so threads had to
+        be rebuilt by eye. Each chat and group is now a single line with its
+        phone, message count and first/last message; opening one shows the
+        transcript. Media keeps its thumbnail grid, and files, backups and
+        notification remnants stay visible underneath.
+        """
+        from PyQt6.QtWidgets import QTableWidgetItem, QHeaderView
         from PyQt6.QtGui import QColor
 
-        wa_items = [a for a in self.all_artifacts if a.get("category") == "WhatsApp"]
-        messages = [a for a in wa_items
-                    if a.get("type") in ("Message", "Deleted Message", "Notification")]
-        backups = [a for a in wa_items if a.get("type") == "Backup"]
-        files = [a for a in wa_items if a not in messages and a not in backups]
+        chats, media, files, backups, notifications = self._collect_whatsapp_chats()
+        groups = [c for c in chats.values() if c.get("is_group")]
+        direct = [c for c in chats.values() if not c.get("is_group")]
+        messages_total = sum(len(c["messages"]) for c in chats.values())
+        deleted_total = sum(1 for c in chats.values() for m in c["messages"]
+                            if m.get("_data", {}).get("deleted"))
 
-        deleted_count = sum(1 for a in messages if a.get("type") == "Deleted Message")
         self.conv_title.setText("WhatsApp")
         self.conv_count.setText(
-            f"{len(messages)} messages · {deleted_count} deleted · "
-            f"{len(files)} files · {len(backups)} backups")
-        self._set_media_actions([a for a in files if a.get("type") in MEDIA_TYPES],
-                                "WhatsApp media")
+            f"{len(direct)} chats \u00b7 {len(groups)} groups \u00b7 "
+            f"{messages_total} messages \u00b7 {deleted_total} deleted \u00b7 "
+            f"{len(media)} media \u00b7 {len(backups)} backups")
+        self._set_media_actions(media, "WhatsApp media")
         self._clear_layout(self.conv_list_layout)
 
-        if not wa_items:
+        if not chats and not media and not backups and not files:
             self._add_empty(
                 self.conv_list_layout,
                 "No WhatsApp data was readable on this device.\n\n"
                 "An unrooted handset exposes WhatsApp media, local backups and "
                 "chat exports, but not the live msgstore. Export a chat in "
-                "WhatsApp (Chat → ⋮ → More → Export chat) and scan again, or "
+                "WhatsApp (Chat \u2192 \u22ee \u2192 More \u2192 Export chat) and scan again, or "
                 "bring the handset in with root/USB debugging plus a physical "
                 "image for the database itself.")
             self.stacked.setCurrentIndex(1)
             return
 
-        if messages:
-            header = QLabel(f"  Messages ({len(messages)})")
-            header.setStyleSheet(
-                "color: #25d366; font-size: 12px; font-weight: 700;"
-                " padding: 8px 0 4px 0; background: transparent; border: none;")
-            self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, header)
+        def add_header(text, colour="#94a3b8"):
+            label = QLabel(f"  {text}")
+            label.setStyleSheet(
+                f"color: {colour}; font-size: 12px; font-weight: 700;"
+                " padding: 10px 0 4px 0; background: transparent; border: none;")
+            self.conv_list_layout.insertWidget(
+                self.conv_list_layout.count() - 1, label)
 
+        def new_table(headers):
             table = QTableWidget()
-            headers = ["Chat", "Direction", "Date & Time", "Message", "Status"]
             table.setColumnCount(len(headers))
             table.setHorizontalHeaderLabels(headers)
-            table.setRowCount(len(messages))
             table.setSortingEnabled(False)
             table.verticalHeader().setVisible(False)
             table.setShowGrid(False)
@@ -3101,119 +3242,121 @@ class ArtifactsPage(QWidget):
                     border: none; border-bottom: 2px solid #1e293b;
                     font-size: 11px; font-weight: 700; padding: 9px; }
             """)
+            return table
 
-            ordered = sorted(messages, key=lambda a: str(a.get("date") or ""), reverse=True)
-            for row, artifact in enumerate(ordered[:5000]):
-                data = artifact.get("_data", {})
-                is_deleted = artifact.get("type") == "Deleted Message"
-                kind = data.get("kind", "text")
-                body = data.get("text") or data.get("attachment") or ""
-                if not body:
-                    body = "(no body stored)" if is_deleted else "(empty)"
-                if kind == "media" and not data.get("text"):
-                    body = f"<media: {data.get('attachment') or 'attachment'}>"
-                status = data.get("status", "")
+        def finish_table(table, stretch=0):
+            header = table.horizontalHeader()
+            header.setSectionResizeMode(stretch, QHeaderView.ResizeMode.Stretch)
+            for column in range(table.columnCount()):
+                if column != stretch:
+                    header.setSectionResizeMode(
+                        column, QHeaderView.ResizeMode.ResizeToContents)
+            rows = table.rowCount()
+            table.setMinimumHeight(min(420, 58 + 32 * max(1, rows)))
+            self.conv_list_layout.insertWidget(
+                self.conv_list_layout.count() - 1, table)
+
+        def add_chat_table(title, conversations, colour):
+            if not conversations:
+                return
+            add_header(f"{title} ({len(conversations)})", colour)
+            conversations.sort(key=lambda c: c.get("last_date", ""), reverse=True)
+            headers = ["Contact / Chat", "Phone Number", "Messages",
+                       "First Message", "Last Message"]
+            table = new_table(headers)
+            table.setRowCount(len(conversations))
+            for row, conv in enumerate(conversations):
                 cells = [
-                    data.get("chat") or data.get("sender") or "Unknown",
-                    data.get("direction", ""),
-                    data.get("date", ""),
-                    body.replace("\n", " "),
-                    status,
+                    conv.get("contact_name") or conv.get("chat") or "Unknown",
+                    conv.get("phone") or "\u2014",
+                    str(len(conv.get("messages", []))),
+                    conv.get("first_date", ""),
+                    conv.get("last_date", ""),
                 ]
                 for column, value in enumerate(cells):
-                    item = QTableWidgetItem(str(value))
-                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                    if is_deleted:
-                        item.setForeground(QColor("#f87171"))
-                    elif kind == "media":
-                        item.setForeground(QColor("#93c5fd"))
-                    elif data.get("direction") == "notification":
-                        item.setForeground(QColor("#f59e0b"))
-                    table.setItem(row, column, item)
+                    cell = QTableWidgetItem(str(value))
+                    cell.setFlags(cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    if column == 0:
+                        cell.setForeground(QColor(colour))
+                    elif column in (3, 4):
+                        cell.setForeground(QColor("#94a3b8"))
+                    table.setItem(row, column, cell)
+            table.itemSelectionChanged.connect(
+                lambda _t=table, _c=conversations: self._open_whatsapp_thread(_t, _c))
+            finish_table(table, stretch=0)
 
-            header_view = table.horizontalHeader()
-            header_view.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            header_view.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-            header_view.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-            header_view.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-            header_view.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-            table.setMinimumHeight(420)
-            self._wire_table(table, ordered)
-            self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, table)
+        add_chat_table("Chats", direct, "#25d366")
+        add_chat_table("Groups", groups, "#22d3ee")
+
+        if media:
+            add_header(f"Media ({len(media)}) \u2014 use Grid view for thumbnails")
+            table = new_table(["File", "Type", "Status"])
+            table.setRowCount(len(media))
+            for row, item in enumerate(media):
+                data = item.get("_data", {})
+                cells = [data.get("filename") or item.get("source", ""),
+                         item.get("type", ""),
+                         data.get("status", "")]
+                for column, value in enumerate(cells):
+                    cell = QTableWidgetItem(str(value))
+                    cell.setFlags(cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    table.setItem(row, column, cell)
+            finish_table(table, stretch=0)
+
+        if files:
+            add_header(f"Files ({len(files)})")
+            table = new_table(["File", "Type", "Path"])
+            table.setRowCount(len(files))
+            for row, item in enumerate(files):
+                data = item.get("_data", {})
+                cells = [data.get("filename") or item.get("summary", ""),
+                         item.get("type", ""),
+                         data.get("path") or item.get("source", "")]
+                for column, value in enumerate(cells):
+                    cell = QTableWidgetItem(str(value))
+                    cell.setFlags(cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    table.setItem(row, column, cell)
+            finish_table(table, stretch=2)
 
         if backups:
-            header = QLabel(f"  Local backups ({len(backups)})")
-            header.setStyleSheet(
-                "color: #25d366; font-size: 12px; font-weight: 700;"
-                " padding: 12px 0 4px 0; background: transparent; border: none;")
-            self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, header)
-            for backup in backups[:30]:
-                data = backup.get("_data", {})
-                frame = QFrame()
-                frame.setStyleSheet("""
-                    QFrame { background: #0d2e1c; border-radius: 8px; border: 1px solid #14532d; }
-                """)
-                frame.setFixedHeight(46)
-                layout = QHBoxLayout(frame)
-                layout.setContentsMargins(12, 6, 12, 6)
-                name = QLabel(f"{data.get('filename', '')}")
-                name.setStyleSheet("color: #e2e8f0; font-size: 12px; background: transparent; border: none;")
-                layout.addWidget(name, 1)
-                meta = QLabel(f"{data.get('date', '')}  {data.get('size', '')}")
-                meta.setStyleSheet("color: #94a3b8; font-size: 11px; background: transparent; border: none;")
-                layout.addWidget(meta)
-                state = QLabel("SEALED" if data.get("sealed") else "PLAINTEXT")
-                state.setStyleSheet(
-                    f"color: {'#f59e0b' if data.get('sealed') else '#22c55e'};"
-                    " font-size: 10px; font-weight: 700; background: transparent; border: none;")
-                layout.addWidget(state)
-                self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, frame)
+            add_header(f"Backups ({len(backups)})")
+            table = new_table(["File", "Format", "Size", "Date", "Status"])
+            table.setRowCount(len(backups))
+            for row, item in enumerate(backups):
+                data = item.get("_data", {})
+                cells = [data.get("name") or data.get("filename") or item.get("summary", ""),
+                         data.get("format", ""),
+                         data.get("size", ""),
+                         data.get("date", item.get("date", "")),
+                         data.get("status", "")]
+                for column, value in enumerate(cells):
+                    cell = QTableWidgetItem(str(value))
+                    cell.setFlags(cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    table.setItem(row, column, cell)
+            finish_table(table, stretch=0)
 
-        type_groups = {}
-        for item in files:
-            ftype = item.get("type", "Cache File")
-            type_groups.setdefault(ftype, []).append(item)
-
-        for ftype in ["Image", "Video", "Audio", "GIF", "Document", "Cache File"]:
-            items = type_groups.get(ftype, [])
-            if not items:
-                continue
-            header = QLabel(f"  {ftype} ({len(items)})")
-            header.setStyleSheet(f"color: #25d366; font-size: 12px; font-weight: 700; padding: 8px 0 4px 0; background: transparent; border: none;")
-            self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, header)
-
-            for item in items[:200]:
-                item_frame = QFrame()
-                item_frame.setStyleSheet("""
-                    QFrame { background: #111827; border-radius: 8px; border: 1px solid #1e293b; }
-                    QFrame:hover { background: #1a2234; border: 1px solid #334155; }
-                """)
-                item_frame.setFixedHeight(44)
-                item_layout = QHBoxLayout(item_frame)
-                item_layout.setContentsMargins(12, 6, 12, 6)
-
-                fname = item.get("_data", {}).get("filename", "")
-                sz = item.get("_data", {}).get("size", "")
-                name_lbl = QLabel(fname[:50])
-                name_lbl.setStyleSheet("color: #e2e8f0; font-size: 12px; background: transparent; border: none;")
-                name_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-                item_layout.addWidget(name_lbl, 1)
-
-                if sz:
-                    sz_lbl = QLabel(sz)
-                    sz_lbl.setStyleSheet("color: #64748b; font-size: 11px; background: transparent; border: none;")
-                    item_layout.addWidget(sz_lbl)
-
-                if ftype in ("Image", "Video", "GIF"):
-                    view_btn = self._media_button("View", "#25d366")
-                    remote_path = item.get("_data", {}).get("path", "")
-                    view_btn.clicked.connect(lambda checked, p=remote_path, t=ftype: self._open_media_viewer(p, t))
-                    item_layout.addWidget(view_btn)
-
-                self.conv_list_layout.insertWidget(self.conv_list_layout.count() - 1, item_frame)
+        if notifications:
+            add_header(f"Notification remnants ({len(notifications)})")
+            table = new_table(["Date", "Chat", "Text"])
+            table.setRowCount(len(notifications))
+            for row, item in enumerate(notifications):
+                data = item.get("_data", {})
+                cells = [data.get("date", item.get("date", "")),
+                         data.get("chat") or data.get("sender", ""),
+                         data.get("text", item.get("summary", ""))]
+                for column, value in enumerate(cells):
+                    cell = QTableWidgetItem(str(value))
+                    cell.setFlags(cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    table.setItem(row, column, cell)
+            finish_table(table, stretch=2)
 
         self.stacked.setCurrentIndex(1)
 
+    def _open_whatsapp_thread(self, table, conversations):
+        """Open the transcript behind the selected chat row."""
+        row = table.currentRow()
+        if 0 <= row < len(conversations):
+            self._on_conversation_clicked(conversations[row])
     def _show_telegram_conversations(self):
         """Telegram as an examiner reads it: chats, then messages, then media.
 

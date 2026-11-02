@@ -371,6 +371,153 @@ class TelegramViewerTest(unittest.TestCase):
         self.assertTrue(any("Export chat history" in text for text in labels))
 
 
+@unittest.skipUnless(_QT_IMPORT, "PyQt6 is not available")
+class WhatsAppViewerTest(unittest.TestCase):
+    """WhatsApp has to answer chats, groups, media and backups in that order.
+
+    The old view was a flat row per message, so a thread had to be rebuilt by
+    eye. These tests pin the threaded projection: a line per chat with its
+    phone, count and first/last date, a separate group table, and a click that
+    opens the transcript.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._app = _make_qapp()
+        cls.page = ArtifactsPage()
+        cls.page.resize(1100, 760)
+        _pump(cls._app)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.page.deleteLater()
+        _pump(cls._app)
+
+    def setUp(self):
+        self.page.all_artifacts = _whatsapp_fixture()
+        self.page._contacts = [a for a in self.page.all_artifacts
+                               if a.get("category") == "Contacts"]
+        self.page.serial = "TESTDEVICE"
+        self.page.device_bar.get_first_serial = lambda: "TESTDEVICE"
+        self.page._on_app_clicked(
+            {"name": "WhatsApp", "category": "WhatsApp", "type": "chat",
+             "color": "#25d366"})
+        _pump(self._app)
+
+    def tearDown(self):
+        self.page._current_app = None
+        self.page.stacked.setCurrentIndex(0)
+        self.page._view_mode = "table"
+        _pump(self._app)
+
+    def _tables(self):
+        return self.page.conv_list_widget.findChildren(QTableWidget)
+
+    def test_chats_and_groups_get_their_own_tables(self):
+        tables = self._tables()
+        self.assertEqual(len(tables), 5,
+                         "expected chats, groups, media, files and backups")
+        chats, groups, media, files, backups = tables
+        self.assertEqual(chats.rowCount(), 2)
+        self.assertEqual(groups.rowCount(), 1)
+        self.assertEqual(media.rowCount(), 1)
+        self.assertEqual(backups.rowCount(), 1)
+
+    def test_a_chat_line_carries_count_and_date_range(self):
+        chats = self._tables()[0]
+        row = next(r for r in range(chats.rowCount())
+                   if chats.item(r, 0).text() == "Kofi Boateng")
+        self.assertEqual(chats.item(row, 1).text(), "233201234567")
+        self.assertEqual(chats.item(row, 2).text(), "4")
+        self.assertEqual(chats.item(row, 3).text(), "2026-02-06 08:10:00")
+        self.assertEqual(chats.item(row, 4).text(), "2026-02-06 08:20:00")
+
+    def test_a_jid_resolves_to_the_saved_contact(self):
+        chats = self._tables()[0]
+        names = {chats.item(r, 0).text() for r in range(chats.rowCount())}
+        self.assertIn("Kofi Boateng", names)
+
+    def test_a_group_jid_is_not_shown_as_a_phone_number(self):
+        groups = self._tables()[1]
+        self.assertEqual(groups.item(0, 1).text(), "\u2014")
+        self.assertTrue(groups.item(0, 0).text().startswith("Group"))
+
+    def test_clicking_a_chat_opens_its_transcript(self):
+        chats = self._tables()[0]
+        chats.selectRow(0)
+        _pump(self._app)
+        self.assertEqual(self.page.stacked.currentIndex(), 2)
+        self.assertEqual(self.page.chat_contact_name.text(), "Kofi Boateng")
+        self.assertIn("4 messages", self.page.chat_msg_count.text())
+
+    def test_the_count_line_names_chats_groups_and_media(self):
+        text = self.page.conv_count.text()
+        self.assertIn("2 chats", text)
+        self.assertIn("1 groups", text)
+        self.assertIn("1 media", text)
+        self.assertIn("1 backups", text)
+
+    def test_a_deleted_message_keeps_a_readable_placeholder(self):
+        chats, _, _, _, _ = self.page._collect_whatsapp_chats()
+        conv = chats["233201234567@s.whatsapp.net"]
+        bodies = [m["_data"]["body"] for m in conv["messages"]]
+        self.assertIn("This message was deleted", bodies)
+
+
+def _whatsapp_fixture():
+    def message(chat, sender, text, direction, date, kind="Message",
+                deleted=False):
+        return {
+            "type": kind, "category": "WhatsApp", "date": date,
+            "summary": text or "(no body)", "source": "",
+            "_data": {"chat": chat, "sender": sender, "direction": direction,
+                      "text": text, "kind": "text", "deleted": deleted,
+                      "attachment": "", "date": date, "timestamp": date,
+                      "source": "", "status": ""},
+        }
+
+    jid = "233201234567@s.whatsapp.net"
+    group = "120363000000000000@g.us"
+    media_path = "/sdcard/Android/media/com.whatsapp/WhatsApp/Media/IMG-1.jpg"
+    return [
+        message(jid, "233201234567", "Hello there", "incoming",
+                "2026-02-06 08:10:00"),
+        message(jid, "me", "Hi, how are you?", "outgoing",
+                "2026-02-06 08:12:00"),
+        message(jid, "233201234567", "Fine", "incoming",
+                "2026-02-06 08:15:00"),
+        message(jid, "233201234567", "", "incoming",
+                "2026-02-06 08:20:00", kind="Deleted Message", deleted=True),
+        message("Alice Mensah", "Alice Mensah", "Sent the report", "incoming",
+                "2026-02-05 17:00:00"),
+        message("Alice Mensah", "me", "Got it", "outgoing",
+                "2026-02-05 17:05:00"),
+        message(group, "111", "Morning all", "incoming", "2026-02-04 09:00:00"),
+        message(group, "222", "Morning", "incoming", "2026-02-04 09:01:00"),
+        message(group, "me", "Hi team", "outgoing", "2026-02-04 09:02:00"),
+        {"type": "Image", "category": "WhatsApp", "date": "",
+         "summary": "IMG-1.jpg", "source": media_path,
+         "_data": {"filename": "IMG-1.jpg", "path": media_path,
+                   "type": "Image", "size": "", "status": "Shared storage"}},
+        {"type": "Document", "category": "WhatsApp", "date": "",
+         "summary": "report.pdf", "source": "/sdcard/.../report.pdf",
+         "_data": {"filename": "report.pdf",
+                   "path": "/sdcard/.../report.pdf",
+                   "type": "Document", "size": "", "status": "Shared storage"}},
+        {"type": "Backup", "category": "WhatsApp", "date": "2026-01-30",
+         "summary": "msgstore.db.crypt14",
+         "source": "/sdcard/.../msgstore.db.crypt14",
+         "_data": {"filename": "msgstore.db.crypt14",
+                   "name": "msgstore.db.crypt14", "path": "/sdcard/...",
+                   "size": "12 MB", "date": "2026-01-30",
+                   "format": "Crypt14", "sealed": True,
+                   "status": "Encrypted backup"}},
+        {"type": "Contact", "category": "Contacts", "date": "",
+         "summary": "Kofi Boateng",
+         "_data": {"name": "Kofi Boateng", "phone": "+233 20 123 4567"}},
+    ]
+
+
 def _telegram_fixture():
     media_path = "/sdcard/Android/data/org.telegram.messenger/cache/p1.jpg"
     return [
