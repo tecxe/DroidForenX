@@ -26,10 +26,9 @@ from desktop.ui.pages.identify_page import IdentifyPage
 from desktop.ui.pages.acquire_page import AcquirePage
 from desktop.ui.pages.examine_page import ExaminePage
 from desktop.ui.pages.report_page import ReportPage
-from desktop.ui.pages.browse_page import BrowsePage
 from desktop.ui.pages.artifacts_page import ArtifactsPage
 from desktop.ui.main_window import MainWindow
-print("\nAll 9 pages import OK")
+print("\nAll 8 pages import OK")
 print("MainWindow imports OK")
 
 from desktop.ui.widgets.stage_bar import StageBar

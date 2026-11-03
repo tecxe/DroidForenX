@@ -15,7 +15,6 @@ from .pages.identify_page import IdentifyPage
 from .pages.acquire_page import AcquirePage
 from .pages.examine_page import ExaminePage
 from .pages.report_page import ReportPage
-from .pages.browse_page import BrowsePage
 from .pages.artifacts_page import ArtifactsPage
 from .pages.sim_page import SimForensicsPage
 from ..core.adb_manager import list_devices, get_device_info
@@ -224,9 +223,8 @@ class MainWindow(QMainWindow):
                 ("  4. Reporting", 6),
             ]),
             ("INVESTIGATION", [
-                ("  File Browser", 7),
-                ("  Artifact Viewer", 8),
-                ("  SIM Info", 9),
+                ("  Artifact Viewer", 7),
+                ("  SIM Info", 8),
             ]),
         ]
 
@@ -313,7 +311,6 @@ class MainWindow(QMainWindow):
         self.acquire_page = AcquirePage(get_db)
         self.examine_page = ExaminePage()
         self.report_page = ReportPage(get_db)
-        self.browse_page = BrowsePage()
         self.artifacts_page = ArtifactsPage()
         self.sim_page = SimForensicsPage()
 
@@ -324,7 +321,6 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.acquire_page)
         self.stack.addWidget(self.examine_page)
         self.stack.addWidget(self.report_page)
-        self.stack.addWidget(self.browse_page)
         self.stack.addWidget(self.artifacts_page)
         self.stack.addWidget(self.sim_page)
 
@@ -362,7 +358,7 @@ class MainWindow(QMainWindow):
 
         export_action = QAction("Export Report...", self)
         export_action.setShortcut("Ctrl+E")
-        export_action.triggered.connect(lambda: self._navigate_to(7))
+        export_action.triggered.connect(lambda: self._navigate_to(6))
         file_menu.addAction(export_action)
 
         file_menu.addSeparator()
@@ -560,14 +556,14 @@ class MainWindow(QMainWindow):
 
         page_names = {0: "Dashboard", 1: "Case Management", 2: "Device Connection",
                       3: "Identification", 4: "Acquisition",
-                      5: "Examination", 6: "Reporting", 7: "File Browser", 8: "Artifact Viewer",
-                      9: "SIM Info"}
+                      5: "Examination", 6: "Reporting", 7: "Artifact Viewer",
+                      8: "SIM Info"}
         self.statusBar().showMessage(f"DroidForenX — {page_names.get(index, 'Unknown')}")
 
     def _navigate_by_name(self, name: str):
         mapping = {"home": 0, "case": 1, "device": 2, "identify": 3,
-                   "acquire": 4, "examine": 5, "report": 6, "browse": 7, "artifacts": 8,
-                   "sim": 9}
+                   "acquire": 4, "examine": 5, "report": 6, "artifacts": 7,
+                   "sim": 8}
         self._navigate_to(mapping.get(name, 0))
 
     def _auto_scan_devices(self):

@@ -485,7 +485,7 @@ class NavigationRouteTest(unittest.TestCase):
 
     def test_every_named_route_reaches_its_own_page(self):
         routes = ("home", "case", "device", "identify", "acquire",
-                  "examine", "report", "browse", "artifacts", "sim")
+                  "examine", "report", "artifacts", "sim")
         landed = {}
         for name in routes:
             self.window._navigate_by_name(name)

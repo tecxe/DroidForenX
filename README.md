@@ -782,8 +782,8 @@ The engine tests (`test_forensic_engine.py`) pin the acquisition edge cases:
 The UI tests (`test_ui_export.py`) run a headless Qt application and generate
 each report format, proving the default **HTML** renders its custody log, the
 **PDF** folds typographic characters instead of raising, and the **XLSX**
-workbook is readable. They also cover `PullFileWorker`'s success and failure
-contracts. This module is skipped when PyQt6 cannot start an application.
+workbook is readable. This module is skipped when PyQt6 cannot start an
+application.
 
 The image-writer tests (`test_imaging.py`) exercise the writers without a device:
 

@@ -1,5 +1,5 @@
 """
-Headless Qt tests for the report exports and the browse-page pull worker.
+Headless Qt tests for the report exports.
 
 These need a Qt application but no display and no device: the platform is forced
 to ``offscreen`` and the whole module is skipped if PyQt6 cannot start one.
@@ -11,8 +11,6 @@ silently:
     folded rather than raising
   * ``Verification Workbook (XLSX)`` is derived from the evidence store, not the
     app database, and must be a readable workbook
-
-``PullFileWorker`` is checked for its success and failure contracts.
 
 Run with:  python -m unittest desktop.tests.test_ui_export -v
 """
@@ -141,66 +139,6 @@ class ReportFormatsTest(unittest.TestCase):
         row = list(wb["Integrity"].iter_rows(min_row=2, max_row=2, values_only=True))[0]
         self.assertEqual(row[3], "OK")
         self.assertEqual(row[1], row[2])
-
-
-@unittest.skipUnless(_QT_IMPORT, "PyQt6 is not available")
-class PullFileWorkerTest(unittest.TestCase):
-    """The browse-page pull worker's success and failure contracts."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls._app = _make_qapp()
-
-    def setUp(self):
-        from desktop.ui.pages.browse_page import PullFileWorker
-        self.PullFileWorker = PullFileWorker
-        self.tmp = Path(tempfile.mkdtemp(prefix="dfx-pullw-"))
-
-    def tearDown(self):
-        shutil.rmtree(self.tmp, ignore_errors=True)
-
-    def _run(self, serial, remote):
-        worker = self.PullFileWorker(serial, remote)
-        captured = {}
-        worker.finished.connect(captured.update)
-        worker.run()  # synchronous, same thread: no event loop needed
-        return captured
-
-    def test_no_serial_reports_no_device(self):
-        result = self._run("", "/sdcard/photo.jpg")
-        self.assertFalse(result["success"])
-        self.assertIn("No device", result["error"])
-
-    def test_directory_path_is_rejected(self):
-        result = self._run("SERIAL", "/")
-        self.assertFalse(result["success"])
-        self.assertIn("Not a file", result["error"])
-
-    def test_successful_pull_reports_local_path(self):
-        def fake_adb_cmd(args, timeout=120):
-            Path(args[-1]).write_bytes(b"payload")
-            return True, ""
-
-        with mock.patch("desktop.core.adb_manager.adb_cmd", fake_adb_cmd), \
-             mock.patch("desktop.ui.pages.browse_page.os.path.expanduser",
-                        return_value=str(self.tmp)):
-            result = self._run("SERIAL", "/sdcard/dcim/photo.jpg")
-
-        self.assertTrue(result["success"], result)
-        self.assertEqual(result["filename"], "photo.jpg")
-        self.assertEqual(result["extension"], ".jpg")
-        self.assertTrue(Path(result["local_path"]).exists())
-        self.assertTrue(str(self.tmp) in result["local_path"],
-                        "pull should land under the (patched) cache dir")
-
-    def test_failed_pull_reports_error(self):
-        with mock.patch("desktop.core.adb_manager.adb_cmd", return_value=(False, "")), \
-             mock.patch("desktop.ui.pages.browse_page.os.path.expanduser",
-                        return_value=str(self.tmp)):
-            result = self._run("SERIAL", "/sdcard/dcim/photo.jpg")
-
-        self.assertFalse(result["success"])
-        self.assertEqual(result["error"], "ADB pull failed")
 
 
 if __name__ == "__main__":
