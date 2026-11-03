@@ -121,12 +121,17 @@
 <section class="hero">
     <div class="badge"><span class="dot"></span> v1.0.35 - Latest Release</div>
     <h1>Professional Mobile<br>Digital Forensics</h1>
-    <p>Standalone desktop toolkit for Android device forensic analysis. 4-stage forensic workflow, 24 artifact loaders, WhatsApp and Telegram without root, physical imaging through MediaTek BootROM / Qualcomm EDL, selectable Raw (dd) / ZIP image output, court-ready reporting. Single .exe, no installation.</p>
+    <p>Standalone desktop toolkit for Android device forensic analysis. 4-stage forensic workflow, 24 artifact loaders, WhatsApp and Telegram without root, physical imaging through MediaTek BootROM / Qualcomm EDL, selectable Raw (dd) / ZIP image output, court-ready reporting. Single self-contained .exe, wrapped in a standard setup wizard. No Python, no dependencies.</p>
     <div class="hero-btns">
-        <a class="btn btn-primary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.35/DroidForenX.exe" download>
+        <a class="btn btn-primary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.35/DroidForenX_Installer.exe" download>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Download DroidForenX.exe
+            Download DroidForenX_Installer.exe
         </a>
+        <a class="btn btn-secondary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.35/DroidForenX.exe" download>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            DroidForenX.exe &mdash; Portable
+        </a>
+    </div>
         <a class="btn btn-secondary" href="https://github.com/tecxe/DroidForenX" target="_blank">
             <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
             View Source Code
@@ -135,7 +140,7 @@
 </section>
 
 <div class="stats">
-    <div class="stat"><div class="stat-val">55.9 MB</div><div class="stat-label">File Size</div></div>
+    <div class="stat"><div class="stat-val">55.4 MB</div><div class="stat-label">File Size</div></div>
     <div class="stat"><div class="stat-val">4</div><div class="stat-label">Forensic Stages</div></div>
     <div class="stat"><div class="stat-val">24</div><div class="stat-label">Artifact Loaders</div></div>
     <div class="stat"><div class="stat-val">0</div><div class="stat-label">Dependencies Required</div></div>
@@ -148,7 +153,7 @@
 
 <section class="section" id="features">
     <h2 class="section-title">Everything You Need</h2>
-    <p class="section-sub">Professional-grade forensic capabilities packed into a single portable executable.</p>
+    <p class="section-sub">Professional-grade forensic capabilities packed into a single self-contained executable inside a standard installer.</p>
 
     <div class="features">
         <div class="feature">
@@ -179,7 +184,7 @@
         <div class="feature">
             <div class="feature-icon" style="background:rgba(100,116,139,0.15);color:var(--muted)">&#128187;</div>
             <h3>Zero Installation</h3>
-            <p>Single .exe file. ADB drivers bundled. No Python, no dependencies, no installation wizard. Just double-click and run.</p>
+            <p>Single self-contained .exe wrapped in a standard setup wizard. ADB drivers bundled inside. No Python, no dependencies. Run the installer, or double-click the portable exe.</p>
         </div>
         <div class="feature">
             <div class="feature-icon" style="background:rgba(129,140,248,0.15);color:#818cf8">&#127769;</div>
@@ -261,11 +266,11 @@
         <div class="file-info">
             <div class="info-card">
                 <div class="label">File Name</div>
-                <div class="value">DroidForenX.exe</div>
+                <div class="value">DroidForenX_Installer.exe</div>
             </div>
             <div class="info-card">
                 <div class="label">File Size</div>
-                <div class="value">55.9 MB</div>
+                <div class="value">55.4 MB</div>
             </div>
             <div class="info-card">
                 <div class="label">Version</div>
@@ -275,12 +280,12 @@
 
         <h3 style="margin-bottom:12px">SHA-256 Hash</h3>
         <div class="hash-box">
-            <code id="hash">5d1d037402b82b03bc26a078466e8f3e9b0475f0791c99d7b76ee066a35a0abb</code>
+            <code id="hash">88f902e127d1208ff0864796da434b44e83c94a28f2d429f14e0d35574863846</code>
             <button class="copy-btn" onclick="copyHash()">Copy Hash</button>
         </div>
 
         <h3 style="margin-bottom:4px">Hash Verification</h3>
-        <p>Download the .exe, then paste its SHA-256 hash below to verify authenticity.</p>
+        <p>Download the installer, then paste its SHA-256 hash below to verify authenticity.</p>
         <div class="verify-input">
             <input type="text" id="verifyInput" placeholder="Paste SHA-256 hash here..." autocomplete="off" spellcheck="false">
             <button onclick="verifyHash()">Verify</button>
@@ -288,7 +293,7 @@
         <div class="verify-result" id="verifyResult"></div>
 
         <p style="margin-top:20px;color:var(--muted);font-size:12px">
-            PowerShell: <code style="background:var(--bg);padding:3px 8px;border-radius:4px;font-size:11px;color:var(--orange)">(Get-FileHash DroidForenX.exe -Algorithm SHA256).Hash</code>
+            PowerShell: <code style="background:var(--bg);padding:3px 8px;border-radius:4px;font-size:11px;color:var(--orange)">(Get-FileHash DroidForenX_Installer.exe -Algorithm SHA256).Hash</code>
         </p>
     </div>
 
@@ -296,7 +301,7 @@
         <div class="step">
             <div class="step-num">1</div>
             <h4>Download</h4>
-            <p>Click the download button above to get DroidForenX.exe from GitHub Releases.</p>
+            <p>Click the download button above to get DroidForenX_Installer.exe from GitHub Releases.</p>
         </div>
         <div class="step">
             <div class="step-num">2</div>
@@ -311,7 +316,7 @@
         <div class="step">
             <div class="step-num">4</div>
             <h4>Run</h4>
-            <p>Double-click DroidForenX.exe. Connect your Android device and start forensics.</p>
+            <p>Run DroidForenX_Installer.exe and install it, then launch the app. Connect your Android device and start forensics.</p>
         </div>
     </div>
 </section>
@@ -321,7 +326,7 @@
 </footer>
 
 <script>
-const EXPECTED_HASH = '5d1d037402b82b03bc26a078466e8f3e9b0475f0791c99d7b76ee066a35a0abb';
+const EXPECTED_HASH = '88f902e127d1208ff0864796da434b44e83c94a28f2d429f14e0d35574863846';
 
 function copyHash() {
     navigator.clipboard.writeText(EXPECTED_HASH).then(() => {
