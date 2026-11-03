@@ -1,6 +1,4 @@
 """Stage 2: Data Acquisition — full forensic extraction."""
-import subprocess
-import sys
 import uuid
 import hashlib
 import re
@@ -11,8 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                               QFrame, QComboBox, QGroupBox, QGridLayout, QProgressBar,
-                              QCheckBox, QScrollArea, QMessageBox, QLineEdit,
-                              QFileDialog)
+                              QCheckBox, QScrollArea, QMessageBox)
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSignal as Signal
 from ..widgets.log_console import LogConsole
 from ..widgets.data_table import DataTable
@@ -29,65 +26,6 @@ try:
     _CUSTODY = CustodyLogger()
 except Exception:
     _CUSTODY = None
-
-
-def _count(results, key: str) -> int:
-    """A count out of an acquisition result, whether or not it is there.
-
-    The result dict is filled by phases that can each be skipped, cancelled or
-    fail, so every reader has to tolerate a missing key. Hard-indexing one was
-    enough to take the finish handler down with a KeyError.
-    """
-    try:
-        return int((results or {}).get(key, 0) or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _summary_rows(results) -> list:
-    """``(label, count, detail)`` for every tally an acquisition produced.
-
-    This is the single source for the closing summary: the console block and the
-    on-screen table both render this list, so the two can never drift apart. A
-    phase that was skipped, cancelled or failed simply contributes nothing
-    instead of raising on a key it never wrote.
-    """
-    def megabytes(key: str) -> float:
-        return _count(results, key) / (1024 * 1024)
-
-    rows = [
-        ("Contacts", _count(results, "contacts"), ""),
-        ("SMS Messages", _count(results, "sms"), ""),
-        ("Call Log Entries", _count(results, "calls"), ""),
-        ("Calendar Events", _count(results, "calendar"), ""),
-        ("Browser History", _count(results, "browser"), ""),
-        ("App Databases", _count(results, "databases"), ""),
-        ("Media Files", _count(results, "media_files"), ""),
-        ("Documents", _count(results, "documents"), ""),
-        ("App Data (Social)", _count(results, "app_data"), ""),
-        ("Device Info", _count(results, "device_info"), ""),
-    ]
-
-    # Whole-image and bulk phases: only worth a line when they actually ran.
-    for label, count_key, byte_key in (
-            ("Full Storage Image", "full_storage_files", "full_storage_bytes"),
-            ("App Data Deep", "app_data_deep_files", "app_data_deep_bytes"),
-            ("ADB Backups", "backup_files", "backup_bytes"),
-            ("Recovered Files", "recovered_files", "recovered_bytes")):
-        count = _count(results, count_key)
-        if count:
-            rows.append((label, count, f"{megabytes(byte_key):.1f} MB"))
-
-    for label, key in (("File Signatures", "signatures_found"),
-                       ("Email Messages", "emails"),
-                       ("Document Metadata", "document_metadata"),
-                       ("Browser Bookmarks", "browser_bookmarks"),
-                       ("Partitions", "partitions")):
-        count = _count(results, key)
-        if count:
-            rows.append((label, count, ""))
-
-    return rows
 
 
 def _sha256(filepath: str) -> str:
@@ -120,195 +58,6 @@ def _store_artifact(session_id: str, name: str, source: str, category: str,
         conn.close()
     except Exception:
         pass
-
-
-class PhysicalWatchWorker(QThread):
-    """Watch the USB bus while the page is open.
-
-    BROM/Preloader only exists for a few seconds after the cable is plugged
-    in, so a one-shot Detect button misses it whenever the operator follows
-    the instructions "power off, hold the buttons, plug in". Polling here
-    means the panel flips to the boot mode by itself and Acquire becomes
-    clickable without a second trip to the button.
-    """
-
-    changed = Signal(list)
-
-    #: The preloader can live for two seconds, so the probe has to be both
-    #: in-process and frequent. SetupAPI enumeration costs about a fifth of a
-    #: millisecond; the old subprocess probe cost a second and missed the
-    #: window outright.
-    INTERVAL = 0.4
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._running = True
-
-    def stop(self):
-        self._running = False
-
-    def run(self):
-        from ...core import physical
-        last = None
-        while self._running:
-            try:
-                modes = physical.detect_usb_modes()
-            except Exception:
-                modes = []
-            key = sorted((m.get("mode", ""), m.get("vid", ""), m.get("pid", ""))
-                         for m in modes)
-            if key != last:
-                last = key
-                self.changed.emit(modes)
-            time.sleep(self.INTERVAL)
-
-
-class PhysicalDetectWorker(QThread):
-    """Detect chipset, boot mode and engine availability off the UI thread."""
-
-    done = Signal(dict)
-
-    def __init__(self, serial: str = "", loader: str = "", parent=None):
-        super().__init__(parent)
-        self._serial = serial
-        self._loader = loader
-
-    def run(self):
-        try:
-            from ...core import physical
-            self.done.emit(physical.detect(self._serial, self._loader))
-        except Exception as exc:  # a probe must never take the window down
-            self.done.emit({"error": str(exc)})
-
-
-class PhysicalImageWorker(QThread):
-    """Drive mtkclient/edl, then validate and record what came back."""
-
-    log = Signal(str, str)
-    finished = Signal(dict)
-
-    def __init__(self, serial: str, case_id: str, loader: str = "",
-                 soc: dict = None, parent=None):
-        super().__init__(parent)
-        self.serial = serial or ""
-        self.case_id = case_id or ""
-        self.loader = loader or ""
-        # The handset is powered off by the time the engine runs, so ADB can no
-        # longer name the chipset. Keep what the last probe learned.
-        self.soc = soc or {}
-        self._reader = None
-
-    def cancel(self):
-        if self._reader is not None:
-            self._reader.cancel()
-
-    def run(self):
-        from ...core import physical, evidence_store
-        try:
-            detection = physical.detect(self.serial, self.loader)
-            soc = (detection.get("profile") or {}).get("soc") or {}
-            if soc.get("family") in (None, "", "unknown") and self.soc:
-                soc = self.soc
-            transports = detection.get("transports") or []
-            tools = detection.get("tools") or {}
-            plan = physical.build_plan(soc, transports, tools, self.loader)
-            if not plan.viable:
-                self.log.emit(plan.reason, "warning")
-                self.finished.emit({"ok": False, "message": plan.reason,
-                                    "files": []})
-                return
-
-            self.log.emit(plan.reason, "info")
-
-            stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-            if self.case_id:
-                try:
-                    outdir = evidence_store.acquired_dir(self.case_id) / "physical"
-                except Exception:
-                    outdir = (Path.home() / ".droidforenx" / "images"
-                              / f"physical_{stamp}")
-            else:
-                outdir = (Path.home() / ".droidforenx" / "images"
-                          / f"physical_{stamp}_{self.serial[:8]}")
-            outdir.mkdir(parents=True, exist_ok=True)
-
-            plan.argv = [arg.replace("<evidence>/physical", str(outdir))
-                         for arg in plan.argv]
-            self.log.emit("Running: " + " ".join(plan.argv), "info")
-            result = physical.run_acquisition(
-                plan,
-                on_line=lambda line: self.log.emit("  " + line, "info"),
-                on_reader=self._set_reader,
-            )
-            if result.get("cancelled"):
-                self.log.emit("Physical acquisition cancelled by user.", "warning")
-                self.finished.emit({"ok": False, "message": "cancelled",
-                                    "files": []})
-                return
-            if not result.get("ok"):
-                message = result.get("message") or (
-                    f"engine exited {result.get('returncode')}")
-                self.log.emit(f"Physical acquisition failed: {message}", "error")
-                self.finished.emit({"ok": False, "message": message,
-                                    "files": []})
-                return
-
-            report = physical.image_set_report(outdir)
-            self.log.emit(
-                f"Engine wrote {report['count']} files "
-                f"({report['total_bytes']:,} bytes).", "success")
-
-            # A whole-disk blob gets its table parsed and its partitions
-            # sliced out, so the examiner is not left with a 128 GiB file.
-            partitions = []
-            for entry in report["files"]:
-                path = Path(entry["path"])
-                try:
-                    image = physical.validate_image(path)
-                except OSError as exc:
-                    self.log.emit(f"  {path.name}: could not validate ({exc})",
-                                  "warning")
-                    continue
-                self.log.emit(
-                    f"  {path.name}: {image.container}, {image.table.upper()}, "
-                    f"{image.size_bytes:,} bytes - {image.summary()}", "info")
-                if image.table in ("gpt", "mbr"):
-                    sliced = physical.extract_partitions(
-                        path, image, outdir / "partitions")
-                    partitions.extend(sliced)
-                    self.log.emit(
-                        f"    sliced {len(sliced)} partitions from {path.name}",
-                        "info")
-
-            if self.case_id:
-                for entry in report["files"]:
-                    evidence_store.record_acquired(
-                        self.case_id, f"physical:{entry['name']}",
-                        entry["path"], "physical",
-                        detail=f"{entry['filesystem'] or 'unrecognised'} "
-                               f"{entry['size_bytes']} bytes",
-                        digest=entry["sha256"])
-                for entry in partitions:
-                    evidence_store.record_acquired(
-                        self.case_id, f"physical:{entry['name']}",
-                        entry["path"], "physical",
-                        detail=f"partition slice, {entry['filesystem'] or 'unknown'}",
-                        digest=entry["sha256"])
-
-            self.finished.emit({
-                "ok": True,
-                "outdir": str(outdir),
-                "files": report["files"],
-                "partitions": partitions,
-                "total_bytes": report["total_bytes"],
-                "engine_output": result.get("output", []),
-            })
-        except Exception as exc:
-            self.log.emit(f"Physical acquisition error: {exc}", "error")
-            self.finished.emit({"ok": False, "message": str(exc), "files": []})
-
-    def _set_reader(self, reader):
-        self._reader = reader
 
 
 class AcquisitionWorker(QThread):
@@ -408,7 +157,7 @@ class AcquisitionWorker(QThread):
         self._log("━━━ Phase 7: Deleted & Trashed Files ━━━", "info")
         self._extract_deleted_files(evidence_root, results)
 
-        # ── Phase 8: Physical Image (BootROM/EDL, no root) ──
+        # ── Phase 8: Physical Image (if root) ──
         if self.level >= 3:
             self.phase_changed.emit("Physical Image")
             self._log("━━━ Phase 8: Physical Image Attempt ━━━", "info")
@@ -461,21 +210,38 @@ class AcquisitionWorker(QThread):
 
         self._complete_session(results)
         audit_log("acquisition_completed", "examiner", self.serial,
-                  json.dumps({"files": _count(results, 'files'), "bytes": _count(results, 'bytes')}))
+                  json.dumps({"files": results["files"], "bytes": results["bytes"]}))
 
         self._log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "info")
-        self._log("ACQUISITION COMPLETE", "success")
-        self._log(f"  Total files:      {_count(results, 'files')}", "success")
-        self._log(f"  Total size:       {_count(results, 'bytes'):,} bytes "
-                  f"({_count(results, 'bytes') / (1024*1024):.1f} MB)", "success")
-        for label, value, detail in _summary_rows(results):
-            line = f"  {label + ':':<18}{value}"
-            if detail:
-                line += f" ({detail})"
-            self._log(line, "success")
-        errors = _count(results, "errors")
-        if errors:
-            self._log(f"  Errors:           {errors}", "warning")
+        self._log(f"ACQUISITION COMPLETE", "success")
+        self._log(f"  Total files:      {results['files']}", "success")
+        self._log(f"  Total size:       {results['bytes']:,} bytes ({results['bytes'] / (1024*1024):.1f} MB)", "success")
+        self._log(f"  Contacts:         {results['contacts']}", "success")
+        self._log(f"  SMS messages:     {results['sms']}", "success")
+        self._log(f"  Call log entries:  {results['calls']}", "success")
+        self._log(f"  Calendar events:  {results['calendar']}", "success")
+        self._log(f"  Media files:      {results['media_files']}", "success")
+        self._log(f"  Documents:        {results['documents']}", "success")
+        self._log(f"  App databases:    {results['databases']}", "success")
+        self._log(f"  Browser history:  {results['browser']}", "success")
+        if results.get("full_storage_files"):
+            self._log(f"  Full storage:     {results['full_storage_files']} files ({results['full_storage_bytes'] / (1024*1024):.1f} MB)", "success")
+        if results.get("app_data_deep_files"):
+            self._log(f"  App data deep:    {results['app_data_deep_files']} files ({results['app_data_deep_bytes'] / (1024*1024):.1f} MB)", "success")
+        if results.get("backup_files"):
+            self._log(f"  ADB backups:      {results['backup_files']} files ({results['backup_bytes'] / (1024*1024):.1f} MB)", "success")
+        if results.get("recovered_files"):
+            self._log(f"  Recovered files:  {results['recovered_files']} ({results['recovered_bytes'] / (1024*1024):.1f} MB)", "success")
+        if results.get("emails"):
+            self._log(f"  Emails:           {results['emails']}", "success")
+        if results.get("document_metadata"):
+            self._log(f"  Doc metadata:     {results['document_metadata']} documents", "success")
+        if results.get("browser_bookmarks"):
+            self._log(f"  Bookmarks:        {results['browser_bookmarks']}", "success")
+        if results.get("signatures_found"):
+            self._log(f"  Signatures found: {results['signatures_found']}", "success")
+        if results.get("partitions"):
+            self._log(f"  Partitions:       {results['partitions']}", "success")
         self._log(f"  Evidence root:    {evidence_root}", "success")
         self._log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "success")
 
@@ -509,7 +275,7 @@ class AcquisitionWorker(QThread):
                 "INSERT INTO acquisition_profiles (id, session_id, primary_mode, hash_algorithm, status, "
                 "total_files, total_bytes, started_at, completed_at) VALUES (?, ?, ?, ?, 'completed', ?, ?, ?, ?)",
                 (str(uuid.uuid4()), self._session_id, f"level_{self.level}", self.hash_algo,
-                 _count(results, 'files'), _count(results, 'bytes'),
+                 results["files"], results["bytes"],
                  datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()),
             )
             conn.commit()
@@ -1079,105 +845,46 @@ class AcquisitionWorker(QThread):
     # ── Phase 8: Physical ──
 
     def _extract_physical(self, evidence_root, results):
-        """Physical image without root, via the chip's boot mode.
+        self._log("Attempting physical image (requires root)...", "warning")
+        ok, test = adb.adb_shell(self.serial, "id")
+        is_root = ok and "uid=0" in test
 
-        The previous version asked for ``su`` and gave up, which on every
-        handset this tool sees meant the phase did nothing while the UI still
-        said "Level 3 - Physical". The block devices stay denied to ``adb`` no
-        matter how the request is worded; the chip's BootROM/EDL is the only
-        unrooted route, and that is what is driven here.
-        """
-        from ...core import physical
+        if not is_root:
+            # Try su
+            ok, test = adb.adb_shell(self.serial, "su -c id")
+            is_root = ok and "uid=0" in test
 
-        self._log("Physical acquisition: detecting chipset and boot mode...", "info")
-        profile = {"soc": physical.normalise_soc({}), "encryption": {}}
-        if self.serial:
-            try:
-                profile = physical.read_device_profile(self.serial)
-            except Exception as exc:
-                self._log(f"  Device profile failed: {exc}", "warning")
-
-        soc = profile.get("soc") or physical.normalise_soc({})
-        crypto = profile.get("encryption") or {}
-        self._log(
-            f"  SoC: {soc.get('label', 'Unknown')}"
-            + (f" ({soc['model']})" if soc.get("model") else ""), "info")
-        self._log(f"  Encryption: {crypto.get('label', 'not stated')}", "info")
-
-        transports = physical.detect_usb_modes()
-        if transports:
-            self._log("  Boot mode: " + ", ".join(t["label"] for t in transports),
-                      "info")
-        else:
-            self._log(
-                "  Boot mode: none (only ADB is present). A physical run has to "
-                "start the engine before the handset is plugged in; use the "
-                "Physical Image panel for that.", "info")
-            self._log(
-                "  Physical phase skipped. No image is claimed and no empty "
-                "'physical' folder is left behind.", "info")
+        if not is_root:
+            self._log("  Device is not rooted — physical image skipped", "warning")
+            self._log("  Logical extraction provides comprehensive data without root", "info")
             return
 
-        tools = physical.find_tools()
-        plan = physical.build_plan(soc, transports, tools)
-        if not plan.viable:
-            self._log(f"  {plan.reason}", "warning")
-            self._log(
-                "  Physical phase skipped. The image is not claimed, and no "
-                "empty 'physical' folder is left behind.", "info")
-            return
+        phys_dir = evidence_root / "physical"
+        phys_dir.mkdir(parents=True, exist_ok=True)
 
-        outdir = evidence_root / "physical"
-        outdir.mkdir(parents=True, exist_ok=True)
-        plan.argv = [arg.replace("<evidence>/physical", str(outdir))
-                     for arg in plan.argv]
-        self._log("  Running: " + " ".join(plan.argv), "info")
-
-        result = physical.run_acquisition(
-            plan, on_line=lambda line: self._log("  " + line, "info"))
-        if result.get("cancelled"):
-            self._log("  Physical acquisition cancelled.", "warning")
-            return
-        if not result.get("ok"):
-            self._log(
-                f"  Engine failed: {result.get('message') or result.get('returncode')}",
-                "warning")
-            return
-
-        try:
-            report = physical.image_set_report(outdir)
-        except OSError as exc:
-            self._log(f"  Could not inventory the image set: {exc}", "warning")
-            return
-
-        for entry in report["files"]:
-            size, _digest = self._hash_and_store(
-                entry["path"], f"physical:{entry['name']}", "physical_image",
-                evidence_root)
+        # Get block device info
+        ok, blocks = adb.adb_shell(self.serial, "ls -la /dev/block/by-name/ 2>/dev/null")
+        if ok and blocks:
+            blocks_path = phys_dir / "block_devices.txt"
+            blocks_path.write_text(blocks, encoding="utf-8", errors="replace")
+            self._hash_and_store(str(blocks_path), "ls /dev/block/by-name", "physical", evidence_root)
             results["files"] += 1
-            results["bytes"] += size
-            self._log(
-                f"  ✓ {entry['name']}: {size:,} bytes"
-                + (f" [{entry['filesystem']}]" if entry["filesystem"] else ""),
-                "success")
+            results["bytes"] += blocks_path.stat().st_size
 
-            # Parse the table and slice a whole-disk blob.
-            try:
-                image = physical.validate_image(entry["path"])
-            except OSError:
-                continue
-            if image.table in ("gpt", "mbr"):
-                slices = physical.extract_partitions(
-                    entry["path"], image, outdir / "partitions")
-                for part in slices:
-                    psize, _ = self._hash_and_store(
-                        part["path"], f"physical:{part['name']}",
-                        "physical_image", evidence_root)
-                    results["files"] += 1
-                    results["bytes"] += psize
-                self._log(
-                    f"    {image.table.upper()} table: sliced {len(slices)} partitions",
-                    "info")
+        # Attempt to image boot partition (small, fast)
+        for part, name in [("/dev/block/by-name/boot", "boot.img"),
+                          ("/dev/block/by-name/recovery", "recovery.img")]:
+            ok, _ = adb.adb_shell(self.serial, f"dd if={part} of=/sdcard/dfx_{name} bs=4096 2>/dev/null")
+            if ok:
+                local = str(phys_dir / name)
+                if adb.pull_file(self.serial, f"/sdcard/dfx_{name}", local, timeout=60):
+                    sz = Path(local).stat().st_size if Path(local).exists() else 0
+                    if sz > 0:
+                        self._hash_and_store(local, part, "physical_image", evidence_root)
+                        results["files"] += 1
+                        results["bytes"] += sz
+                        self._log(f"  ✓ {name}: {sz:,} bytes", "success")
+                adb.adb_shell(self.serial, f"rm /sdcard/dfx_{name}")
 
     # ═══════════════════════════════════════════════════════════════════════
     #  PHASE 9: FULL STORAGE IMAGE
@@ -1309,11 +1016,11 @@ class AcquisitionWorker(QThread):
         except Exception as e:
             self._log(f"  Filesystem info: {e}", "warning")
 
-        self._log(f"  Full storage total: {_count(results, 'full_storage_files')} files "
+        self._log(f"  Full storage total: {results['full_storage_files']} files "
                   f"({results['full_storage_bytes'] / (1024*1024):.1f} MB)", "success")
 
         results["phases"]["full_storage"] = {
-            "files": _count(results, 'full_storage_files'),
+            "files": results["full_storage_files"],
             "bytes": results["full_storage_bytes"],
         }
 
@@ -1448,7 +1155,7 @@ class AcquisitionWorker(QThread):
             "data_packages_pulled": pulled_count,
             "media_packages_pulled": media_count,
             "backups_successful": backup_success,
-            "files": _count(results, 'app_data_deep_files'),
+            "files": results["app_data_deep_files"],
             "bytes": results["app_data_deep_bytes"],
         }
 
@@ -1572,7 +1279,7 @@ class AcquisitionWorker(QThread):
             "sqlite_journals": wal_pulled,
             "signatures_found": signatures_found,
             "documents": docs_pulled,
-            "files": _count(results, 'recovered_files'),
+            "files": results["recovered_files"],
             "bytes": results["recovered_bytes"],
         }
 
@@ -1618,35 +1325,35 @@ class AcquisitionWorker(QThread):
             "acquisition_date": datetime.now(timezone.utc).isoformat(),
             "tool": "DroidForenX v1.0",
             "examiner_notes": "",
-            "total_files": _count(results, 'files'),
-            "total_bytes": _count(results, 'bytes'),
+            "total_files": results["files"],
+            "total_bytes": results["bytes"],
             "phases": {
                 "phase_1_device_properties": results.get("device_info", 0),
                 "phase_2_logical": {
-                    "contacts": _count(results, 'contacts'),
-                    "sms": _count(results, 'sms'),
-                    "calls": _count(results, 'calls'),
-                    "calendar": _count(results, 'calendar'),
+                    "contacts": results["contacts"],
+                    "sms": results["sms"],
+                    "calls": results["calls"],
+                    "calendar": results["calendar"],
                 },
-                "phase_3_browser": _count(results, 'browser'),
-                "phase_4_app_databases": _count(results, 'databases'),
-                "phase_5_filesystem": _count(results, 'media_files'),
-                "phase_6_social_apps": _count(results, 'app_data'),
+                "phase_3_browser": results["browser"],
+                "phase_4_app_databases": results["databases"],
+                "phase_5_filesystem": results["media_files"],
+                "phase_6_social_apps": results["app_data"],
                 "phase_7_deleted": results.get("recovered_files", 0),
                 "phase_8_physical": results.get("partitions", 0),
                 "phase_9_full_storage": {
-                    "files": _count(results, 'full_storage_files'),
+                    "files": results["full_storage_files"],
                     "bytes": results["full_storage_bytes"],
                 },
                 "phase_10_app_data_deep": {
-                    "files": _count(results, 'app_data_deep_files'),
+                    "files": results["app_data_deep_files"],
                     "bytes": results["app_data_deep_bytes"],
-                    "backups": _count(results, 'backup_files'),
+                    "backups": results["backup_files"],
                 },
                 "phase_11_recovered": {
-                    "files": _count(results, 'recovered_files'),
+                    "files": results["recovered_files"],
                     "bytes": results["recovered_bytes"],
-                    "signatures": _count(results, 'signatures_found'),
+                    "signatures": results["signatures_found"],
                 },
                 "phase_12_packaging": "complete",
             },
@@ -1704,9 +1411,9 @@ class AcquisitionWorker(QThread):
             "case_id": self.case_id,
             "level": self.level,
             "results": {
-                "total_files": _count(results, 'files'),
-                "total_bytes": _count(results, 'bytes'),
-                "errors": _count(results, "errors"),
+                "total_files": results["files"],
+                "total_bytes": results["bytes"],
+                "errors": results["errors"],
             },
         }
         audit_path = evidence_root / "AUDIT_TRAIL.json"
@@ -1959,17 +1666,17 @@ class AcquisitionWorker(QThread):
                 details=json.dumps({
                     "serial": self.serial,
                     "level": self.level,
-                    "total_files": _count(results, 'files'),
-                    "total_bytes": _count(results, 'bytes'),
-                    "contacts": _count(results, 'contacts'),
-                    "sms": _count(results, 'sms'),
-                    "calls": _count(results, 'calls'),
+                    "total_files": results["files"],
+                    "total_bytes": results["bytes"],
+                    "contacts": results["contacts"],
+                    "sms": results["sms"],
+                    "calls": results["calls"],
                     "emails": results.get("emails", 0),
                     "document_metadata": results.get("document_metadata", 0),
                     "browser_bookmarks": results.get("browser_bookmarks", 0),
-                    "full_storage": _count(results, 'full_storage_files'),
-                    "app_data_deep": _count(results, 'app_data_deep_files'),
-                    "recovered": _count(results, 'recovered_files'),
+                    "full_storage": results["full_storage_files"],
+                    "app_data_deep": results["app_data_deep_files"],
+                    "recovered": results["recovered_files"],
                 }),
             )
             self._log("  Chain of custody entry recorded", "success")
@@ -1987,16 +1694,16 @@ class AcquisitionWorker(QThread):
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "tool": "DroidForenX v1.0",
             "results_summary": {
-                "total_files": _count(results, 'files'),
-                "total_bytes": _count(results, 'bytes'),
-                "contacts": _count(results, 'contacts'),
-                "sms_messages": _count(results, 'sms'),
-                "call_log_entries": _count(results, 'calls'),
-                "calendar_events": _count(results, 'calendar'),
-                "media_files": _count(results, 'media_files'),
-                "documents": _count(results, 'documents'),
-                "app_databases": _count(results, 'databases'),
-                "browser_history": _count(results, 'browser'),
+                "total_files": results["files"],
+                "total_bytes": results["bytes"],
+                "contacts": results["contacts"],
+                "sms_messages": results["sms"],
+                "call_log_entries": results["calls"],
+                "calendar_events": results["calendar"],
+                "media_files": results["media_files"],
+                "documents": results["documents"],
+                "app_databases": results["databases"],
+                "browser_history": results["browser"],
             },
         }
         manifest_path = evidence_root / "ACQUISITION_MANIFEST.json"
@@ -2045,7 +1752,7 @@ class AcquirePage(QWidget):
         self.level_combo.addItems([
             "Level 1 — Logical (contacts, SMS, calls, calendar, app data, adb backup)",
             "Level 2 — Full (+sdcard media, social apps, documents, full storage, file carving)",
-            "Level 3 — Physical (+flash image via BootROM/EDL, no root)",
+            "Level 3 — Physical (+disk image, requires root)",
         ])
         self.level_combo.setStyleSheet("padding: 10px;")
         config_layout.addWidget(self.level_combo, 0, 1, 1, 2)
@@ -2056,8 +1763,6 @@ class AcquirePage(QWidget):
         config_layout.addWidget(self.hash_combo, 1, 1)
 
         layout.addWidget(config_group)
-
-        layout.addWidget(self._build_physical_group())
 
         # Extraction checklist
         check_group = QGroupBox("📋 Extraction Checklist (auto-selected by level)")
@@ -2140,7 +1845,7 @@ class AcquirePage(QWidget):
 
         # The acquisition runs a fixed list of phases; tracking the index is what
         # lets one bar describe the whole job instead of each phase separately.
-        self._phase_total = 15
+        self._phase_total = 9
         self._phase_index = 0
         self._phase_name = ""
         self._phase_started = False
@@ -2183,302 +1888,6 @@ class AcquirePage(QWidget):
         # No scroll area previously, so a short window compressed the console.
         enable_page_scroll(self)
 
-    # -- physical acquisition (no root) -----------------------------------
-
-    def _build_physical_group(self):
-        group = QGroupBox("🔓 Physical Image (no root)")
-        outer = QVBoxLayout(group)
-        outer.setSpacing(8)
-
-        intro = QLabel(
-            "A physical image is the raw flash, taken below the filesystem. "
-            "Without root that means talking to the chip: MediaTek BootROM "
-            "via mtkclient, or Qualcomm EDL via edl.py. The engines are "
-            "separate open-source tools; this app detects, drives and validates "
-            "them.")
-        intro.setWordWrap(True)
-        intro.setStyleSheet("font-size: 12px; color: #94a3b8; background: transparent;")
-        outer.addWidget(intro)
-
-        row = QHBoxLayout()
-        self.btn_phys_detect = QPushButton("Detect Chipset & Mode")
-        self.btn_phys_detect.setFixedHeight(34)
-        self.btn_phys_detect.clicked.connect(self._detect_physical)
-        row.addWidget(self.btn_phys_detect)
-        row.addStretch()
-        outer.addLayout(row)
-
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(12)
-        grid.setVerticalSpacing(4)
-        self.phys_soc = QLabel("Not detected")
-        self.phys_mode = QLabel("Not detected")
-        self.phys_tools = QLabel("Not checked")
-        for row_index, (label, widget) in enumerate((
-                ("Chipset:", self.phys_soc),
-                ("Boot mode:", self.phys_mode),
-                ("Engine:", self.phys_tools))):
-            name = QLabel(label)
-            name.setStyleSheet("color: #64748b; font-size: 12px; background: transparent;")
-            widget.setStyleSheet("color: #e2e8f0; font-size: 12px; background: transparent;")
-            widget.setWordWrap(True)
-            grid.addWidget(name, row_index, 0)
-            grid.addWidget(widget, row_index, 1)
-        outer.addLayout(grid)
-
-        self.phys_reason = QLabel(
-            "Press Detect. A powered-on handset is read over ADB; for a "
-            "physical image it has to be powered off and connected in "
-            "BootROM/EDL mode.")
-        self.phys_reason.setWordWrap(True)
-        self.phys_reason.setStyleSheet(
-            "color: #f59e0b; font-size: 12px; background: transparent;")
-        outer.addWidget(self.phys_reason)
-
-        loader_row = QHBoxLayout()
-        loader_label = QLabel("Firehose loader:")
-        loader_label.setStyleSheet("color: #64748b; font-size: 12px; background: transparent;")
-        loader_row.addWidget(loader_label)
-        self.phys_loader = QLineEdit()
-        self.phys_loader.setPlaceholderText(
-            "Qualcomm only - programmer .mbn/.elf matching the SoC (optional for MediaTek)")
-        loader_row.addWidget(self.phys_loader, 1)
-        self.btn_phys_browse = QPushButton("Browse")
-        self.btn_phys_browse.setFixedHeight(30)
-        self.btn_phys_browse.clicked.connect(self._browse_loader)
-        loader_row.addWidget(self.btn_phys_browse)
-        outer.addLayout(loader_row)
-
-        run_row = QHBoxLayout()
-        self.btn_phys_acquire = QPushButton("⛏ Acquire Physical Image")
-        self.btn_phys_acquire.setFixedHeight(36)
-        self.btn_phys_acquire.setEnabled(False)
-        self.btn_phys_acquire.clicked.connect(self._acquire_physical)
-        run_row.addWidget(self.btn_phys_acquire)
-        self.btn_phys_stop = QPushButton("⏹ Stop")
-        self.btn_phys_stop.setFixedHeight(36)
-        self.btn_phys_stop.setEnabled(False)
-        self.btn_phys_stop.clicked.connect(self._stop_physical)
-        run_row.addWidget(self.btn_phys_stop)
-        # Shown only when Windows has enumerated the boot-mode device but bound
-        # no driver to it: the one fault the operator has to fix by hand.
-        self.btn_phys_driver = QPushButton("🔌 Install USB Driver…")
-        self.btn_phys_driver.setFixedHeight(36)
-        self.btn_phys_driver.setVisible(False)
-        self.btn_phys_driver.clicked.connect(self._open_driver_helper)
-        run_row.addWidget(self.btn_phys_driver)
-        run_row.addStretch()
-        outer.addLayout(run_row)
-
-        self.phys_ceiling = QLabel(
-            "Ceiling: an encrypted handset yields ciphertext for userdata. "
-            "Boot, vendor, metadata and any unencrypted volume stay readable; "
-            "the image is still integrity-bound evidence for a lab with keys.")
-        self.phys_ceiling.setWordWrap(True)
-        self.phys_ceiling.setStyleSheet(
-            "color: #64748b; font-size: 11px; background: transparent;")
-        outer.addWidget(self.phys_ceiling)
-
-        self._phys_detect_worker = None
-        self._phys_worker = None
-        self._phys_watch = None
-        self._phys_modes = []
-        self._phys_soc = {}
-        self._phys_detected_serial = ""
-        # Whether the last detection found a route worth offering. The Acquire
-        # button follows this, so a finished run cannot leave it enabled when
-        # there is nothing to run against.
-        self._phys_plan_viable = False
-        # A boot mode can appear while Detect is still in flight; remember the
-        # request so it is honoured when that worker retires instead of dropped.
-        self._phys_redetect_pending = False
-        return group
-
-    def _open_driver_helper(self):
-        """Start the signed-driver installer for the boot-mode USB endpoint.
-
-        Windows must have a function driver on the raw BootROM/Preloader node
-        before any engine can read it, and that install needs administrator
-        rights. Zadig is the tool mtkclient's own documentation points at, so
-        the app starts it rather than describing a path the operator has to
-        hunt for.
-        """
-        from ...core import physical
-        zadig = physical.find_zadig()
-        if not zadig:
-            self.console.log(
-                "Zadig is not installed. Download it from https://zadig.akeo.ie "
-                "and place zadig.exe beside the app or in ~/droidforenx-tools.",
-                "warning")
-            QMessageBox.information(
-                self, "Driver installer not found",
-                "Zadig installs the WinUSB driver that a raw BootROM/Preloader "
-                "port needs.\n\nDownload it from https://zadig.akeo.ie and put "
-                "zadig.exe beside DroidForenX.exe or in "
-                "%USERPROFILE%\\droidforenx-tools, then click again.")
-            return
-        try:
-            if sys.platform.startswith("win"):
-                subprocess.Popen(
-                    ["powershell", "-NoProfile", "-Command",
-                     f"Start-Process -FilePath '{zadig}' -Verb RunAs"],
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            else:
-                subprocess.Popen([zadig])
-        except OSError as exc:
-            self.console.log(f"Could not start {zadig}: {exc}", "error")
-            return
-        self.console.log(
-            f"Started {zadig}. Plug the powered-off handset in, then choose "
-            "Options > List All Devices > the MediaTek port > WinUSB > "
-            "Replace Driver.", "info")
-
-    def _browse_loader(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select firehose loader", "",
-            "Loaders (*.mbn *.elf *.bin);;All files (*)")
-        if path:
-            self.phys_loader.setText(path)
-
-    def _detect_physical(self):
-        if self._phys_detect_worker is not None and self._phys_detect_worker.isRunning():
-            # A preloader or BootROM port can come and go faster than a detection
-            # finishes. Queue the request rather than dropping it.
-            self._phys_redetect_pending = True
-            return
-        self._phys_redetect_pending = False
-        serial = self._serial or self.device_bar.get_first_serial()
-        self.phys_reason.setText("Detecting...")
-        self.btn_phys_detect.setEnabled(False)
-        worker = PhysicalDetectWorker(serial, self.phys_loader.text().strip(), self)
-        worker.done.connect(self._on_physical_detected)
-        worker.finished.connect(self._on_detect_worker_finished)
-        self._phys_detect_worker = worker
-        worker.start()
-
-    def _on_detect_worker_finished(self):
-        self.btn_phys_detect.setEnabled(True)
-        if self._phys_redetect_pending:
-            self._phys_redetect_pending = False
-            self._detect_physical()
-
-    def _on_boot_mode_changed(self, modes):
-        """The phone entered or left a boot mode while the page was open."""
-        previous = self._phys_modes
-        self._phys_modes = modes or []
-        now = sorted(m.get("mode", "") for m in self._phys_modes)
-        before = sorted(m.get("mode", "") for m in previous)
-        if now == before:
-            return
-        imaging = [m for m in self._phys_modes
-                   if m.get("mode") in ("mtk_brom", "mtk_preloader", "mtk_da",
-                                        "qualcomm_edl")]
-        if imaging:
-            self.console.log(
-                "Boot mode detected: "
-                + ", ".join(m.get("label", m.get("mode", "")) for m in imaging),
-                "success")
-            unbound = [m for m in imaging if m.get("bound") is False]
-            if unbound:
-                # Better to say it while the device is still on the bus than to
-                # let the engine fail its handshake for minutes.
-                from ...core import physical
-                self.console.log(physical.driver_message(unbound[0]), "warning")
-            # Re-detect with the device now on the bus, so the engine and plan
-            # are rebuilt instead of showing the stale "ADB only" reason.
-            self._detect_physical()
-        else:
-            self.phys_mode.setText("ADB only (no boot-mode USB device present)")
-            self.btn_phys_acquire.setEnabled(False)
-            self.btn_phys_driver.setVisible(False)
-
-    def _on_physical_detected(self, data):
-        if data.get("error"):
-            self._phys_plan_viable = False
-            self.phys_reason.setText(f"Detection failed: {data['error']}")
-            self.phys_reason.setStyleSheet(
-                "color: #f59e0b; font-size: 12px; background: transparent;")
-            self.btn_phys_acquire.setEnabled(False)
-            self.btn_phys_driver.setVisible(False)
-            return
-        profile = data.get("profile") or {}
-        soc = profile.get("soc") or {}
-        crypto = profile.get("encryption") or {}
-        transports = data.get("transports") or []
-        tools = data.get("tools") or {}
-        plan = data.get("plan") or {}
-
-        self._phys_detected_serial = profile.get("serial", "")
-        # A handset in BROM is no longer on ADB, so the profile read fails and
-        # would blank the chipset line. Only replace it with a real answer.
-        if soc.get("family") not in (None, "", "unknown"):
-            self.phys_soc.setText(
-                f"{soc.get('label', 'Unknown')}"
-                + (f" · {soc['model']}" if soc.get("model") else ""))
-        self.phys_mode.setText(
-            ", ".join(t["label"] for t in transports) if transports
-            else "ADB only (no boot-mode USB device present)")
-        engine = tools.get("mtkclient") or tools.get("mtkclient_module") or tools.get("edl")
-        if engine and engine.lower().endswith(".py"):
-            engine += f"  (python: {tools.get('python') or 'default'})"
-        self.phys_tools.setText(engine or "No acquisition engine found on PATH")
-        if soc.get("family") not in (None, "", "unknown"):
-            self._phys_soc = soc
-        reason = plan.get("reason", "")
-        if crypto.get("encrypted"):
-            reason += f"\nEncryption: {crypto.get('label', 'encrypted')}"
-        self.phys_reason.setText(reason or "No route reported.")
-        self.phys_reason.setStyleSheet(
-            "color: #22c55e; font-size: 12px; background: transparent;"
-            if plan.get("viable") else
-            "color: #f59e0b; font-size: 12px; background: transparent;")
-        self.btn_phys_acquire.setEnabled(bool(plan.get("viable")))
-        self._phys_plan_viable = bool(plan.get("viable"))
-        # The driver button exists for exactly one situation: the chip is on
-        # the bus and Windows has no function driver on the port.
-        self.btn_phys_driver.setVisible(plan.get("route") == "driver")
-
-    def _acquire_physical(self):
-        if self._phys_worker is not None and self._phys_worker.isRunning():
-            return
-        serial = self._serial or self.device_bar.get_first_serial()
-        self.btn_phys_acquire.setEnabled(False)
-        self.btn_phys_stop.setEnabled(True)
-        self.console.log("Starting physical acquisition...", "info")
-        worker = PhysicalImageWorker(
-            serial, self._case_id, self.phys_loader.text().strip(),
-            soc=self._phys_soc, parent=self)
-        worker.log.connect(self.console.log)
-        worker.finished.connect(self._on_physical_finished)
-        self._phys_worker = worker
-        worker.start()
-
-    def _stop_physical(self):
-        if self._phys_worker is not None and self._phys_worker.isRunning():
-            self._phys_worker.cancel()
-            self.console.log("Stopping physical acquisition...", "warning")
-
-    def _on_physical_finished(self, result):
-        self.btn_phys_stop.setEnabled(False)
-        self.btn_phys_acquire.setEnabled(self._phys_plan_viable)
-        if not result.get("ok"):
-            self.console.log(
-                f"Physical image not acquired: {result.get('message', 'unknown')}",
-                "warning")
-            return
-        files = result.get("files") or []
-        partitions = result.get("partitions") or []
-        self.console.log(
-            f"Physical image complete: {len(files)} files, "
-            f"{result.get('total_bytes', 0):,} bytes, "
-            f"{len(partitions)} partition slices.", "success")
-        self.console.log(f"Stored under: {result.get('outdir', '')}", "info")
-        self.phys_reason.setText(
-            f"Physical image captured: {len(files)} files, "
-            f"{len(partitions)} partition slices.\n{result.get('outdir', '')}")
-        self.phys_reason.setStyleSheet(
-            "color: #22c55e; font-size: 12px; background: transparent;")
-
     def set_device(self, serial: str, case_id: str = "", session_id: str = ""):
         self._serial = serial
         self._case_id = case_id
@@ -2501,23 +1910,10 @@ class AcquirePage(QWidget):
     def _on_device_rescanned(self, devices):
         if devices:
             self._serial = devices[0].get("serial", "")
-            if self._serial and self._serial != self._phys_detected_serial:
-                self._detect_physical()
 
     def showEvent(self, event):
         super().showEvent(event)
         self.device_bar.auto_scan()
-        self._detect_physical()
-        if self._phys_watch is None or not self._phys_watch.isRunning():
-            self._phys_watch = PhysicalWatchWorker(self)
-            self._phys_watch.changed.connect(self._on_boot_mode_changed)
-            self._phys_watch.start()
-
-    def hideEvent(self, event):
-        if self._phys_watch is not None:
-            self._phys_watch.stop()
-            self._phys_watch = None
-        super().hideEvent(event)
 
     def _start_acquisition(self):
         serial = self._serial or self.device_bar.get_first_serial()
@@ -2557,7 +1953,7 @@ class AcquirePage(QWidget):
         try:
             done, steps = int(current), int(total)
             # One percentage for the whole acquisition, not one per phase: the
-            # operator asked "how far through the job", and phase-local
+            # operator asked "how far through the job", and nine phase-local
             # bars that each restart at zero answer a different question.
             within = (done / steps) if steps > 0 else 0.0
             overall = ((max(0, self._phase_index - 1) + within) / self._phase_total) * 100
@@ -2586,18 +1982,51 @@ class AcquirePage(QWidget):
         self.btn_stop.setEnabled(False)
         self.progress_bar.setValue(100)
         self.progress_label.setText("Acquisition complete!")
-        total_mb = _count(results, 'bytes') / (1024 * 1024)
+        total_mb = results['bytes'] / (1024 * 1024)
         self.progress_label.setText(
-            f"Complete — {_count(results, 'files'):,} files, {total_mb:.1f} MB extracted")
+            f"Complete — {results['files']:,} files, {total_mb:.1f} MB extracted")
 
-        rows = [(label, str(value), detail)
-                for label, value, detail in _summary_rows(results)]
+        rows = [
+            ("Contacts", str(results["contacts"]), ""),
+            ("SMS Messages", str(results["sms"]), ""),
+            ("Call Log Entries", str(results["calls"]), ""),
+            ("Calendar Events", str(results["calendar"]), ""),
+            ("Browser History", str(results["browser"]), ""),
+            ("App Databases", str(results["databases"]), ""),
+            ("Media Files", str(results["media_files"]), ""),
+            ("Documents", str(results["documents"]), ""),
+            ("App Data (Social)", str(results["app_data"]), ""),
+            ("Device Info", str(results["device_info"]), ""),
+        ]
+
+        if results.get("full_storage_files"):
+            rows.append(("Full Storage Image", str(results["full_storage_files"]),
+                         f"{results['full_storage_bytes'] / (1024*1024):.1f} MB"))
+        if results.get("app_data_deep_files"):
+            rows.append(("App Data Deep", str(results["app_data_deep_files"]),
+                         f"{results['app_data_deep_bytes'] / (1024*1024):.1f} MB"))
+        if results.get("backup_files"):
+            rows.append(("ADB Backups", str(results["backup_files"]),
+                         f"{results['backup_bytes'] / (1024*1024):.1f} MB"))
+        if results.get("recovered_files"):
+            rows.append(("Recovered Files", str(results["recovered_files"]),
+                         f"{results['recovered_bytes'] / (1024*1024):.1f} MB"))
+        if results.get("signatures_found"):
+            rows.append(("File Signatures", str(results["signatures_found"]), ""))
+        if results.get("emails"):
+            rows.append(("Email Messages", str(results["emails"]), ""))
+        if results.get("document_metadata"):
+            rows.append(("Document Metadata", str(results["document_metadata"]), ""))
+        if results.get("browser_bookmarks"):
+            rows.append(("Browser Bookmarks", str(results["browser_bookmarks"]), ""))
+        if results.get("partitions"):
+            rows.append(("Partitions", str(results["partitions"]), ""))
+
         rows.append(("━━━━━━━━━━━━━━━", "━━━━━━━━", "━━━━━━━━"))
-        rows.append(("TOTAL FILES", str(_count(results, "files")), f"{total_mb:.1f} MB"))
-        rows.append(("Errors", str(_count(results, "errors")), ""))
+        rows.append(("TOTAL FILES", str(results["files"]), f"{total_mb:.1f} MB"))
+        rows.append(("Errors", str(results["errors"]), ""))
         self.results_table.load_data(rows)
         self.results_frame.setVisible(True)
 
-        errors = _count(results, "errors")
-        if errors:
-            self.console.log(f"⚠ {errors} errors occurred during acquisition", "warning")
+        if results["errors"] > 0:
+            self.console.log(f"⚠ {results['errors']} errors occurred during acquisition", "warning")
