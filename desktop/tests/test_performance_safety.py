@@ -14,12 +14,14 @@ Run with:  python -m unittest desktop.tests.test_performance_safety -v
 
 import os
 import unittest
+from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 try:
     from PyQt6.QtWidgets import QApplication
 
+    from desktop.ui.pages import artifacts_page as artifacts_mod
     from desktop.ui.pages.artifacts_page import ArtifactsPage
     from desktop.ui.widgets import device_status_bar as dsb
     from desktop.ui.widgets.device_status_bar import DeviceStatusBar
@@ -55,6 +57,12 @@ class FreshCacheScanTest(unittest.TestCase):
         self.assertEqual(seen and seen[0].get("serial"), "CACHED")
         self.assertIsNone(bar._scan_worker)
 
+    def test_an_unauthorised_device_is_not_called_connected(self):
+        bar = DeviceStatusBar()
+        bar._update_ui([{"serial": "S", "model": "TECNO",
+                         "state": "unauthorized", "ready": False}])
+        self.assertIn("USB debugging", bar.status_text.text())
+
 
 @unittest.skipUnless(_QT_IMPORT, "PyQt6 is not available")
 class AcquisitionDeferralTest(unittest.TestCase):
@@ -62,6 +70,10 @@ class AcquisitionDeferralTest(unittest.TestCase):
 
     def setUp(self):
         self._app = _make_qapp()
+        patcher = mock.patch.object(artifacts_mod, "_autoload_allowed",
+                                    return_value=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.page = ArtifactsPage()
         self.page.device_bar._devices = [{"serial": "SERIAL"}]
         self.starts = []
@@ -83,7 +95,6 @@ class AcquisitionDeferralTest(unittest.TestCase):
 
         self.page.on_acquisition_finished()
         self.assertEqual(self.starts, [("SERIAL", "All")])
-        self.assertTrue(self.page._data_loaded)
         self.assertFalse(self.page._load_deferred)
 
     def test_a_cancelled_run_is_not_persisted(self):
@@ -94,6 +105,55 @@ class AcquisitionDeferralTest(unittest.TestCase):
         self.page._on_finished([])
 
         self.assertEqual(persisted, [], "a cancelled run must not write the case")
+
+    def test_an_empty_crawl_does_not_latch_the_page(self):
+        """A device that was still settling must be retried, not left blank."""
+        self.page._persist_artifacts = lambda results: None
+        self.page._worker = type("W", (), {"_cancel": False})()
+
+        self.page._on_finished([])
+
+        self.assertFalse(self.page._data_loaded,
+                         "an empty crawl must not claim the device is loaded")
+
+    def test_a_populated_crawl_marks_the_page_loaded(self):
+        self.page._persist_artifacts = lambda results: None
+        self.page._worker = type("W", (), {"_cancel": False})()
+
+        self.page._on_finished([{"category": "SMS", "summary": "hi"}])
+
+        self.assertTrue(self.page._data_loaded)
+
+    def test_the_page_polls_for_a_device_while_visible(self):
+        """Plugging the phone in while the page is open must be noticed."""
+        seen = []
+        self.page.device_bar.auto_scan = lambda: seen.append(1)
+        self.page._poll_ticks = 0
+        self.page._device_timer.start()
+        self.page._poll_for_device()
+        self.assertTrue(seen, "a visible page should re-probe for a device")
+        self.assertTrue(self.page._device_timer.isActive())
+
+        self.page._data_loaded = True
+        self.page._poll_for_device()
+        self.assertFalse(self.page._device_timer.isActive(),
+                         "the poll stops once the device has been read")
+
+    def test_an_unauthorised_phone_is_not_crawled(self):
+        """An unapproved handset must not start a crawl that just times out."""
+        self.page._on_device_connected(
+            {"serial": "SERIAL", "state": "unauthorized", "ready": False})
+
+        self.assertEqual(self.starts, [], "must not crawl before the phone is ready")
+        self.assertTrue(self.page._device_timer.isActive())
+        self.assertIn("USB debugging", self.page.progress_label.text())
+        self.page._device_timer.stop()
+
+    def test_a_ready_phone_starts_the_crawl(self):
+        self.page._on_device_connected(
+            {"serial": "SERIAL", "state": "device", "ready": True})
+
+        self.assertEqual(self.starts, [("SERIAL", "All")])
 
 
 if __name__ == "__main__":

@@ -571,10 +571,9 @@ class MainWindow(QMainWindow):
         self._navigate_to(mapping.get(name, 0))
 
     def _auto_scan_devices(self):
-        """Instant synchronous scan — push device state to all pages."""
-        from .widgets.device_status_bar import _scan_devices_cached
-        devices = _scan_devices_cached()
-        self._on_auto_scan_done(devices)
+        """Probe for devices off the GUI thread, then push state to all pages."""
+        from .widgets.device_status_bar import scan_async
+        scan_async(self._on_auto_scan_done)
 
     def _on_auto_scan_done(self, devices):
         if devices:

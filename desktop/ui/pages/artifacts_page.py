@@ -254,6 +254,24 @@ APP_DEFS = [
 ]
 
 
+def _autoload_allowed() -> bool:
+    """Whether an automatic device crawl may run.
+
+    The offscreen/minimal Qt platforms are the headless test harness. A test
+    run must never talk to a handset that happens to be on the bench: it made
+    the suite wait on real adb timeouts, and it would pull evidence outside a
+    case. Real sessions always use a windowing platform.
+    """
+    try:
+        from PyQt6.QtGui import QGuiApplication
+        app = QGuiApplication.instance()
+        if app is None:
+            return False
+        return app.platformName().lower() not in ("offscreen", "minimal")
+    except Exception:
+        return False
+
+
 class LoadWorker(QThread):
     finished = pyqtSignal(list)
     progress = pyqtSignal(str)
@@ -2819,6 +2837,15 @@ class ArtifactsPage(QWidget):
         self._acquisition_active = False
         self._load_deferred = False
         self._data_loaded = False
+        #: Consecutive empty crawls, so a device that genuinely holds nothing
+        #: is not rescanned forever.
+        self._empty_loads = 0
+        #: Watches for a phone that is plugged in after the page is already
+        #: open (and for the USB-debugging prompt being accepted).
+        self._device_timer = QTimer(self)
+        self._device_timer.setInterval(2000)
+        self._device_timer.timeout.connect(self._poll_for_device)
+        self._poll_ticks = 0
         self._contacts = []
         self._conversations = {}
         self._current_app = None
@@ -5375,41 +5402,104 @@ class ArtifactsPage(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        # The scan now runs on a worker thread; ``_on_device_connected`` starts
-        # the extraction once the probe reports a device. Reading the serial
-        # immediately after auto_scan() would always be empty here.
+        # The probe runs on a worker, so the serial is not readable on the next
+        # line any more: ``_on_device_connected`` starts the extraction once the
+        # probe reports a device. The timer covers the case this change made
+        # visible — a phone plugged in while the page is already open used to be
+        # picked up by the next page show, and now nothing else asks.
+        self._poll_ticks = 0
         self.device_bar.auto_scan()
+        if self._data_loaded or not _autoload_allowed():
+            return
+        self._device_timer.start()
+
+    def hideEvent(self, event):
+        self._device_timer.stop()
+        super().hideEvent(event)
+
+    def _poll_for_device(self):
+        """Re-probe while the page is visible and the device is still unseen."""
+        if not _autoload_allowed():
+            self._device_timer.stop()
+            return
+        self._poll_ticks += 1
+        if self._data_loaded or self._poll_ticks > 60:
+            self._device_timer.stop()
+            return
+        if self._worker is not None and self._worker.isRunning():
+            return                      # a crawl owns adb; do not fight it
+        if self._acquisition_active:
+            return                      # acquisition owns adb; resume after
+        self.device_bar.auto_scan()
+
+    def _waiting_for_device(self, info) -> None:
+        """Say why a phone on the cable is not being read yet."""
+        state = str(info.get("state", "") or "")
+        if state == "unauthorized":
+            message = ("Phone connected but not authorised \\u2014 accept "
+                       "\\u201cAllow USB debugging\\u201d on the handset.")
+        elif state == "offline":
+            message = "Phone is offline \\u2014 replug the cable or restart adb."
+        else:
+            message = "Waiting for the phone to finish connecting..."
+        if self._worker is not None and self._worker.isRunning():
+            return
+        self.progress_frame.setVisible(True)
+        self.progress_label.setText(message)
 
     def _on_device_connected(self, info):
         serial = info.get("serial", "")
-        if serial and not self._data_loaded:
-            if self._acquisition_active:
-                # Do not crawl the device while an acquisition owns the adb
-                # channel: two concurrent extractions halve each other's speed
-                # and make the window look frozen. Resume when it finishes.
-                self._load_deferred = True
-                return
-            self._start_load(serial, "All")
-            self._data_loaded = True
+        if not serial or not _autoload_allowed():
+            return
+        if self._acquisition_active:
+            # Do not crawl the device while an acquisition owns the adb
+            # channel: two concurrent extractions halve each other's speed
+            # and make the window look frozen. Resume when it finishes.
+            self._load_deferred = True
+            return
+        if not info.get("ready", True):
+            # ``list_devices`` keeps unauthorised and offline handsets in the
+            # list on purpose. Crawling one means every shell call runs into
+            # its timeout, which is exactly what "the artifacts take forever"
+            # looked like. Wait for the prompt instead and keep probing.
+            self._waiting_for_device(info)
+            if not self._data_loaded:
+                self._device_timer.start()
+            return
+        if self._data_loaded:
+            self._device_timer.stop()
+            return
+        if self._worker is not None and self._worker.isRunning():
+            return
+        self._start_load(serial, "All")
 
     def on_acquisition_started(self):
         self._acquisition_active = True
-        self._load_deferred = False
         if self._worker and self._worker.isRunning():
+            # The crawl is about to be cancelled, so whatever it had collected
+            # is thrown away: clear the flag or the page would sit empty with
+            # "already loaded" set and never try again.
             self._worker.cancel()
             self._pending_load = None
+            self._data_loaded = False
             self.progress_frame.setVisible(True)
             self.progress_label.setText(
                 "Extraction paused while acquisition runs...")
+        self._load_deferred = not self._data_loaded
 
     def on_acquisition_finished(self):
         self._acquisition_active = False
-        if self._load_deferred and not self._data_loaded:
+        if self._data_loaded:
             self._load_deferred = False
-            serial = self.device_bar.get_first_serial()
-            if serial:
-                self._start_load(serial, "All")
-                self._data_loaded = True
+            return
+        serial = self.device_bar.get_first_serial()
+        if not serial:
+            return
+        if self._worker is not None and self._worker.isRunning():
+            self._pending_load = (serial, "All")
+            return
+        self._load_deferred = False
+        self._start_load(serial, "All")
 
     def _on_refresh(self):
         serial = self.device_bar.get_first_serial()
@@ -5417,7 +5507,7 @@ class ArtifactsPage(QWidget):
             self._load_deferred = bool(serial)
             return
         if serial:
-            self._data_loaded = True
+            self._empty_loads = 0
             self._start_load(serial, "All")
 
     def _start_load(self, serial, category):
@@ -5495,8 +5585,36 @@ class ArtifactsPage(QWidget):
         if not cancelled:
             self._persist_artifacts(results)
 
+        # A crawl that finished without a single artifact is usually a device
+        # that was still settling (adb re-enumerating, the USB-debugging prompt
+        # not yet accepted). Retry a couple of times before declaring it empty,
+        # otherwise the page can latch on a zero-count view.
+        if cancelled:
+            self._data_loaded = False
+        elif results:
+            self._data_loaded = True
+            self._empty_loads = 0
+            self._device_timer.stop()
+        elif self._empty_loads < 2:
+            self._empty_loads += 1
+            self._data_loaded = False
+            QTimer.singleShot(2500, self._retry_empty_load)
+        else:
+            self._data_loaded = True
+            self._device_timer.stop()
+
         if pending:
             self._launch_load(*pending)
+
+    def _retry_empty_load(self):
+        """One more crawl after an empty one, if the page is still waiting."""
+        if self._data_loaded or self._acquisition_active or not _autoload_allowed():
+            return
+        if self._worker is not None and self._worker.isRunning():
+            return
+        serial = self.device_bar.get_first_serial()
+        if serial:
+            self._start_load(serial, "All")
 
     def _build_sms_conversations(self, results):
         sms_msgs = [a for a in results if a.get("category") == "SMS"]

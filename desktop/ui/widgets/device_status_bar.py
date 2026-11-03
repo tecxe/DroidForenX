@@ -42,6 +42,30 @@ class _DeviceScanWorker(QThread):
         self.done.emit(devices)
 
 
+#: Workers free-standing scans keep alive until they finish. Qt aborts the
+#: process if the last reference to a running QThread is dropped.
+_live_scans = set()
+
+
+def scan_async(callback) -> "_DeviceScanWorker":
+    """Probe adb on a worker thread and hand the list to ``callback``.
+
+    Same contract as the old synchronous scan, without the GUI-thread stall.
+    The callback runs on the GUI thread.
+    """
+    worker = _DeviceScanWorker()
+    _live_scans.add(worker)
+
+    def _cleanup():
+        _live_scans.discard(worker)
+        worker.deleteLater()
+
+    worker.done.connect(callback)
+    worker.finished.connect(_cleanup)
+    worker.start()
+    return worker
+
+
 class DeviceStatusBar(QFrame):
     """Reusable device status bar — embeds in every forensic page header."""
     device_rescanned = Signal(list)
@@ -95,10 +119,27 @@ class DeviceStatusBar(QFrame):
             d = devices[0]
             model = d.get("model", "") or d.get("device", "") or "Unknown"
             serial = d.get("serial", "")
-            self.status_icon.setStyleSheet("font-size: 14px; color: #10b981; border: none;")
-            self.status_text.setText("Connected:")
-            self.status_text.setStyleSheet("font-size: 13px; color: #10b981; border: none;")
-            self.device_label.setText(f"{model} ({serial})")
+            state = str(d.get("state", "") or "device")
+            ready = bool(d.get("ready", state == "device"))
+            if ready:
+                self.status_icon.setStyleSheet("font-size: 14px; color: #10b981; border: none;")
+                self.status_text.setText("Connected:")
+                self.status_text.setStyleSheet("font-size: 13px; color: #10b981; border: none;")
+                self.device_label.setText(f"{model} ({serial})")
+            else:
+                # The handset is on the cable but not usable yet. Saying
+                # "Connected" here made a pending USB-debugging prompt look
+                # like a device that had simply stopped answering.
+                if state == "unauthorized":
+                    hint = "Unauthorized — tap Allow USB debugging on the phone"
+                elif state == "offline":
+                    hint = "Offline — replug the cable or restart adb"
+                else:
+                    hint = f"Waiting for the phone ({state})"
+                self.status_icon.setStyleSheet("font-size: 14px; color: #f59e0b; border: none;")
+                self.status_text.setText(hint)
+                self.status_text.setStyleSheet("font-size: 13px; color: #f59e0b; border: none;")
+                self.device_label.setText(f"{model} ({serial})" if model != "Unknown" else serial)
         else:
             self.status_icon.setStyleSheet("font-size: 14px; color: #ef4444; border: none;")
             self.status_text.setText("No device — connect USB & enable debugging")
@@ -118,9 +159,19 @@ class DeviceStatusBar(QFrame):
             return
         if self._scan_worker is not None and self._scan_worker.isRunning():
             return
-        self._scan_worker = _DeviceScanWorker(self)
+        self._scan_worker = _DeviceScanWorker()
         self._scan_worker.done.connect(self._on_scan_done)
+        self._scan_worker.finished.connect(self._release_scan_worker)
         self._scan_worker.start()
+
+    def _release_scan_worker(self):
+        # The thread has finished, so the object can be dropped without
+        # aborting the process. Without this, every poll on a visible page
+        # left a dead QThread behind.
+        worker = self._scan_worker
+        self._scan_worker = None
+        if worker is not None:
+            worker.deleteLater()
 
     def _on_scan_done(self, devices):
         self._devices = devices
