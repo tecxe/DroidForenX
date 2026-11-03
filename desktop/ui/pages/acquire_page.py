@@ -1717,6 +1717,8 @@ class AcquisitionWorker(QThread):
 class AcquirePage(QWidget):
     navigate = pyqtSignal(str)
     session_created = pyqtSignal(str)
+    acquisition_started = pyqtSignal()
+    acquisition_finished = pyqtSignal()
 
     def __init__(self, db_get, parent=None):
         super().__init__(parent)
@@ -1943,6 +1945,7 @@ class AcquirePage(QWidget):
         self.worker.session_created.connect(self.session_created)
         self.worker.finished.connect(self._on_finished)
         self.worker.start()
+        self.acquisition_started.emit()
 
     def _stop_acquisition(self):
         if hasattr(self, "worker") and self.worker.isRunning():
@@ -1978,6 +1981,7 @@ class AcquirePage(QWidget):
         self.console.log(f"  ✓ {name} ({size:,} bytes)", "success")
 
     def _on_finished(self, results):
+        self.acquisition_finished.emit()
         self.btn_acquire.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.progress_bar.setValue(100)

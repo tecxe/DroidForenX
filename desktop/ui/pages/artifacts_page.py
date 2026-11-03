@@ -270,6 +270,8 @@ class LoadWorker(QThread):
 
     def run(self):
         r = []
+        counts = {}
+        seen = 0
         try:
             loaders = self._get_loaders()
             for fn in loaders:
@@ -279,11 +281,14 @@ class LoadWorker(QThread):
                     fn(r)
                 except Exception as e:
                     logger.warning(f"Loader error: {e}")
-                counts = {}
-                for a in r:
+                # Count only the rows this loader appended. Re-walking the whole
+                # accumulated list after every loader was O(n^2) and made a
+                # full device scan spend as much time counting as reading.
+                for a in r[seen:]:
                     cat = a.get("category", "Other")
                     counts[cat] = counts.get(cat, 0) + 1
-                self.counts_updated.emit(counts)
+                seen = len(r)
+                self.counts_updated.emit(dict(counts))
         except Exception as e:
             logger.warning(f"Worker error: {e}")
         self.finished.emit(r)
@@ -2810,6 +2815,9 @@ class ArtifactsPage(QWidget):
         self.evidence_root = None
         self.all_artifacts = []
         self._worker = None
+        self._pending_load = None
+        self._acquisition_active = False
+        self._load_deferred = False
         self._data_loaded = False
         self._contacts = []
         self._conversations = {}
@@ -5225,21 +5233,47 @@ class ArtifactsPage(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
+        # The scan now runs on a worker thread; ``_on_device_connected`` starts
+        # the extraction once the probe reports a device. Reading the serial
+        # immediately after auto_scan() would always be empty here.
         self.device_bar.auto_scan()
-        if not self._data_loaded:
+
+    def _on_device_connected(self, info):
+        serial = info.get("serial", "")
+        if serial and not self._data_loaded:
+            if self._acquisition_active:
+                # Do not crawl the device while an acquisition owns the adb
+                # channel: two concurrent extractions halve each other's speed
+                # and make the window look frozen. Resume when it finishes.
+                self._load_deferred = True
+                return
+            self._start_load(serial, "All")
+            self._data_loaded = True
+
+    def on_acquisition_started(self):
+        self._acquisition_active = True
+        self._load_deferred = False
+        if self._worker and self._worker.isRunning():
+            self._worker.cancel()
+            self._pending_load = None
+            self.progress_frame.setVisible(True)
+            self.progress_label.setText(
+                "Extraction paused while acquisition runs...")
+
+    def on_acquisition_finished(self):
+        self._acquisition_active = False
+        if self._load_deferred and not self._data_loaded:
+            self._load_deferred = False
             serial = self.device_bar.get_first_serial()
             if serial:
                 self._start_load(serial, "All")
                 self._data_loaded = True
 
-    def _on_device_connected(self, info):
-        serial = info.get("serial", "")
-        if serial and not self._data_loaded:
-            self._start_load(serial, "All")
-            self._data_loaded = True
-
     def _on_refresh(self):
         serial = self.device_bar.get_first_serial()
+        if self._acquisition_active:
+            self._load_deferred = bool(serial)
+            return
         if serial:
             self._data_loaded = True
             self._start_load(serial, "All")
@@ -5247,8 +5281,20 @@ class ArtifactsPage(QWidget):
     def _start_load(self, serial, category):
         self._media_rows_cache = None
         if self._worker and self._worker.isRunning():
+            # Never wait() on the GUI thread here: a full device scan can sit
+            # inside an adb call for seconds, and blocking the event loop made
+            # the whole window freeze when the operator clicked another
+            # category while an extraction was still running. Cancel, remember
+            # the request, and launch it from the worker's finished handler.
             self._worker.cancel()
-            self._worker.wait(2000)
+            self._pending_load = (serial, category)
+            self.progress_frame.setVisible(True)
+            self.progress_label.setText("Stopping the previous extraction...")
+            return
+        self._pending_load = None
+        self._launch_load(serial, category)
+
+    def _launch_load(self, serial, category):
         self.progress_frame.setVisible(True)
         self.progress_label.setText("Extracting all artifacts from device...")
         self.refresh_btn.setEnabled(False)
@@ -5267,6 +5313,10 @@ class ArtifactsPage(QWidget):
         self.progress_label.setText(f"Extracting... {total} artifacts found so far")
 
     def _on_finished(self, results):
+        pending = getattr(self, "_pending_load", None)
+        self._pending_load = None
+        cancelled = bool(getattr(self._worker, "_cancel", False))
+
         self.all_artifacts = results
         self.progress_frame.setVisible(False)
         self.refresh_btn.setEnabled(True)
@@ -5274,10 +5324,15 @@ class ArtifactsPage(QWidget):
         self._contacts = [a for a in results if a.get("category") == "Contacts"]
         self._build_sms_conversations(results)
 
+        # One pass over the results instead of one pass per category. With tens
+        # of thousands of rows the old loop did n x 40 work and blocked the GUI
+        # thread long enough to look like a freeze.
         counts = {}
+        for a in results:
+            cat = a.get("category", "")
+            counts[cat] = counts.get(cat, 0) + 1
         for app_def in APP_DEFS:
-            cat = app_def["category"]
-            counts[cat] = sum(1 for a in results if a.get("category") == cat)
+            counts.setdefault(app_def["category"], 0)
         self.structure.set_counts(counts)
 
         total = len(results)
@@ -5293,7 +5348,13 @@ class ArtifactsPage(QWidget):
         if self._current_app:
             self._show_category_properties(self._current_app)
 
-        self._persist_artifacts(results)
+        # A cancelled run produces a partial list; persisting it would write
+        # half a device into the case and then overwrite it on the rerun.
+        if not cancelled:
+            self._persist_artifacts(results)
+
+        if pending:
+            self._launch_load(*pending)
 
     def _build_sms_conversations(self, results):
         sms_msgs = [a for a in results if a.get("category") == "SMS"]
@@ -5332,20 +5393,23 @@ class ArtifactsPage(QWidget):
                     (self._session_id,))
             }
             now = datetime.now(timezone.utc).isoformat()
+            rows = []
             for a in results[:5000]:
                 name = (a.get("summary") or "")[:200]
                 source = a.get("source", "")
                 if (name, source) in existing:
                     continue
                 existing.add((name, source))
-                conn.execute(
+                rows.append((str(uuid.uuid4()), self._session_id, f"art_{uuid.uuid4().hex[:12]}",
+                             name, source, a.get("category", ""), a.get("type", ""),
+                             0, source, "",
+                             json.dumps(a.get("_data", {}), default=str)[:2000], now))
+            if rows:
+                conn.executemany(
                     "INSERT INTO evidence_artifacts (id, session_id, artifact_id, name, source, category,"
                     " mime_type, file_size, file_path, sha256_hash, metadata, created_at)"
                     " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (str(uuid.uuid4()), self._session_id, f"art_{uuid.uuid4().hex[:12]}",
-                     name, source, a.get("category", ""), a.get("type", ""),
-                     0, source, "",
-                     json.dumps(a.get("_data", {}), default=str)[:2000], now)
+                    rows,
                 )
             conn.commit()
             conn.close()

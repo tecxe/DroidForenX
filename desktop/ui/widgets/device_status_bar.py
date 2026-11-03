@@ -1,7 +1,7 @@
-"""Shared device status bar — instant device detection, no threads needed."""
+"""Shared device status bar — device detection kept off the UI thread."""
 import time
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QLabel, QPushButton, QFrame)
-from PyQt6.QtCore import Qt, pyqtSignal as Signal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal as Signal
 from ...core import adb_manager as adb
 
 # Global cache — one scan shared across all status bars
@@ -23,6 +23,25 @@ def _scan_devices_cached() -> list:
     return devices
 
 
+class _DeviceScanWorker(QThread):
+    """Run the adb probe off the GUI thread.
+
+    ``adb devices`` is a subprocess. During an acquisition the adb server is
+    already busy, so a synchronous call on the GUI thread can stall for
+    hundreds of milliseconds every time a page is shown. Doing it here keeps
+    navigation responsive no matter what the device is doing.
+    """
+
+    done = Signal(list)
+
+    def run(self):
+        try:
+            devices = _scan_devices_cached()
+        except Exception:
+            devices = []
+        self.done.emit(devices)
+
+
 class DeviceStatusBar(QFrame):
     """Reusable device status bar — embeds in every forensic page header."""
     device_rescanned = Signal(list)
@@ -31,6 +50,7 @@ class DeviceStatusBar(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._devices = []
+        self._scan_worker = None
         self.setStyleSheet("""
             QFrame {
                 background: #0f172a;
@@ -86,8 +106,23 @@ class DeviceStatusBar(QFrame):
             self.device_label.setText("")
 
     def scan(self):
-        """Instant synchronous scan (~200ms). Called on page show and button click."""
-        devices = _scan_devices_cached()
+        """Scan for devices without blocking the GUI thread.
+
+        A fresh cache is applied immediately (no adb call, no worker). A stale
+        cache is refreshed on a worker thread; the result is delivered through
+        the same signals as before, so listeners behave exactly as they did
+        with the old synchronous version.
+        """
+        if time.monotonic() - _cache["ts"] < CACHE_TTL:
+            self._on_scan_done(list(_cache["devices"]))
+            return
+        if self._scan_worker is not None and self._scan_worker.isRunning():
+            return
+        self._scan_worker = _DeviceScanWorker(self)
+        self._scan_worker.done.connect(self._on_scan_done)
+        self._scan_worker.start()
+
+    def _on_scan_done(self, devices):
         self._devices = devices
         self._update_ui(devices)
         self.device_rescanned.emit(devices)

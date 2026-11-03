@@ -543,6 +543,10 @@ class MainWindow(QMainWindow):
         # Acquisition creates the forensic session; earlier it was the seizure
         # stage that did, so the id has to come from here now.
         self.acquire_page.session_created.connect(self._on_session_created)
+        # Keep the artifact viewer out of the adb channel while an acquisition
+        # owns it, then let it catch up when the run ends.
+        self.acquire_page.acquisition_started.connect(self.artifacts_page.on_acquisition_started)
+        self.acquire_page.acquisition_finished.connect(self.artifacts_page.on_acquisition_finished)
         self.examine_page.navigate.connect(self._navigate_by_name)
         self.report_page.navigate.connect(self._navigate_by_name)
 
