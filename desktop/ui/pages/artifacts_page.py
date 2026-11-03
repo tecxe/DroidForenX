@@ -3083,6 +3083,19 @@ class ArtifactsPage(QWidget):
         self.conv_count.setStyleSheet("color: #64748b; font-size: 12px; background: transparent; border: none;")
         header_layout.addWidget(self.conv_count)
 
+        # Table / Grid toggle for the open category. The curated table stays the
+        # default; the grid is a scannable projection for visual review.
+        self.view_toggle = QPushButton("Grid")
+        self.view_toggle.setFixedHeight(30)
+        self.view_toggle.setVisible(False)
+        self.view_toggle.setToolTip("Switch between the table and a card grid")
+        self.view_toggle.setStyleSheet(
+            "QPushButton { background: #1e293b; color: #e2e8f0; border: 1px solid #334155;"
+            " border-radius: 6px; font-size: 12px; font-weight: 600; padding: 0 12px; }"
+            "QPushButton:hover { background: #334155; }")
+        self.view_toggle.clicked.connect(self._toggle_view_mode)
+        header_layout.addWidget(self.view_toggle)
+
         # Only meaningful for categories that hold pictures; hidden otherwise.
         self.grid_btn = QPushButton("Grid view")
         self.grid_btn.setFixedHeight(30)
@@ -3195,11 +3208,23 @@ class ArtifactsPage(QWidget):
         self._current_app = app_def
         self._view_mode = "table"
         self._gallery_prev_mode = "table"
+        self.structure.select_category(app_def["category"])
+        self._show_category_properties(app_def)
+        self._render_category(app_def)
+
+    def _render_category(self, app_def):
+        """Draw the open category in the current projection."""
         category = app_def["category"]
         app_type = app_def.get("type", "list")
+        toggle = getattr(self, "view_toggle", None)
+        if toggle is not None:
+            toggle.setVisible(True)
+            toggle.setText("Table" if self._view_mode == "grid" else "Grid")
 
-        self.structure.select_category(category)
-        self._show_category_properties(app_def)
+        if self._view_mode == "grid":
+            self._render_grid_view(app_def)
+            self.stacked.setCurrentIndex(1)
+            return
 
         if category == "SMS":
             self._show_sms_conversations()
@@ -3226,6 +3251,119 @@ class ArtifactsPage(QWidget):
         if self.stacked.currentIndex() == 3:
             self._view_mode = "gallery"
             self._gallery_prev_mode = "table"
+
+    def _toggle_view_mode(self):
+        """Flip the open category between the table and the card grid."""
+        if not self._current_app:
+            return
+        if self._view_mode == "grid":
+            self._view_mode = "table"
+        else:
+            self._view_mode = "grid"
+        self._render_category(self._current_app)
+
+    def _render_grid_view(self, app_def):
+        """Project the open category as a grid of artifact cards.
+
+        The grid is capped: building one widget per row of a 16,000-item
+        category would stall the GUI for seconds, so the first page is drawn
+        and the rest is reachable through a narrower category.
+        """
+        category = app_def.get("category", "")
+        items = [a for a in self.all_artifacts if a.get("category") == category]
+        self.conv_title.setText(app_def.get("name", category) + " \u2014 Grid")
+        self.conv_count.setText(f"{len(items)} items")
+        media = [a for a in items if a.get("type") in MEDIA_TYPES]
+        self._set_media_actions(media, app_def.get("name", ""))
+        self._clear_layout(self.conv_list_layout)
+        self.conv_stack.setCurrentIndex(0)
+
+        if not items:
+            self._add_empty(self.conv_list_layout,
+                            "Nothing was recovered for this category on this device.")
+            return
+
+        # Pictures belong in the thumbnail gallery, which already understands
+        # how to pull and cache them; everything else gets text cards.
+        if media and app_def.get("type") == "media":
+            self.thumb_gallery.set_serial(self.device_bar.get_first_serial() or "")
+            self.thumb_gallery.load(app_def.get("name", "Media"), media)
+            self.conv_stack.setCurrentIndex(1)
+            return
+
+        limit = 400
+        container = QWidget()
+        grid = QGridLayout(container)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(10)
+        columns = 4
+        for index, artifact in enumerate(items[:limit]):
+            grid.addWidget(self._artifact_card(artifact),
+                           index // columns, index % columns)
+        self.conv_list_layout.insertWidget(
+            self.conv_list_layout.count() - 1, container)
+
+        if len(items) > limit:
+            note = QLabel(
+                f"Showing the first {limit} of {len(items):,} artifacts. "
+                "Open a narrower category to review the rest.")
+            note.setWordWrap(True)
+            note.setStyleSheet(
+                "color: #64748b; font-size: 11px; padding: 8px 2px;"
+                " background: transparent; border: none;")
+            self.conv_list_layout.insertWidget(
+                self.conv_list_layout.count() - 1, note)
+
+    def _artifact_card(self, artifact):
+        """One card in the grid: kind, summary and when it was seen."""
+        data = artifact.get("_data", {}) or {}
+        kind = artifact.get("type") or data.get("type") or "Artifact"
+        summary = (artifact.get("summary") or data.get("filename")
+                   or data.get("name") or artifact.get("source") or "\u2014")
+        date = artifact.get("date") or data.get("date") or ""
+
+        card = QFrame()
+        card.setFixedHeight(98)
+        card.setStyleSheet(
+            "QFrame { background: #111827; border: 1px solid #1e293b;"
+            " border-radius: 8px; }"
+            "QFrame:hover { background: #1a2234; border: 1px solid #334155; }")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(4)
+
+        kind_label = QLabel(str(kind)[:24])
+        kind_label.setStyleSheet(
+            "color: #38bdf8; font-size: 10px; font-weight: 700;"
+            " letter-spacing: 0.5px; background: transparent; border: none;")
+        layout.addWidget(kind_label)
+
+        summary_label = QLabel(str(summary)[:80])
+        summary_label.setWordWrap(True)
+        summary_label.setStyleSheet(
+            "color: #e2e8f0; font-size: 12px; background: transparent; border: none;")
+        layout.addWidget(summary_label, 1)
+
+        if date:
+            date_label = QLabel(str(date)[:19])
+            date_label.setStyleSheet(
+                "color: #475569; font-size: 10px; background: transparent; border: none;")
+            layout.addWidget(date_label)
+
+        self._wire_row(card, artifact)
+        card.mouseDoubleClickEvent = (
+            lambda _event, _artifact=artifact: self._activate_artifact(_artifact))
+        return card
+
+    def _activate_artifact(self, artifact):
+        """Double-click a card: open media in the viewer, otherwise inspect."""
+        data = artifact.get("_data", {}) or {}
+        path = data.get("path") or artifact.get("source") or ""
+        if artifact.get("type") in MEDIA_TYPES and path:
+            self._open_media_viewer(path, artifact.get("type", ""))
+        else:
+            self._show_artifact_properties(artifact)
 
     def _show_sms_conversations(self):
         self.conv_title.setText("Messages")
@@ -5013,6 +5151,10 @@ class ArtifactsPage(QWidget):
         """
         app_def = self._current_app
         if not app_def:
+            return
+        if self._view_mode == "grid":
+            self._render_grid_view(app_def)
+            self.stacked.setCurrentIndex(1)
             return
         self.conv_stack.setCurrentIndex(0)
         self._render_table_view(app_def)

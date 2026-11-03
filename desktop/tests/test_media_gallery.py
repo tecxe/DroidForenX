@@ -20,7 +20,7 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 try:
-    from PyQt6.QtWidgets import QApplication, QLabel, QTableWidget
+    from PyQt6.QtWidgets import QApplication, QFrame, QLabel, QTableWidget
 
     from desktop.ui.pages.artifacts_page import ArtifactsPage
     from desktop.ui.pages.device_page import DevicePage
@@ -315,11 +315,21 @@ class TelegramViewerTest(unittest.TestCase):
         self.assertIn("1 channels", text)
         self.assertIn("3 chats", text)
 
-    def test_the_view_switcher_is_gone(self):
-        """One projection only: the curated table."""
-        self.assertFalse(hasattr(self.page, "view_bar"))
-        self.assertFalse(hasattr(self.page, "_view_buttons"))
-        self.assertFalse(hasattr(self.page, "_set_view_mode"))
+    def test_the_grid_toggle_switches_the_projection(self):
+        """The table stays the default; the grid is one click away."""
+        self.assertEqual(self.page._view_mode, "table")
+        self.page._toggle_view_mode()
+        _pump(self._app)
+        self.assertEqual(self.page._view_mode, "grid")
+        self.assertEqual(self.page.view_toggle.text(), "Table")
+        self.assertEqual(self.page.stacked.currentIndex(), 1)
+        self.assertTrue(self.page.conv_list_widget.findChildren(QFrame),
+                        "the grid should build artifact cards")
+
+        self.page._toggle_view_mode()
+        _pump(self._app)
+        self.assertEqual(self.page._view_mode, "table")
+        self.assertEqual(self.page.view_toggle.text(), "Grid")
 
     def test_a_category_opens_as_a_table(self):
         self.assertEqual(self.page.conv_stack.currentIndex(), 0)
