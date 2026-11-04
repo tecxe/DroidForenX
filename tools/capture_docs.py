@@ -253,6 +253,17 @@ def capture(window, app, wanted: set[str], with_device: bool, tests_log: Path | 
         pump(app, 0.8)
         save(window, "acquisition")
 
+    def shot_acquisition_actions():
+        go(4)
+        page = window.acquire_page
+        page.level_combo.setCurrentIndex(0)
+        page.hash_combo.setCurrentIndex(0)
+        from PyQt6.QtWidgets import QScrollArea
+        for area in page.findChildren(QScrollArea):
+            area.verticalScrollBar().setValue(area.verticalScrollBar().maximum())
+        pump(app, 0.8)
+        save(window, "acquisition-actions")
+
     def shot_artifacts():
         go(8)
         page = window.artifacts_page
@@ -326,16 +337,31 @@ def capture(window, app, wanted: set[str], with_device: bool, tests_log: Path | 
         pump(app, 0.8)
         save(window, "reporting")
 
+    def shot_report_sections():
+        go(6)
+        page = window.report_page
+        page.case_input.setText("CASE-2026-0141")
+        page.examiner_input.setText("Naa Adjei")
+        page.badge_input.setText("D-01178")
+        page.org_input.setText("Cybercrime Unit, CID")
+        from PyQt6.QtWidgets import QScrollArea
+        for area in page.findChildren(QScrollArea):
+            area.verticalScrollBar().setValue(min(220, area.verticalScrollBar().maximum()))
+        pump(app, 0.8)
+        save(window, "report-sections")
+
     shots.update({
         "dashboard": shot_dashboard,
         "cases": shot_cases,
         "device": shot_device,
         "acquisition": shot_acquisition,
+        "acquisition-actions": shot_acquisition_actions,
         "artifacts": shot_artifacts,
         "sim": shot_sim,
         "gallery": shot_gallery,
         "create-image": shot_create_image,
         "report": shot_report,
+        "report-sections": shot_report_sections,
     })
 
     needs_device = {"device", "acquisition", "artifacts", "sim", "gallery",

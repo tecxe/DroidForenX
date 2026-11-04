@@ -46,11 +46,12 @@ copy, and records an append-only chain of custody for every action.
 
 ## Screenshots
 
-Every frame below is the running application, not a mock-up, captured on
-**25 October 2026** with a **TECNO KL6** (Android 14 / API 34, unrooted)
-attached over ADB. The case is a throwaway demonstration case, seeded into a
-temporary database; the artifact counts, contacts, messages and calls are read
-from the phone. Click an image to open it at full size.
+Every frame below is from the running application, not a mock-up. Device and
+artifact views were captured with a **TECNO KL6** (Android 14 / API 34,
+unrooted) attached over ADB. Other screens use a throwaway demonstration case
+seeded into a temporary database. The Acquisition and Reporting screenshots
+were refreshed for **v1.0.39** on **4 November 2026**; those views do not pull
+personal device content. Click an image to open it at full size.
 
 `tools/capture_docs.py` takes them: it points `database.DB_PATH` at a temporary
 directory, seeds a case, shows the real window and grabs it with
@@ -82,18 +83,25 @@ that produced the result.
 
 **Acquisition** — pick an extraction level and the loaders to run. Level 1 is
 logical (contacts, SMS, calls, calendar, app data, ADB backup); Level 2 adds
-shared storage and carving.
+shared storage and carving. **Capture Screen** sits beside **Create Image** in
+the Acquisition action row. It saves a hashed PNG of the connected handset as a
+finding under Screenshots.
 
 ![Acquisition page with the Level 1 logical profile selected](docs/images/acquisition.png)
+
+The action row is below the extraction checklist; this focused view shows
+**Capture Screen** beside **Create Image**.
+
+![Acquisition action row with Capture Screen beside Create Image](docs/images/acquisition-actions.png)
 
 **Artifact viewer** — what came back, grouped by app and category. This frame
 was taken against the phone: 42,763 artifacts in one pass, including 860 SMS,
 1,403 calls and 2,249 contacts. The call log is a table, so each row carries its
 direction and whether it was answered instead of being folded into a
 conversation thread. Media categories offer a **thumbnail grid** with three tile
-sizes, pulled in the background and cached for display only, and **Capture
-Screen** takes a PNG of whatever is on the handset over `exec-out screencap`,
-hashes it, and files it as a finding under the Screenshots category.
+sizes, pulled in the background and cached for display only. Screen capture is
+available in Acquisition beside **Create Image**, where it takes a PNG of the
+handset over `exec-out screencap`, hashes it, and files it under Screenshots.
 
 ![Artifact viewer reading messages, calls and contacts from the device](docs/images/artifact-viewer.png)
 
@@ -153,9 +161,14 @@ the device layout is in front of you before anything is committed.
 ![Create Image dialog configured for Raw output from a connected device](docs/images/create-image.png)
 
 **Reporting** — a plain-English, court-ready report built from the case's
-preserved artifacts and chain of custody.
+preserved artifacts and chain of custody. The Report Sections preview is
+populated on first open and remains readable in its own table area.
 
 ![Reporting page preview](docs/images/reporting.png)
+
+The focused view shows the visible section descriptions and readiness status.
+
+![Report Sections preview table](docs/images/report-sections.png)
 
 **Tests** — the suite that guards acquisition, hashing, custody, imaging and the
 UI. No device is needed to run it:
