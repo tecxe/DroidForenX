@@ -98,6 +98,16 @@ a = Analysis(
     optimize=0,
 )
 
+# PyInstaller began collecting these optional ICU runtime DLLs in newer
+# environments. In the one-file Windows build they prevent QtWidgets from
+# loading (WinError 127), while the same Qt bundle starts correctly without
+# them. Qt's Windows locale fallback remains available when ICU is absent.
+if IS_WINDOWS:
+    a.binaries = [
+        entry for entry in a.binaries
+        if Path(entry[0]).name.lower() not in {"icuuc.dll", "icudt78.dll"}
+    ]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
