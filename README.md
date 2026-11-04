@@ -215,6 +215,7 @@ python -m unittest `
   desktop.tests.test_performance_safety `
   desktop.tests.test_main_window `
   desktop.tests.test_ui_export `
+  desktop.tests.test_update_checker `
   desktop.tests.test_whatsapp `
   desktop.tests.test_telegram `
   desktop.tests.test_reproducible_build -v
@@ -781,7 +782,7 @@ by anyone. `test_reproducible_build.py` compares the installed environment
 against the lock, and the full two-build byte comparison runs only with
 `DROIDFORENX_SLOW_TESTS=1`.
 
-437 tests, no device required. They cover the properties that matter:
+447 tests, no device required. They cover the properties that matter:
 
 - an acquired artifact survives being read (the original bug was that 11
   loaders deleted evidence after parsing)
@@ -818,6 +819,10 @@ each report format, proving the default **HTML** renders its custody log, the
 **PDF** folds typographic characters instead of raising, and the **XLSX**
 workbook is readable. This module is skipped when PyQt6 cannot start an
 application.
+
+The updater tests (`test_update_checker.py`) cover numeric version ordering,
+release asset validation and rejection of unexpected download links. The
+latest-release request is also checked against GitHub when publishing a release.
 
 The image-writer tests (`test_imaging.py`) exercise the writers without a device:
 
