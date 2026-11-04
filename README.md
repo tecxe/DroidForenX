@@ -56,6 +56,9 @@ screenshots were refreshed for **v1.0.39**; the Help menu and update prompt
 screenshots were added for **v1.0.40** on **4 November 2026**. Click an image to
 open it at full size.
 
+The Windows v1.0.40 binaries were rebuilt on **4 November 2026** to fix a Qt
+startup error in the original release package.
+
 `tools/capture_docs.py` takes them: it points `database.DB_PATH` at a temporary
 directory, seeds a case, shows the real window and grabs it with
 `QWidget.grab()`. Two details are deliberate. It does not use
