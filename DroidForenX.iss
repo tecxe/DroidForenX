@@ -7,8 +7,8 @@
 
 [Setup]
 AppName=DroidForenX
-AppVersion=1.0.36
-AppVerName=DroidForenX v1.0.36
+AppVersion=1.0.37
+AppVerName=DroidForenX v1.0.37
 DefaultDirName={autopf}\DroidForenX
 DefaultGroupName=DroidForenX
 OutputBaseFilename=DroidForenX_Installer

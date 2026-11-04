@@ -8,22 +8,22 @@
         *{margin:0;padding:0;box-sizing:border-box}
         :root{
             --bg:#080c14;--surface:#0d1117;--card:#111827;--border:#1e293b;
-            --text:#e2e8f0;--muted:#64748b;--accent:#3b82f6;--green:#22c55e;
-            --orange:#f59e0b;--red:#ef4444;--purple:#a855f7;
+            --text:#e2e8f0;--muted:#7890a8;--accent:#25d4d8;--green:#35d6a0;
+            --orange:#ff9f1c;--red:#ef6b5b;--purple:#ff7a18;
         }
         body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
         a{color:var(--accent);text-decoration:none}
 
         .nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(8,12,20,0.85);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:0 2rem;height:64px;display:flex;align-items:center;justify-content:space-between}
-        .nav-brand{display:flex;align-items:center;gap:12px;font-size:18px;font-weight:800;letter-spacing:-0.5px}
-        .nav-brand .logo{width:36px;height:36px;background:linear-gradient(135deg,var(--accent),var(--purple));border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:900;color:#fff}
+        .nav-brand{display:flex;align-items:center;font-size:18px;font-weight:800;letter-spacing:-0.5px}
+        .nav-brand .logo{width:190px;height:42px;object-fit:contain;object-position:left center;display:block}
         .nav-links{display:flex;gap:24px;align-items:center}
         .nav-links a{color:var(--muted);font-size:14px;font-weight:500;transition:color .2s}
         .nav-links a:hover{color:var(--text)}
 
         .hero{padding:160px 2rem 80px;text-align:center;position:relative}
         .hero::before{content:'';position:absolute;top:64px;left:50%;transform:translateX(-50%);width:600px;height:600px;background:radial-gradient(circle,rgba(59,130,246,0.08) 0%,transparent 70%);pointer-events:none}
-        .badge{display:inline-flex;align-items:center;gap:8px;padding:6px 16px;border-radius:100px;font-size:12px;font-weight:600;color:var(--green);background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);margin-bottom:24px}
+        .badge{display:inline-flex;align-items:center;gap:8px;padding:6px 16px;border-radius:100px;font-size:12px;font-weight:600;color:var(--accent);background:rgba(37,212,216,0.1);border:1px solid rgba(37,212,216,0.25);margin-bottom:24px}
         .badge .dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
         .hero h1{font-size:clamp(2.5rem,6vw,4.5rem);font-weight:900;letter-spacing:-2px;line-height:1.05;margin-bottom:20px;background:linear-gradient(135deg,#fff 0%,#94a3b8 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
@@ -31,7 +31,7 @@
         .hero-btns{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
 
         .btn{display:inline-flex;align-items:center;gap:10px;padding:14px 32px;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;border:none;transition:all .25s ease}
-        .btn-primary{background:linear-gradient(135deg,var(--accent),#2563eb);color:#fff;box-shadow:0 4px 24px rgba(59,130,246,0.3)}
+        .btn-primary{background:linear-gradient(135deg,var(--accent),var(--orange));color:#08111c;box-shadow:0 4px 24px rgba(37,212,216,0.3)}
         .btn-primary:hover{transform:translateY(-2px);box-shadow:0 8px 32px rgba(59,130,246,0.4)}
         .btn-secondary{background:var(--card);color:var(--text);border:1px solid var(--border)}
         .btn-secondary:hover{border-color:var(--accent);background:var(--surface)}
@@ -108,39 +108,33 @@
 
 <nav class="nav">
     <div class="nav-brand">
-        <div class="logo">DF</div>
-        <span>DroidForenX</span>
+        <img class="logo" src="images/droidforenx-logo.png" alt="DroidForenX">
     </div>
     <div class="nav-links">
         <a href="#features">Features</a>
         <a href="#verify">Verify</a>
-        <a href="https://github.com/tecxe/DroidForenX" target="_blank">GitHub</a>
     </div>
 </nav>
 
 <section class="hero">
-    <div class="badge"><span class="dot"></span> v1.0.36 - Latest Release</div>
+    <div class="badge"><span class="dot"></span> v1.0.37 - Latest Release</div>
     <h1>Professional Mobile<br>Digital Forensics</h1>
-    <p>Standalone desktop toolkit for Android device forensic analysis. 4-stage forensic workflow, 24 artifact loaders, WhatsApp and Telegram without root, physical imaging on a rooted handset, selectable Raw (dd) / ZIP image output, court-ready reporting. Single self-contained .exe, wrapped in a standard setup wizard. No Python, no dependencies.</p>
+    <p>Android forensics made clear and practical — preserve device evidence, examine digital artifacts, and produce trustworthy reports from a focused desktop workflow.</p>
     <div class="hero-btns">
-        <a class="btn btn-primary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.36/DroidForenX_Installer.exe" download>
+        <a class="btn btn-primary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.37/DroidForenX_Installer.exe" download>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Download DroidForenX_Installer.exe
         </a>
-        <a class="btn btn-secondary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.36/DroidForenX.exe" download>
+        <a class="btn btn-secondary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.37/DroidForenX.exe" download>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             DroidForenX.exe &mdash; Portable
         </a>
     </div>
-        <a class="btn btn-secondary" href="https://github.com/tecxe/DroidForenX" target="_blank">
-            <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-            View Source Code
-        </a>
     </div>
 </section>
 
 <div class="stats">
-    <div class="stat"><div class="stat-val">62.9 MB</div><div class="stat-label">Installer Size</div></div>
+    <div class="stat"><div class="stat-val">55.2 MB</div><div class="stat-label">Installer Size</div></div>
     <div class="stat"><div class="stat-val">4</div><div class="stat-label">Forensic Stages</div></div>
     <div class="stat"><div class="stat-val">24</div><div class="stat-label">Artifact Loaders</div></div>
     <div class="stat"><div class="stat-val">0</div><div class="stat-label">Dependencies Required</div></div>
@@ -195,6 +189,21 @@
             <div class="feature-icon" style="background:rgba(16,185,129,0.15);color:var(--green)">&#128247;</div>
             <h3>Thumbnail Grid &amp; Screen Capture</h3>
             <p>Media categories open as a Cellebrite-style thumbnail grid at three tile sizes, pulled in the background and cached for display only. Capture Screen takes a PNG of whatever is on the handset over <code>adb exec-out screencap</code>, hashes it, and files it as a finding &mdash; the way to preserve a conversation the tool cannot read natively.</p>
+        </div>
+        <div class="feature">
+            <div class="feature-icon" style="background:rgba(56,189,248,0.15);color:#38bdf8">&#128202;</div>
+            <h3>Grid or Table, Your Call</h3>
+            <p>The curated table stays the default, because a table is what an examiner cites. One toggle re-projects the same rows as a card grid &mdash; category accent, summary, timestamp and count on every tile &mdash; for the browse-first pass through a large artifact set. The grid caps itself at 400 cards and says so, instead of quietly rendering a view that would take minutes to lay out.</p>
+        </div>
+        <div class="feature">
+            <div class="feature-icon" style="background:rgba(52,211,153,0.15);color:#34d399">&#9889;</div>
+            <h3>Responsive Under Load</h3>
+            <p>Every ADB call runs off the GUI thread, so the window keeps drawing while the handset answers. Device scans are asynchronous and poll, acquisition owns the channel while it runs, and the artifact viewer defers its own crawl rather than fighting for it. Counting is single-pass, persistence is batched &mdash; a seventy-thousand-artifact phone reads in minutes without a frozen frame.</p>
+        </div>
+        <div class="feature">
+            <div class="feature-icon" style="background:rgba(251,191,36,0.15);color:#fbbf24">&#128268;</div>
+            <h3>Waits for a Ready Handset</h3>
+            <p>An unauthorised or offline device is reported as exactly that, not as Connected. The viewer refuses to crawl a handset that has not answered the authorisation prompt, polls until state is <code>device</code>, and retries the load &mdash; so plugging in a locked phone produces a status line instead of a blank panel and a silent two-minute timeout.</p>
         </div>
         <div class="feature">
             <div class="feature-icon" style="background:rgba(56,189,248,0.15);color:#38bdf8">&#128172;</div>
@@ -270,24 +279,24 @@
             </div>
             <div class="info-card">
                 <div class="label">File Size</div>
-                <div class="value">62.9 MB</div>
+                <div class="value">55.2 MB</div>
             </div>
             <div class="info-card">
                 <div class="label">Version</div>
-                <div class="value">v1.0.36</div>
+                <div class="value">v1.0.37</div>
             </div>
         </div>
 
         <h3 style="margin-bottom:12px">SHA-256 Hash</h3>
         <div class="hash-box">
-            <code id="hash">98f23376bc49b92c262e8fa5e6b75716b31c6fca0748c659f9b517ac12654a4b</code>
+            <code id="hash">AAB3330DBDC0800EC3D998699A648CB037D3E23E42045D61E2F90A2B630DC58B</code>
             <button class="copy-btn" onclick="copyHash()">Copy Hash</button>
         </div>
 
         <p style="margin-top:16px;color:var(--muted);font-size:12px">
             The hash above is the installer. The portable build,
             <code style="background:var(--bg);padding:3px 8px;border-radius:4px;font-size:11px;color:var(--orange)">DroidForenX.exe</code>,
-            is <code style="background:var(--bg);padding:3px 8px;border-radius:4px;font-size:11px;color:var(--accent)">93d6b8eb63356d19214eb86ed1d0954e867bf4600bdefe679901cbe28cea830e</code>
+            is <code style="background:var(--bg);padding:3px 8px;border-radius:4px;font-size:11px;color:var(--accent)">6E1B40289900693F869E2BAEDC353EDF5A2B2DF1F032D5EEFE15464DABB34C99</code>
         </p>
 
         <h3 style="margin-bottom:4px">Hash Verification</h3>
@@ -328,7 +337,7 @@
 </section>
 
 <footer>
-    <p>DroidForenX v1.0.36 &middot; Built by <a href="https://github.com/tecxe" target="_blank">tecxe</a> &middot; <a href="https://github.com/tecxe/DroidForenX" target="_blank">Source on GitHub</a></p>
+    <p>DroidForenX v1.0.37 &middot; Built by <a href="https://github.com/tecxe" target="_blank">tecxe</a> &middot; <a href="https://github.com/tecxe/DroidForenX" target="_blank">Source on GitHub</a></p>
 </footer>
 
 <script>
