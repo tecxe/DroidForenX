@@ -367,6 +367,39 @@ def capture(window, app, wanted: set[str], with_device: bool, tests_log: Path | 
         pump(app, 0.8)
         save(window, "report-sections")
 
+    def shot_updates():
+        from PyQt6.QtCore import QTimer
+        from PyQt6.QtWidgets import QMessageBox
+        from desktop.core.update_checker import UpdateInfo
+
+        help_action = next(action for action in window.menuBar().actions()
+                           if action.text().replace("&", "") == "Help")
+        menu = help_action.menu()
+        menu.popup(window.menuBar().mapToGlobal(
+            window.menuBar().actionGeometry(help_action).bottomLeft()))
+        pump(app, 0.4)
+        save(menu, "help-menu-updates")
+        menu.close()
+
+        def capture_dialog():
+            dialog = app.activeModalWidget()
+            if not isinstance(dialog, QMessageBox):
+                return
+            save(dialog, "update-available")
+            later = next(button for button in dialog.buttons()
+                         if button.text() == "Later")
+            later.click()
+
+        QTimer.singleShot(700, capture_dialog)
+        window._show_update_available(UpdateInfo(
+            version="1.0.40",
+            title="DroidForenX v1.0.40",
+            notes="Adds update checks from Help and an update available prompt.",
+            release_url="https://github.com/tecxe/DroidForenX/releases/tag/v1.0.40",
+            installer_url=("https://github.com/tecxe/DroidForenX/releases/download/"
+                           "v1.0.40/DroidForenX_Installer.exe"),
+        ))
+
     shots.update({
         "dashboard": shot_dashboard,
         "cases": shot_cases,
@@ -379,6 +412,7 @@ def capture(window, app, wanted: set[str], with_device: bool, tests_log: Path | 
         "create-image": shot_create_image,
         "report": shot_report,
         "report-sections": shot_report_sections,
+        "updates": shot_updates,
     })
 
     needs_device = {"device", "acquisition", "sim", "gallery",

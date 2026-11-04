@@ -52,8 +52,9 @@ connection, media gallery, SIM and Create Image views were captured with a
 use a throwaway demonstration case seeded into a temporary database. The
 Artifact Viewer image uses illustrative category counts and contains no
 personal artifact content. The Acquisition, Artifact Viewer and Reporting
-screenshots were refreshed for **v1.0.39** on **4 November 2026**. Click an
-image to open it at full size.
+screenshots were refreshed for **v1.0.39**; the Help menu and update prompt
+screenshots were added for **v1.0.40** on **4 November 2026**. Click an image to
+open it at full size.
 
 `tools/capture_docs.py` takes them: it points `database.DB_PATH` at a temporary
 directory, seeds a case, shows the real window and grabs it with
@@ -106,13 +107,22 @@ grid** with three tile sizes, loaded in the background and cached for display.
 Screen capture is in Acquisition beside **Create Image**; it hashes a PNG from
 `exec-out screencap` and files it under Screenshots.
 
-![Current Artifact Viewer with its searchable data structure and no standalone File Browser entry](docs/images/artifact-viewer.png)
+![Artifact Viewer with its searchable data structure](docs/images/artifact-viewer.png)
 
 **File Browser** — the standalone File System Browser page has been removed.
-Extracted file findings remain grouped in Artifact Viewer under **Data Files**,
+Files already acquired remain available in Artifact Viewer under **Data Files**,
 including All Files, Documents, Downloads, Recent Items, Screenshots and Camera.
-This is a view of collected findings, not a live general-purpose filesystem
-browser.
+The Artifact Viewer shows collected findings rather than browsing the live
+device filesystem.
+
+**Updates** — Help includes **Check for Updates...**. A quiet startup check also
+prompts when GitHub has a newer stable release. The dialog shows the release
+notes and offers the installer download or the release page; the user chooses
+when to download and install.
+
+![Help menu with Check for Updates](docs/images/help-menu-updates.png)
+
+![DroidForenX update available dialog with installer and release notes options](docs/images/update-available.png)
 
 **WhatsApp without root** — the WhatsApp tile no longer shows zero on an
 unrooted handset. It reads what Android actually exposes and says what it could

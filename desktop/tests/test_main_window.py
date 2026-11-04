@@ -147,6 +147,13 @@ class SidebarRenderingTest(unittest.TestCase):
         self.assertGreaterEqual(version[0].contentsRect().height(),
                                 version[0].fontMetrics().height())
 
+    def test_help_menu_exposes_check_for_updates(self):
+        help_menu = next(action.menu() for action in self.window.menuBar().actions()
+                         if action.text().replace("&", "") == "Help")
+        labels = [action.text() for action in help_menu.actions() if not action.isSeparator()]
+        self.assertEqual(labels[0], "Check for Updates...")
+        self.assertIn("About DroidForenX", labels)
+
     def test_the_device_status_footer_is_actually_painted(self):
         # A zero-height text box is how this bug hid: the widgets existed, had
         # text, and were "visible", but drew nothing.

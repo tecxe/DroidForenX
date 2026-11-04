@@ -23,7 +23,7 @@ def _qt_message_handler(msg_type, context, message):
         logging.warning(f"Qt Critical: {message}")
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt, qInstallMessageHandler
+from PyQt6.QtCore import Qt, QTimer, qInstallMessageHandler
 from PyQt6.QtGui import QFont
 
 from desktop import __version__
@@ -74,6 +74,8 @@ def main():
     from desktop.ui.main_window import MainWindow
     window = MainWindow()
     window.show()
+    # Let the first frame render before checking; release lookups run in a worker.
+    QTimer.singleShot(4000, lambda: window.check_for_updates(manual=False))
 
     sys.exit(app.exec())
 

@@ -3,7 +3,8 @@ from PyQt6.QtWidgets import (QMainWindow, QApplication, QWidget, QVBoxLayout, QH
                                QLabel, QPushButton, QStackedWidget, QFrame, QSplitter,
                                QStatusBar, QMenuBar, QMenu, QMessageBox, QFileDialog,
                                QScrollArea, QToolButton, QSizePolicy)
-from PyQt6.QtCore import Qt, QSize, QSettings
+from PyQt6.QtCore import Qt, QSize, QSettings, QThread, QUrl, pyqtSignal
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtGui import QIcon, QFont, QAction, QActionGroup
 
 from .theme import MAIN_STYLESHEET, theme
@@ -19,6 +20,7 @@ from .pages.artifacts_page import ArtifactsPage
 from .pages.sim_page import SimForensicsPage
 from ..core.adb_manager import list_devices, get_device_info
 from ..core.database import get_db, init_db, audit_log
+from ..core.update_checker import UpdateInfo, fetch_latest_release
 from .. import __version__
 
 
@@ -71,6 +73,18 @@ class _ElidedLabel(QLabel):
             self._full_text, Qt.TextElideMode.ElideMiddle, width))
 
 
+class _UpdateCheckThread(QThread):
+    """Keep the GitHub request off the UI thread."""
+
+    checked = pyqtSignal(object, str)
+
+    def run(self):
+        try:
+            self.checked.emit(fetch_latest_release(__version__), "")
+        except Exception as exc:
+            self.checked.emit(None, str(exc))
+
+
 class MainWindow(QMainWindow):
     #: Preferred working size. Used as an upper bound, never as a hard floor,
     #: so the window still opens on laptops smaller than this.
@@ -91,6 +105,10 @@ class MainWindow(QMainWindow):
         self._current_session_id = ""
         self._settings = None
         self._sidebar_restored = False
+        self._update_check_thread = None
+        self._update_check_result = (None, "")
+        self._update_check_manual = False
+        self._closing = False
 
         self._setup_ui()
         self._setup_menu()
@@ -414,9 +432,103 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.sidebar_action)
 
         help_menu = menubar.addMenu("Help")
+        self.check_updates_action = QAction("Check for Updates...", self)
+        self.check_updates_action.triggered.connect(
+            lambda _checked=False: self.check_for_updates(manual=True))
+        help_menu.addAction(self.check_updates_action)
+        help_menu.addSeparator()
+
         about_action = QAction("About DroidForenX", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
+
+    def check_for_updates(self, manual: bool = True) -> None:
+        """Check GitHub Releases without holding up the application window."""
+        if self._update_check_thread is not None and self._update_check_thread.isRunning():
+            if manual:
+                QMessageBox.information(
+                    self, "Checking for Updates", "An update check is already in progress.")
+            return
+
+        self._update_check_manual = manual
+        self._update_check_result = (None, "")
+        self.check_updates_action.setEnabled(False)
+        thread = _UpdateCheckThread(self)
+        self._update_check_thread = thread
+        thread.checked.connect(self._store_update_check_result)
+        thread.finished.connect(self._finish_update_check)
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
+
+    def _store_update_check_result(self, update, error: str) -> None:
+        self._update_check_result = (update, error)
+
+    def _finish_update_check(self) -> None:
+        update, error = self._update_check_result
+        manual = self._update_check_manual
+        self._update_check_thread = None
+        self.check_updates_action.setEnabled(True)
+
+        if self._closing:
+            self.close()
+            return
+
+        if error:
+            if manual:
+                QMessageBox.warning(
+                    self, "Update Check Failed",
+                    "DroidForenX could not check for updates. Check your internet "
+                    f"connection and try again.\n\nDetails: {error}")
+            return
+        if update is None:
+            if manual:
+                QMessageBox.information(
+                    self, "No Updates Available",
+                    f"DroidForenX v{_app_version()} is up to date.")
+            return
+        self._show_update_available(update)
+
+    def _show_update_available(self, update: UpdateInfo) -> None:
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("DroidForenX Update Available")
+        dialog.setIcon(QMessageBox.Icon.Information)
+        dialog.setTextFormat(Qt.TextFormat.PlainText)
+        dialog.setText(f"DroidForenX v{update.version} is available.")
+        notes = update.notes or "This release includes improvements and fixes."
+        dialog.setInformativeText(
+            f"{notes}\n\nDownload the installer, then close DroidForenX before "
+            "running it to update the app.")
+        download_button = dialog.addButton(
+            "Download Installer", QMessageBox.ButtonRole.AcceptRole)
+        notes_button = dialog.addButton(
+            "Release Notes", QMessageBox.ButtonRole.ActionRole)
+        later_button = dialog.addButton("Later", QMessageBox.ButtonRole.RejectRole)
+        dialog.setDefaultButton(later_button)
+        dialog.exec()
+
+        clicked = dialog.clickedButton()
+        if clicked is download_button:
+            self._open_update_link(update.installer_url)
+        elif clicked is notes_button:
+            self._open_update_link(update.release_url)
+
+    def _open_update_link(self, url: str) -> None:
+        if not QDesktopServices.openUrl(QUrl(url)):
+            QMessageBox.warning(
+                self, "Could Not Open Link",
+                "The link could not be opened. Visit the DroidForenX GitHub "
+                "releases page to download the update.")
+
+    def closeEvent(self, event) -> None:
+        # Keep the window alive until its short, timeout-bounded update request
+        # ends; destroying a running QThread would crash during application exit.
+        if (self._update_check_thread is not None
+                and self._update_check_thread.isRunning()):
+            self._closing = True
+            self.statusBar().showMessage("Finishing update check before closing…")
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     def _sync_theme_actions(self, _resolved: str = "") -> None:
         """Keep the menu ticked on the selected mode.
