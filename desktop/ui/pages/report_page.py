@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
                               QFrame, QGroupBox, QGridLayout, QLineEdit, QTextEdit,
                               QComboBox, QScrollArea, QMessageBox, QFileDialog,
                               QDateEdit, QSplitter)
+from PyQt6.QtWidgets import QHeaderView
 from PyQt6.QtCore import Qt, pyqtSignal, QDate
 from ..widgets.log_console import LogConsole
 from ..widgets.data_table import DataTable
@@ -92,7 +93,12 @@ class ReportPage(QWidget):
         preview_layout = QVBoxLayout(preview_group)
 
         self.preview_table = DataTable(["Section", "Description", "Status"])
+        self.preview_table.setMinimumHeight(220)
         self.preview_table.setMaximumHeight(320)
+        preview_header = self.preview_table.horizontalHeader()
+        preview_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        preview_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        preview_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         preview_layout.addWidget(self.preview_table)
         cl.addWidget(preview_group)
 
@@ -118,6 +124,10 @@ class ReportPage(QWidget):
         cl.addStretch()
         scroll.setWidget(content)
         layout.addWidget(scroll)
+
+        # Keep the preview populated even before a case is selected so the
+        # report structure is visible when the page first opens.
+        self._update_preview()
 
         # Console
         self.console = LogConsole("Report Generation Log")

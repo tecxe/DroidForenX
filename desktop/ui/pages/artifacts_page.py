@@ -3134,19 +3134,6 @@ class ArtifactsPage(QWidget):
         self.grid_btn.clicked.connect(self._open_current_gallery)
         header_layout.addWidget(self.grid_btn)
 
-        # ADB screencap: whatever the examiner is looking at on the handset can
-        # be captured as a finding, which is the only way to preserve a chat
-        # that lives inside an app the tool cannot read.
-        self.capture_btn = QPushButton("Capture Screen")
-        self.capture_btn.setFixedHeight(30)
-        self.capture_btn.setStyleSheet(
-            "QPushButton { background: #7c3aed; color: white; border: none;"
-            " border-radius: 6px; font-size: 12px; font-weight: 600; padding: 0 12px; }"
-            "QPushButton:hover { background: #7c3aed; }"
-            "QPushButton:disabled { background: #1e293b; color: #475569; }")
-        self.capture_btn.clicked.connect(self._capture_screen)
-        header_layout.addWidget(self.capture_btn)
-
         outer.addWidget(header)
 
         self.conv_scroll = QScrollArea()

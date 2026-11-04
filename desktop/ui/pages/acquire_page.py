@@ -10,7 +10,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                               QFrame, QComboBox, QGroupBox, QGridLayout, QProgressBar,
                               QCheckBox, QScrollArea, QMessageBox)
-from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSignal as Signal
+from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, pyqtSignal as Signal
 from ..widgets.log_console import LogConsole
 from ..widgets.data_table import DataTable
 from ..widgets.device_status_bar import DeviceStatusBar
@@ -1822,6 +1822,17 @@ class AcquirePage(QWidget):
         self.btn_create_image.clicked.connect(self._open_create_image)
         btn_row.addWidget(self.btn_create_image)
 
+        self.btn_capture_screen = QPushButton("Capture Screen")
+        self.btn_capture_screen.setFixedHeight(42)
+        self.btn_capture_screen.setToolTip("Capture the connected device screen and save it as evidence")
+        self.btn_capture_screen.setStyleSheet(
+            "QPushButton { background: #7c3aed; color: white; border: none;"
+            " border-radius: 8px; padding: 8px 20px; font-weight: 600; font-size: 13px; }"
+            "QPushButton:hover { background: #6d28d9; }"
+            "QPushButton:disabled { background: #334155; color: #64748b; }")
+        self.btn_capture_screen.clicked.connect(self._capture_screen)
+        btn_row.addWidget(self.btn_capture_screen)
+
         btn_row.addStretch()
 
         btn_next = QPushButton("Next: Examination →")
@@ -1908,6 +1919,35 @@ class AcquirePage(QWidget):
         dialog = CreateImageDialog(
             self, serial=serial or "", case_id=self._case_id, session_id=self._session_id)
         dialog.exec()
+
+    def _capture_screen(self) -> None:
+        """Capture the connected handset screen and register it as evidence."""
+        serial = self._serial or self.device_bar.get_first_serial()
+        if not serial:
+            self._flash_capture("No device connected")
+            return
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        target = Path.home() / ".droidforenx" / "evidence" / "screenshots" / f"screen_{stamp}.png"
+        ok, message = adb.capture_screen(serial, str(target))
+        if not ok:
+            self.console.log(f"Capture failed: {message}", "error")
+            self._flash_capture("Capture failed")
+            return
+        size = target.stat().st_size if target.exists() else 0
+        _store_artifact(self._session_id, target.name, "On-device screen capture",
+                        "Screenshots", str(target), size, _sha256(str(target)),
+                        {"captured_from": serial, "type": "Image"})
+        self.console.log(f"Screen captured: {target.name}", "success")
+        self._flash_capture("Screen saved")
+
+    def _flash_capture(self, message: str) -> None:
+        self.btn_capture_screen.setText(message)
+        self.btn_capture_screen.setEnabled(False)
+        QTimer.singleShot(2500, self._reset_capture_button)
+
+    def _reset_capture_button(self) -> None:
+        self.btn_capture_screen.setText("Capture Screen")
+        self.btn_capture_screen.setEnabled(True)
 
     def _on_device_rescanned(self, devices):
         if devices:
