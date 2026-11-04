@@ -265,15 +265,32 @@ def capture(window, app, wanted: set[str], with_device: bool, tests_log: Path | 
         save(window, "acquisition-actions")
 
     def shot_artifacts():
-        go(8)
         page = window.artifacts_page
-        wait_for(app, lambda: page.all_artifacts or not page._data_loaded,
-                 timeout=420, label="artifact extraction")
-        pump(app, 1.5)
+        # The README view uses illustrative category totals, not a live device
+        # crawl. This keeps documentation capture independent of a handset and
+        # prevents personal artifact content from entering a screenshot.
+        page.device_bar.auto_scan = lambda: None
+        page.device_bar._update_ui([])
+        page._data_loaded = True
+        demo_counts = {
+            "SMS": 860, "Calls": 1403, "Contacts": 2249, "WhatsApp": 420,
+            "Telegram": 180, "Calendar": 88, "Recent Items": 240,
+            "Location Related": 45, "Media": 3600, "Documents": 320,
+            "Transactions": 70, "Emails & Accounts": 28, "WiFi & Network": 46,
+            "System Info": 78, "Deleted Files": 96, "Downloads": 400,
+            "Screenshots": 35, "Camera": 1300, "Recordings": 190,
+            "Chrome": 142, "All Files": 690,
+        }
+        page.structure.set_counts(demo_counts)
+        total = sum(demo_counts.values())
+        page.stats_label.setText(
+            f"{total:,} demonstration artifacts  |  860 SMS  |  1,403 calls  |  2,249 contacts")
+        go(7)
+        pump(app, 0.8)
         save(window, "artifact-viewer")
 
     def shot_sim():
-        go(9)
+        go(8)
         page = window.sim_page
         page._read_sim()
         wait_for(app, lambda: page._result is not None, timeout=180, label="SIM read")
@@ -281,7 +298,7 @@ def capture(window, app, wanted: set[str], with_device: bool, tests_log: Path | 
         save(window, "sim-forensics")
 
     def shot_gallery():
-        go(8)
+        go(7)
         page = window.artifacts_page
         wait_for(app, lambda: page.all_artifacts or not page._data_loaded,
                  timeout=420, label="artifact extraction")
@@ -364,7 +381,7 @@ def capture(window, app, wanted: set[str], with_device: bool, tests_log: Path | 
         "report-sections": shot_report_sections,
     })
 
-    needs_device = {"device", "acquisition", "artifacts", "sim", "gallery",
+    needs_device = {"device", "acquisition", "sim", "gallery",
                     "create-image"}
     if not with_device:
         for name in needs_device:

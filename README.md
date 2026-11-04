@@ -46,12 +46,14 @@ copy, and records an append-only chain of custody for every action.
 
 ## Screenshots
 
-Every frame below is from the running application, not a mock-up. Device and
-artifact views were captured with a **TECNO KL6** (Android 14 / API 34,
-unrooted) attached over ADB. Other screens use a throwaway demonstration case
-seeded into a temporary database. The Acquisition and Reporting screenshots
-were refreshed for **v1.0.39** on **4 November 2026**; those views do not pull
-personal device content. Click an image to open it at full size.
+Every frame below is from the running application, not a mock-up. Device
+connection, media gallery, SIM and Create Image views were captured with a
+**TECNO KL6** (Android 14 / API 34, unrooted) attached over ADB. Other screens
+use a throwaway demonstration case seeded into a temporary database. The
+Artifact Viewer image uses illustrative category counts and contains no
+personal artifact content. The Acquisition, Artifact Viewer and Reporting
+screenshots were refreshed for **v1.0.39** on **4 November 2026**. Click an
+image to open it at full size.
 
 `tools/capture_docs.py` takes them: it points `database.DB_PATH` at a temporary
 directory, seeds a case, shows the real window and grabs it with
@@ -94,16 +96,23 @@ The action row is below the extraction checklist; this focused view shows
 
 ![Acquisition action row with Capture Screen beside Create Image](docs/images/acquisition-actions.png)
 
-**Artifact viewer** — what came back, grouped by app and category. This frame
-was taken against the phone: 42,763 artifacts in one pass, including 860 SMS,
-1,403 calls and 2,249 contacts. The call log is a table, so each row carries its
-direction and whether it was answered instead of being folded into a
-conversation thread. Media categories offer a **thumbnail grid** with three tile
-sizes, pulled in the background and cached for display only. Screen capture is
-available in Acquisition beside **Create Image**, where it takes a PNG of the
-handset over `exec-out screencap`, hashes it, and files it under Screenshots.
+**Artifact Viewer** — a three-pane workspace: a searchable structure for
+**Analyze Data**, **Data Files** and **Exchange**; the selected category in the
+middle; and an item inspector on the right. The overview has quick links to
+WhatsApp, text messages, calls, media, documents and contacts. The counts in
+this screenshot are illustrative demo values. Call records are shown in a table
+with direction and answer status, and media categories offer a **thumbnail
+grid** with three tile sizes, loaded in the background and cached for display.
+Screen capture is in Acquisition beside **Create Image**; it hashes a PNG from
+`exec-out screencap` and files it under Screenshots.
 
-![Artifact viewer reading messages, calls and contacts from the device](docs/images/artifact-viewer.png)
+![Current Artifact Viewer with its searchable data structure and no standalone File Browser entry](docs/images/artifact-viewer.png)
+
+**File Browser** — the standalone File System Browser page has been removed.
+Extracted file findings remain grouped in Artifact Viewer under **Data Files**,
+including All Files, Documents, Downloads, Recent Items, Screenshots and Camera.
+This is a view of collected findings, not a live general-purpose filesystem
+browser.
 
 **WhatsApp without root** — the WhatsApp tile no longer shows zero on an
 unrooted handset. It reads what Android actually exposes and says what it could
