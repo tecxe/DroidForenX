@@ -115,8 +115,8 @@
         img,canvas,svg{max-width:100%}
         @media(max-width:640px){
         .nav{height:auto;min-height:56px;flex-wrap:wrap;padding:.5rem 1rem;row-gap:.4rem}
-        .nav-links{flex-wrap:nowrap;gap:.5rem}
-        .theme-switch{order:3;width:100%;justify-content:center;margin-top:.1rem}
+        .theme-switch{order:2;width:auto;margin-left:auto}
+        .nav-links{order:3;width:100%;flex-wrap:nowrap;gap:.5rem;justify-content:flex-start}
         .extract-scene{max-width:280px}
         .nav-links a{white-space:nowrap}
         .hero{padding:120px 1.25rem 56px}
@@ -133,7 +133,7 @@
         .steps{grid-template-columns:1fr}
         .verify-input button{min-height:48px}
         .copy-btn{min-height:40px}
-        .theme-switch{order:3}
+        .theme-switch{order:2;margin-left:auto}
         footer{padding:32px 1rem}
         }
 
@@ -315,6 +315,7 @@
     <div class="nav-links">
         <a href="#features">Features</a>
         <a href="#verify">Verify</a>
+    </div>
         <div class="theme-switch" role="group" aria-label="Theme">
             <button type="button" data-theme-mode="system" aria-pressed="true" title="Follow system theme">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
@@ -329,7 +330,6 @@
                 <span>Dark</span>
             </button>
         </div>
-    </div>
 </nav>
 
 <section class="hero">
