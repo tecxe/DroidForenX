@@ -143,7 +143,10 @@
             .hero{padding:140px 2rem 64px}
         }
         @media(max-width:480px){
-            .nav-brand .logo{width:150px;height:34px}
+            .nav-brand{flex-shrink:0}
+            .nav-brand .logo{width:118px;height:30px}
+            .theme-switch{flex-shrink:1;max-width:52vw}
+            .theme-switch button{padding:6px 7px;gap:4px}
             .nav-links a{font-size:13px}
             .extract-scene{max-width:248px}
             .hero h1{font-size:1.85rem;letter-spacing:-1px}
