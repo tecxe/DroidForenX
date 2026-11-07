@@ -17,7 +17,17 @@
         body{font-family:'Inter','Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
         h1,h2,h3,h4,.stat-val,.nav-brand{font-family:'Sora','Inter','Segoe UI',system-ui,sans-serif;letter-spacing:-.02em}
         .hero h1{font-weight:800;letter-spacing:-.035em}
-        .section-title{font-weight:700;letter-spacing:-.03em}
+        .section-title{color:#fff}
+        [data-theme="light"] .section-title{color:#0f1f33}
+        .section-title::after{content:'';display:block;width:56px;height:4px;border-radius:2px;margin-top:12px;background:linear-gradient(90deg,#ff9f1c,#ff7a18)}
+        .feature h3,.step h4,.requirements h3,.verify-section h3,.info-card .value{color:#fff}
+        [data-theme="light"] .feature h3,[data-theme="light"] .step h4,[data-theme="light"] .requirements h3,
+        [data-theme="light"] .verify-section h3,[data-theme="light"] .info-card .value{color:#0f1f33}
+        .feature h3::first-letter{color:#ff9f1c}
+        [data-theme="light"] .feature h3::first-letter{color:#ea580c}
+        .stat-val{color:#fff}
+        [data-theme="light"] .stat-val{color:#0f1f33}
+        .stat-val::first-letter{color:#ff9f1c}
         .btn,.theme-switch button{font-family:'Inter','Segoe UI',system-ui,sans-serif;letter-spacing:.01em}
         a{color:var(--accent);text-decoration:none}
 
