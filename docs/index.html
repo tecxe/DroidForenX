@@ -186,10 +186,8 @@
         .hero .badge,.hero h1,.hero p,.hero-btns{animation:riseIn .9s var(--ease) both}
         .hero h1{animation-delay:.08s}.hero p{animation-delay:.16s}.hero-btns{animation-delay:.24s}
         @keyframes riseIn{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:translateY(0)}}
-        .hero h1{color:#ff9f1c;-webkit-text-fill-color:#ff9f1c;background:none;
-            text-shadow:-1px -1px 0 #ffc978,1px 1px 0 #fb923c,2px 2px 0 #f97316,3px 3px 0 #ea580c,4px 4px 0 #dc4a0a,5px 5px 0 #c93f08,6px 6px 0 #b43406,7px 7px 0 #a02c05,8px 8px 0 #8c2604,9px 9px 0 #782103,10px 10px 0 #641b02,11px 11px 0 #541601,12px 12px 0 #451200,13px 13px 0 #370e00,14px 14px 0 #2a0a00,15px 15px 0 #1e0700,16px 16px 0 #120400,26px 34px 40px rgba(0,0,0,.55),0 0 42px rgba(255,159,28,.22)}
-        [data-theme="light"] .hero h1{color:#ff7a18;-webkit-text-fill-color:#ff7a18;background:none;
-            text-shadow:-1px -1px 0 #ffd9a0,1px 1px 0 #fb923c,2px 2px 0 #f97316,3px 3px 0 #ea580c,4px 4px 0 #dc4a0a,5px 5px 0 #c93f08,6px 6px 0 #b43406,7px 7px 0 #a02c05,8px 8px 0 #8c2604,9px 9px 0 #782103,10px 10px 0 #641b02,11px 11px 0 #541601,12px 12px 0 #451200,13px 13px 0 #370e00,14px 14px 0 #2a0a00,15px 15px 0 #1e0700,16px 16px 0 #120400,26px 34px 36px rgba(124,45,18,.38)}
+        .hero h1{background:linear-gradient(100deg,#ff9f1c,#ff7a18);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
+        [data-theme="light"] .hero h1{background:linear-gradient(100deg,#ff9f1c,#ff7a18);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
         @keyframes shimmer{to{background-position:-220% 0}}
         .badge{animation:riseIn .6s var(--ease) both,floaty 4s ease-in-out 1s infinite}
         @keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
