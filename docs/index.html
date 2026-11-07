@@ -254,6 +254,38 @@
         .theme-switch button[aria-pressed="true"]{background:var(--accent);color:#fff;box-shadow:0 4px 14px rgba(37,212,216,.30)}
         [data-theme="light"] .theme-switch button[aria-pressed="true"]{box-shadow:0 4px 14px rgba(8,145,178,.25)}
         @media(max-width:640px){.theme-switch button span{display:none}.theme-switch button{padding:7px 9px}}
+    
+        /* ===== extraction hero scene: phone -> computer ===== */
+        .hero-grid{display:grid;grid-template-columns:minmax(300px,480px) minmax(0,1fr);gap:3rem;align-items:center;
+            max-width:1180px;margin:0 auto;text-align:left}
+        .hero-copy .badge{margin-bottom:20px}
+        .hero-copy p{margin:0 0 36px}
+        .hero-copy .hero-btns{justify-content:flex-start}
+        .extract-scene{position:relative;will-change:transform}
+        .extract-scene svg{width:100%;height:auto;display:block;overflow:visible}
+        .scene-line{fill:none;stroke:var(--accent);stroke-width:2;stroke-linecap:round;opacity:.9}
+        .scene-thin{fill:none;stroke:var(--accent);stroke-width:1.4;opacity:.45}
+        .scene-fill{fill:rgba(37,212,216,.08)}
+        [data-theme="light"] .scene-fill{fill:rgba(14,116,144,.07)}
+        .stream{fill:none;stroke:var(--accent);stroke-width:2;stroke-dasharray:6 10;opacity:.6;
+            animation:dashFlow 1.6s linear infinite}
+        @keyframes dashFlow{to{stroke-dashoffset:-16}}
+        .scanline{animation:scanY 3.6s ease-in-out infinite}
+        @keyframes scanY{0%,100%{transform:translateY(0);opacity:0}12%{opacity:.9}50%{transform:translateY(150px);opacity:.9}62%{opacity:0}}
+        .ring{transform-origin:center;transform-box:fill-box;animation:spinSlow 7s linear infinite}
+        @keyframes spinSlow{to{transform:rotate(360deg)}}
+        .rowpulse{animation:rowGlow 2.8s ease-in-out infinite}
+        @keyframes rowGlow{0%,100%{opacity:.25}50%{opacity:.95}}
+        .floaty2{animation:floaty 6s ease-in-out infinite}
+        @media(max-width:900px){
+            .hero-grid{grid-template-columns:1fr;gap:2rem;text-align:center}
+            .extract-scene{max-width:420px;margin:0 auto;width:100%}
+            .hero-copy .hero-btns{justify-content:center}
+        }
+        @media(max-width:640px){
+            .extract-scene{max-width:320px}
+            .hero-btns{margin:0 auto}
+        }
     </style>
 </head>
 <body>
@@ -284,6 +316,51 @@
 </nav>
 
 <section class="hero">
+    <div class="hero-grid">
+        <div class="extract-scene" aria-hidden="true">
+            <svg viewBox="0 0 480 340" role="img" aria-label="An Android phone being extracted by a computer">
+                <!-- data streams -->
+                <path id="stream1" class="stream" d="M150 110 C 210 90, 260 90, 320 110"/>
+                <path id="stream2" class="stream" d="M150 170 C 220 170, 250 170, 320 170" style="animation-delay:.4s"/>
+                <path id="stream3" class="stream" d="M150 230 C 210 250, 260 250, 320 230" style="animation-delay:.8s"/>
+                <circle r="4" fill="var(--accent)"><animateMotion dur="2.2s" repeatCount="indefinite"><mpath href="#stream1"/></animateMotion></circle>
+                <circle r="3.4" fill="var(--green)"><animateMotion dur="2.6s" begin=".5s" repeatCount="indefinite"><mpath href="#stream2"/></animateMotion></circle>
+                <circle r="4" fill="var(--accent)"><animateMotion dur="2.4s" begin="1s" repeatCount="indefinite"><mpath href="#stream3"/></animateMotion></circle>
+
+                <!-- phone -->
+                <g class="floaty2">
+                    <rect class="scene-line" x="46" y="52" width="104" height="236" rx="18"/>
+                    <rect class="scene-fill" x="56" y="66" width="84" height="188" rx="10"/>
+                    <rect class="scene-line" x="82" y="60" width="32" height="5" rx="2.5"/>
+                    <circle class="scene-line" cx="98" cy="272" r="6"/>
+                    <g class="scanline"><rect x="56" y="70" width="84" height="3" rx="1.5" fill="var(--accent)"/></g>
+                    <rect class="scene-thin" x="68" y="92" width="60" height="7" rx="3.5"/>
+                    <rect class="scene-thin" x="68" y="112" width="44" height="7" rx="3.5"/>
+                    <rect class="scene-thin" x="68" y="132" width="54" height="7" rx="3.5"/>
+                    <circle cx="78" cy="176" r="7" fill="var(--accent)" opacity=".7"/>
+                    <rect class="scene-thin" x="94" y="172" width="34" height="7" rx="3.5"/>
+                    <circle cx="78" cy="204" r="7" fill="var(--green)" opacity=".7"/>
+                    <rect class="scene-thin" x="94" y="200" width="28" height="7" rx="3.5"/>
+                    <!-- extraction ring -->
+                    <g class="ring"><circle cx="150" cy="52" r="17" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" stroke-dasharray="80 27"/></g>
+                    <text x="150" y="57" text-anchor="middle" font-size="11" font-weight="700" fill="var(--accent)">AI</text>
+                </g>
+
+                <!-- computer -->
+                <g>
+                    <rect class="scene-line" x="322" y="72" width="132" height="92" rx="10"/>
+                    <rect class="scene-fill" x="332" y="82" width="112" height="72" rx="6"/>
+                    <rect class="rowpulse" x="342" y="94" width="66" height="7" rx="3.5" fill="var(--accent)"/>
+                    <rect class="rowpulse" x="342" y="110" width="48" height="7" rx="3.5" fill="var(--green)" style="animation-delay:.5s"/>
+                    <rect class="rowpulse" x="342" y="126" width="58" height="7" rx="3.5" fill="var(--accent)" style="animation-delay:1s"/>
+                    <rect class="scene-thin" x="342" y="142" width="30" height="6" rx="3"/>
+                    <path class="scene-line" d="M388 164 v18 M352 196 h72 l8 18 h-88 z"/>
+                    <rect class="scene-thin" x="360" y="214" width="56" height="6" rx="3"/>
+                </g>
+            </svg>
+        </div>
+
+        <div class="hero-copy">
     <div class="badge"><span class="dot"></span> v1.0.40 - Latest Release</div>
     <h1>Professional Mobile<br>Digital Forensics</h1>
     <p>Android forensics made clear and practical — preserve device evidence, examine digital artifacts, and produce trustworthy reports from a focused desktop workflow.</p>
@@ -296,6 +373,8 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             DroidForenX.exe &mdash; Portable
         </a>
+    </div>
+        </div>
     </div>
 </section>
 
