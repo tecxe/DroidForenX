@@ -102,9 +102,86 @@
             .verify-input{flex-direction:column}
             .hash-box{flex-direction:column;align-items:flex-start}
         }
+    
+        /* ============ Modern interactive layer (performance-safe) ============ */
+        :root{--ease:cubic-bezier(.22,1,.36,1);--spring:cubic-bezier(.34,1.56,.64,1)}
+        html{scroll-behavior:smooth}
+        body{position:relative}
+        ::selection{background:rgba(37,212,216,.35);color:#fff}
+
+        /* aurora backdrop — transform/opacity only, GPU-composited */
+        .aurora{position:fixed;inset:-20%;z-index:-2;pointer-events:none;opacity:.55;
+            background:
+              radial-gradient(42% 34% at 18% 12%,rgba(37,212,216,.16),transparent 70%),
+              radial-gradient(38% 30% at 84% 18%,rgba(255,159,28,.10),transparent 70%),
+              radial-gradient(46% 36% at 50% 88%,rgba(53,214,160,.08),transparent 70%);
+            animation:auroraDrift 22s ease-in-out infinite alternate;will-change:transform}
+        @keyframes auroraDrift{from{transform:translate3d(-2%,-1%,0) scale(1)}to{transform:translate3d(2%,2%,0) scale(1.06)}}
+        #particles{position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.5}
+        #progressBar{position:fixed;top:0;left:0;height:3px;width:100%;z-index:200;transform-origin:left;transform:scaleX(0);
+            background:linear-gradient(90deg,var(--accent),var(--green),var(--orange))}
+
+        /* reveal on scroll — compositor only */
+        .reveal{opacity:0;transform:translateY(26px);transition:opacity .7s var(--ease),transform .7s var(--ease);transition-delay:var(--d,0s)}
+        .reveal.in{opacity:1;transform:translateY(0)}
+
+        /* hero entrance */
+        .hero .badge,.hero h1,.hero p,.hero-btns{animation:riseIn .9s var(--ease) both}
+        .hero h1{animation-delay:.08s}.hero p{animation-delay:.16s}.hero-btns{animation-delay:.24s}
+        @keyframes riseIn{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:translateY(0)}}
+        .hero h1{background:linear-gradient(110deg,#fff 20%,#9fd8dc 40%,#fff 60%);background-size:220% 100%;
+            -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
+            animation:riseIn .9s var(--ease) .08s both,shimmer 6s linear infinite}
+        @keyframes shimmer{to{background-position:-220% 0}}
+        .badge{animation:riseIn .9s var(--ease) both,floaty 5s ease-in-out 1s infinite}
+        @keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+
+        /* nav */
+        .nav{transition:height .35s var(--ease),background .35s,box-shadow .35s}
+        .nav.scrolled{height:54px;background:rgba(8,12,20,.92);box-shadow:0 8px 30px rgba(0,0,0,.35)}
+        .nav-links a{position:relative;padding:4px 0}
+        .nav-links a::after{content:'';position:absolute;left:0;bottom:0;height:2px;width:100%;background:var(--accent);
+            transform:scaleX(0);transform-origin:right;transition:transform .35s var(--ease)}
+        .nav-links a:hover::after{transform:scaleX(1);transform-origin:left}
+
+        /* buttons — shine sweep + spring press, transform only */
+        .btn{position:relative;overflow:hidden;will-change:transform}
+        .btn::before{content:'';position:absolute;inset:0;background:linear-gradient(105deg,transparent 35%,rgba(255,255,255,.45) 50%,transparent 65%);
+            transform:translateX(-120%);transition:transform .6s var(--ease)}
+        .btn:hover::before{transform:translateX(120%)}
+        .btn:active{transform:scale(.96)}
+        .btn svg{transition:transform .3s var(--spring)}
+        .btn:hover svg{transform:translateY(2px)}
+
+        /* feature cards — 3D tilt + cursor spotlight */
+        .features{perspective:900px}
+        .feature{position:relative;transform-style:preserve-3d;transition:border-color .3s,box-shadow .3s;will-change:transform}
+        .feature::after{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity .3s;
+            background:radial-gradient(220px circle at var(--mx,50%) var(--my,50%),rgba(37,212,216,.14),transparent 65%)}
+        .feature:hover::after{opacity:1}
+        .feature:hover{border-color:rgba(37,212,216,.55);box-shadow:0 18px 40px rgba(0,0,0,.35)}
+        .feature-icon{transition:transform .35s var(--spring)}
+        .feature:hover .feature-icon{transform:translateZ(28px) scale(1.08) rotate(-4deg)}
+
+        /* stats + steps + info cards */
+        .stat-val{font-variant-numeric:tabular-nums}
+        .step,.info-card{transition:transform .3s var(--ease),border-color .3s}
+        .step:hover,.info-card:hover{transform:translateY(-4px);border-color:rgba(37,212,216,.4)}
+        .req-item{transition:transform .25s var(--ease),color .25s}
+        .req-item:hover{transform:translateX(4px);color:var(--text)}
+
+        :focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:6px}
+
+        @media (prefers-reduced-motion:reduce){
+            *,*::before,*::after{animation-duration:.001s!important;animation-iteration-count:1!important;transition-duration:.001s!important}
+            html{scroll-behavior:auto}
+            .reveal{opacity:1;transform:none}
+            #particles{display:none}
+        }
     </style>
 </head>
 <body>
+<div class="aurora"></div><canvas id="particles"></canvas><div id="progressBar"></div>
 
 <nav class="nav">
     <div class="nav-brand">
@@ -130,10 +207,9 @@
             DroidForenX.exe &mdash; Portable
         </a>
     </div>
-    </div>
 </section>
 
-<div class="stats">
+<div class="stats reveal">
     <div class="stat"><div class="stat-val">92.9 MB</div><div class="stat-label">Installer Size</div></div>
     <div class="stat"><div class="stat-val">4</div><div class="stat-label">Forensic Stages</div></div>
     <div class="stat"><div class="stat-val">24</div><div class="stat-label">Artifact Loaders</div></div>
@@ -145,94 +221,94 @@
     are reported as NOT_ACCESSIBLE without root; the rest report their own state &mdash; nothing is silently dropped.
 </p>
 
-<section class="section" id="features">
+<section class="section reveal" id="features">
     <h2 class="section-title">Everything You Need</h2>
     <p class="section-sub">Professional-grade forensic capabilities packed into a single self-contained executable inside a standard installer.</p>
 
     <div class="features">
-        <div class="feature">
+        <div class="feature reveal" style="--d:0.06s">
             <div class="feature-icon" style="background:rgba(59,130,246,0.15);color:var(--accent)">&#128270;</div>
             <h3>Device Identification</h3>
             <p>Stage one: make, model, serial, Android version, build fingerprint, storage and installed packages, read over ADB and recorded against the case before anything is acquired.</p>
         </div>
-        <div class="feature">
+        <div class="feature reveal" style="--d:0.12s">
             <div class="feature-icon" style="background:rgba(34,197,94,0.15);color:var(--green)">&#128229;</div>
             <h3>Data Acquisition</h3>
             <p>Acquisition pipeline: SMS, calls, contacts, social media, deleted files, documents, emails, browser data. Imaging output is selectable - Raw (dd) segments or ZIP - with per-image hashing and verification, and progress in real percentages with a rate and an ETA on the forty-minute logical capture.</p>
         </div>
-        <div class="feature">
+        <div class="feature reveal" style="--d:0.18s">
             <div class="feature-icon" style="background:rgba(20,184,166,0.15);color:#2dd4bf">&#128179;</div>
             <h3>SIM Info</h3>
             <p>Reads the UICC through the handset: every slot and its state, carrier and network code, ICCID, IMSI and MSISDN per subscription, with the subscriber number pulled from three sources when the platform will part with it. Android's redaction of identifier tails is stated in the record, not padded over, and a page-level note says what the handset cannot give up.</p>
         </div>
-        <div class="feature">
+        <div class="feature reveal" style="--d:0.24s">
             <div class="feature-icon" style="background:rgba(245,158,11,0.15);color:var(--orange)">&#128269;</div>
             <h3>Examination &amp; Analysis</h3>
             <p>Run 11 analysis modules over the preserved copy: call logs, SMS/MMS, contacts, browser history, GPS, WiFi, Bluetooth, app artifacts, calendar, deleted data and notes. Read-only &mdash; it parses from the acquired copy, never the device.</p>
         </div>
-        <div class="feature">
+        <div class="feature reveal" style="--d:0.30s">
             <div class="feature-icon" style="background:rgba(236,72,153,0.15);color:#ec4899">&#128196;</div>
             <h3>Court-Ready Reporting</h3>
             <p>Generate forensic reports in HTML, PDF, JSON, or an XLSX verification workbook that independently re-hashes every artifact. Written in plain English for lawyers and judges.</p>
         </div>
-        <div class="feature">
+        <div class="feature reveal" style="--d:0.00s">
             <div class="feature-icon" style="background:rgba(100,116,139,0.15);color:var(--muted)">&#128187;</div>
             <h3>Zero Installation</h3>
             <p>Single self-contained .exe wrapped in a standard setup wizard. ADB drivers bundled inside. No Python, no dependencies. Run the installer, or double-click the portable exe.</p>
         </div>
-        <div class="feature">
+        <div class="feature reveal" style="--d:0.06s">
             <div class="feature-icon" style="background:rgba(129,140,248,0.15);color:#818cf8">&#127769;</div>
             <h3>Dark, Light, or System Theme</h3>
             <p>The interface opens dark and switches from the View menu &mdash; light, or follow the operating system as it changes. Your choice is remembered between launches. Exported reports keep their own fixed palette, so a court document never changes appearance because a UI preference did.</p>
         </div>
-        <div class="feature">
+        <div class="feature reveal" style="--d:0.12s">
             <div class="feature-icon" style="background:rgba(16,185,129,0.15);color:var(--green)">&#128247;</div>
             <h3>Thumbnail Grid &amp; Screen Capture</h3>
             <p>Media categories open as a Cellebrite-style thumbnail grid at three tile sizes, pulled in the background and cached for display only. Capture Screen takes a PNG of whatever is on the handset over <code>adb exec-out screencap</code>, hashes it, and files it as a finding &mdash; the way to preserve a conversation the tool cannot read natively.</p>
         </div>
-        <div class="feature">
+        <div class="feature reveal" style="--d:0.18s">
             <div class="feature-icon" style="background:rgba(56,189,248,0.15);color:#38bdf8">&#128202;</div>
             <h3>Grid or Table, Your Call</h3>
             <p>The curated table stays the default, because a table is what an examiner cites. One toggle re-projects the same rows as a card grid &mdash; category accent, summary, timestamp and count on every tile &mdash; for the browse-first pass through a large artifact set. The grid caps itself at 400 cards and says so, instead of quietly rendering a view that would take minutes to lay out.</p>
         </div>
-        <div class="feature">
+        <div class="feature reveal" style="--d:0.24s">
             <div class="feature-icon" style="background:rgba(52,211,153,0.15);color:#34d399">&#9889;</div>
             <h3>Responsive Under Load</h3>
             <p>Every ADB call runs off the GUI thread, so the window keeps drawing while the handset answers. Device scans are asynchronous and poll, acquisition owns the channel while it runs, and the artifact viewer defers its own crawl rather than fighting for it. Counting is single-pass, persistence is batched &mdash; a seventy-thousand-artifact phone reads in minutes without a frozen frame.</p>
         </div>
-        <div class="feature">
+        <div class="feature reveal" style="--d:0.30s">
             <div class="feature-icon" style="background:rgba(251,191,36,0.15);color:#fbbf24">&#128268;</div>
             <h3>Waits for a Ready Handset</h3>
             <p>An unauthorised or offline device is reported as exactly that, not as Connected. The viewer refuses to crawl a handset that has not answered the authorisation prompt, polls until state is <code>device</code>, and retries the load &mdash; so plugging in a locked phone produces a status line instead of a blank panel and a silent two-minute timeout.</p>
         </div>
-        <div class="feature">
+        <div class="feature reveal" style="--d:0.00s">
             <div class="feature-icon" style="background:rgba(56,189,248,0.15);color:#38bdf8">&#128172;</div>
             <h3>WhatsApp Without Root</h3>
             <p>Chat exports, a plain <code>msgstore.db</code>, crypt15 inventory for the encrypted store, and notification previews &mdash; with WhatsApp's own "this message was deleted" markers and <code>.trashed-*</code> recovery kept as findings. What the handset will not expose is listed as unreachable instead of reported as zero.</p>
         </div>
-        <div class="feature">
+        <div class="feature reveal" style="--d:0.06s">
             <div class="feature-icon" style="background:rgba(14,165,233,0.15);color:#0ea5e9">&#9992;&#65039;</div>
             <h3>Telegram, Read Honestly</h3>
             <p>Chats, groups, channels and media from a Telegram export or a readable cache, plus notifications captured on the device. Four artifact view modes &mdash; table, timeline, thread and raw &mdash; let the same evidence be read the way the question needs it.</p>
         </div>
-        <div class="feature">
+        <div class="feature reveal" style="--d:0.12s">
             <div class="feature-icon" style="background:rgba(168,85,247,0.15);color:#a855f7">&#128421;&#65039;</div>
             <h3>Physical Image on a Rooted Handset</h3>
             <p>The partition map is captured first, then <code>boot</code> and <code>recovery</code> are imaged over <code>dd</code>, pulled, hashed and filed as physical-image artifacts. On an unrooted handset the phase says the device refused root instead of quietly doing nothing &mdash; and the report states the honest ceiling, which is ciphertext for <code>userdata</code>.</p>
         </div>
-        <div class="feature">
+        <div class="feature reveal" style="--d:0.18s">
             <div class="feature-icon" style="background:rgba(239,68,68,0.15);color:#ef4444">&#128221;</div>
             <h3>Cases You Can Correct</h3>
             <p>A mistyped case number, title, investigator or status is fixable from Case Management, and a case opened by mistake can be deleted &mdash; with a separate question about whether the evidence folder goes with it. Folders are left alone unless you say otherwise.</p>
         </div>
-        <div class="feature">
+        <div class="feature reveal" style="--d:0.24s">
             <div class="feature-icon" style="background:rgba(245,158,11,0.15);color:var(--orange)">&#127991;&#65039;</div>
             <h3>Its Own Mark</h3>
             <p>The executable carries the DroidForenX emblem in the taskbar and in Explorer, and the sidebar carries the wordmark. The sidebar also folds away with Ctrl+B when a table needs the width, and a grip stays on screen to bring it back.</p>
         </div>
     </div>
 
-    <div class="requirements">
+    <div class="requirements reveal">
         <h3>
             <svg viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" width="20" height="20"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
             System Requirements
@@ -266,11 +342,11 @@
     </div>
 </section>
 
-<section class="section" id="verify" style="padding-top:0">
+<section class="section reveal" id="verify" style="padding-top:0">
     <h2 class="section-title">Verify Your Download</h2>
     <p class="section-sub">Always verify the SHA-256 hash before running. This ensures the file hasn't been tampered with.</p>
 
-    <div class="verify-section">
+    <div class="verify-section reveal">
         <h3>File Information</h3>
         <div class="file-info">
             <div class="info-card">
@@ -312,7 +388,7 @@
         </p>
     </div>
 
-    <div class="steps">
+    <div class="steps reveal">
         <div class="step">
             <div class="step-num">1</div>
             <h4>Download</h4>
@@ -376,6 +452,91 @@ function verifyHash() {
 document.getElementById('verifyInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') verifyHash();
 });
+
+/* ===== interactive layer: rAF-throttled, transform/opacity only ===== */
+(function(){
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* scroll progress + nav shrink — single passive listener, rAF gated */
+  const bar = document.getElementById('progressBar');
+  const nav = document.querySelector('.nav');
+  let ticking = false;
+  function onScroll(){
+    if(ticking) return; ticking = true;
+    requestAnimationFrame(()=>{
+      const h = document.documentElement;
+      const max = h.scrollHeight - h.clientHeight;
+      bar.style.transform = 'scaleX(' + (max > 0 ? h.scrollTop / max : 0) + ')';
+      nav.classList.toggle('scrolled', h.scrollTop > 24);
+      ticking = false;
+    });
+  }
+  addEventListener('scroll', onScroll, {passive:true}); onScroll();
+
+  /* reveal on scroll */
+  const io = new IntersectionObserver((es)=>{
+    es.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); } });
+  }, {threshold:.12});
+  document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+
+  if(!reduced){
+    /* magnetic buttons (desktop pointers only) */
+    document.querySelectorAll('.btn').forEach(btn=>{
+      btn.addEventListener('pointermove', e=>{
+        if(e.pointerType !== 'mouse') return;
+        const r = btn.getBoundingClientRect();
+        const x = (e.clientX - r.left - r.width/2) / r.width;
+        const y = (e.clientY - r.top - r.height/2) / r.height;
+        btn.style.transform = `translate(${x*6}px,${y*4}px)`;
+      });
+      btn.addEventListener('pointerleave', ()=>{ btn.style.transform=''; });
+    });
+
+    /* card tilt + spotlight, rAF per card, cap tilt small for perf */
+    document.querySelectorAll('.feature').forEach(card=>{
+      let raf = null;
+      card.addEventListener('pointermove', e=>{
+        if(e.pointerType !== 'mouse' || raf) return;
+        raf = requestAnimationFrame(()=>{
+          const r = card.getBoundingClientRect();
+          const px = (e.clientX - r.left)/r.width, py = (e.clientY - r.top)/r.height;
+          card.style.setProperty('--mx', (px*100)+'%');
+          card.style.setProperty('--my', (py*100)+'%');
+          card.style.transform = `rotateX(${(0.5-py)*6}deg) rotateY(${(px-0.5)*8}deg) translateY(-4px)`;
+          raf = null;
+        });
+      });
+      card.addEventListener('pointerleave', ()=>{ card.style.transform=''; });
+    });
+
+    /* lightweight particle field — capped, pauses when tab hidden */
+    const cv = document.getElementById('particles'), ctx = cv.getContext('2d');
+    let W, H, pts = [];
+    function size(){
+      const dpr = Math.min(devicePixelRatio||1, 1.5);
+      W = cv.width = innerWidth*dpr; H = cv.height = innerHeight*dpr;
+      cv.style.width = innerWidth+'px'; cv.style.height = innerHeight+'px';
+      const n = Math.min(42, Math.floor(innerWidth/30));
+      pts = Array.from({length:n},()=>({x:Math.random()*W,y:Math.random()*H,
+        vx:(Math.random()-.5)*.22*dpr, vy:(Math.random()-.5)*.22*dpr, r:(Math.random()*1.4+.6)*dpr}));
+    }
+    size(); addEventListener('resize', size);
+    (function loop(){
+      if(!document.hidden){
+        ctx.clearRect(0,0,W,H);
+        ctx.fillStyle = 'rgba(37,212,216,.55)';
+        for(const p of pts){
+          p.x += p.vx; p.y += p.vy;
+          if(p.x<0||p.x>W) p.vx *= -1;
+          if(p.y<0||p.y>H) p.vy *= -1;
+          ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,6.283); ctx.fill();
+        }
+      }
+      requestAnimationFrame(loop);
+    })();
+  }
+})();
+
 </script>
 </body>
 </html>
