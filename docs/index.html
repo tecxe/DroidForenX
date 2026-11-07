@@ -186,9 +186,10 @@
         .hero .badge,.hero h1,.hero p,.hero-btns{animation:riseIn .9s var(--ease) both}
         .hero h1{animation-delay:.08s}.hero p{animation-delay:.16s}.hero-btns{animation-delay:.24s}
         @keyframes riseIn{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:translateY(0)}}
-        .hero h1{background:linear-gradient(110deg,#fff 20%,#9fd8dc 40%,#fff 60%);background-size:220% 100%;
-            -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
-            animation:riseIn .9s var(--ease) .08s both,shimmer 6s linear infinite}
+        .hero h1{color:#fff;-webkit-text-fill-color:#fff}
+        .hero h1 .accent-word{background:linear-gradient(100deg,#ff9f1c,#ff7a18);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
+        [data-theme="light"] .hero h1{color:#0f1f33;-webkit-text-fill-color:#0f1f33}
+        [data-theme="light"] .hero h1 .accent-word{background:linear-gradient(100deg,#ea580c,#c2410c);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
         @keyframes shimmer{to{background-position:-220% 0}}
         .badge{animation:riseIn .6s var(--ease) both,floaty 4s ease-in-out 1s infinite}
         @keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
@@ -244,8 +245,7 @@
         }
         [data-theme="light"] .nav{background:rgba(255,255,255,.82)}
         [data-theme="light"] .nav.scrolled{background:rgba(255,255,255,.94);box-shadow:0 8px 30px rgba(15,31,51,.10)}
-        [data-theme="light"] .hero h1{background:linear-gradient(110deg,#0f1f33 20%,#0891b2 40%,#0f1f33 60%);background-size:220% 100%;
-            -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;animation:riseIn .9s var(--ease) .08s both,shimmer 6s linear infinite}
+        [data-theme="light"] .hero h1{background:none}
         [data-theme="light"] .aurora{opacity:.6;background:
               radial-gradient(42% 34% at 18% 12%,rgba(14,116,144,.20),transparent 70%),
               radial-gradient(38% 30% at 84% 18%,rgba(194,65,12,.12),transparent 70%),
@@ -349,10 +349,12 @@
 
                 <!-- phone -->
                 <g class="floaty2">
-                    <rect class="scene-line" x="46" y="52" width="104" height="236" rx="18"/>
-                    <rect class="scene-fill" x="56" y="66" width="84" height="188" rx="10"/>
-                    <rect class="scene-line" x="82" y="60" width="32" height="5" rx="2.5"/>
-                    <circle class="scene-line" cx="98" cy="272" r="6"/>
+                    <rect class="scene-line" x="46" y="52" width="104" height="236" rx="10"/>
+                    <rect class="scene-fill" x="56" y="66" width="84" height="188" rx="6"/>
+                    <circle class="scene-line" cx="98" cy="76" r="4"/>
+                    <rect x="146" y="96" width="5" height="26" rx="2" fill="var(--accent)" opacity=".8"/>
+                    <rect x="146" y="132" width="5" height="40" rx="2" fill="var(--accent)" opacity=".5"/>
+                    <path class="scene-thin" d="M88 286 h20 l-3 6 h-14 z"/>
                     <g class="scanline"><rect x="56" y="70" width="84" height="3" rx="1.5" fill="var(--accent)"/></g>
                     <rect class="scene-thin" x="68" y="92" width="60" height="7" rx="3.5"/>
                     <rect class="scene-thin" x="68" y="112" width="44" height="7" rx="3.5"/>
@@ -381,7 +383,7 @@
 
         <div class="hero-copy">
     <div class="badge"><span class="dot"></span> v1.0.40 - Latest Release</div>
-    <h1>Professional Mobile<br>Digital Forensics</h1>
+    <h1>Professional Mobile<br><span class="accent-word">Digital Forensics</span></h1>
     <p>Android forensics made clear and practical — preserve device evidence, examine digital artifacts, and produce trustworthy reports from a focused desktop workflow.</p>
     <div class="hero-btns">
         <a class="btn btn-primary" href="https://github.com/tecxe/DroidForenX/releases/download/v1.0.40/DroidForenX_Installer.exe" download>
