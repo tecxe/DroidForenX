@@ -21,14 +21,15 @@
         .nav-links a{color:var(--muted);font-size:14px;font-weight:500;transition:color .2s}
         .nav-links a:hover{color:var(--text)}
 
-        .hero{padding:160px 2rem 80px;text-align:center;position:relative}
+        .hero{padding:128px 2rem 64px;text-align:center;position:relative}
         .hero::before{content:'';position:absolute;top:64px;left:50%;transform:translateX(-50%);width:600px;height:600px;background:radial-gradient(circle,rgba(59,130,246,0.08) 0%,transparent 70%);pointer-events:none}
         .badge{display:inline-flex;align-items:center;gap:8px;padding:6px 16px;border-radius:100px;font-size:12px;font-weight:600;color:var(--accent);background:rgba(37,212,216,0.1);border:1px solid rgba(37,212,216,0.25);margin-bottom:24px}
         .badge .dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-        .hero h1{font-size:clamp(2.5rem,6vw,4.5rem);font-weight:900;letter-spacing:-2px;line-height:1.05;margin-bottom:20px;background:linear-gradient(135deg,#fff 0%,#94a3b8 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+        .hero h1{font-size:clamp(2.4rem,4.2vw,3.6rem);font-weight:900;letter-spacing:-1.5px;line-height:1.08;margin-bottom:18px;background:linear-gradient(135deg,#fff 0%,#94a3b8 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
         .hero p{font-size:18px;color:var(--muted);max-width:580px;margin:0 auto 40px;line-height:1.6}
-        .hero-btns{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
+        .hero-btns{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+        .hero-copy .hero-btns{flex-direction:row}
 
         .btn{display:inline-flex;align-items:center;gap:10px;padding:14px 32px;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;border:none;transition:all .25s ease}
         .btn-primary{background:linear-gradient(135deg,var(--accent),var(--orange));color:#08111c;box-shadow:0 4px 24px rgba(37,212,216,0.3)}
@@ -105,6 +106,7 @@
 
         /* ===== responsive: tablets & phones ===== */
         img,canvas,svg{max-width:100%}
+        @media(max-width:640px){
         .nav{padding:0 1rem;gap:.75rem}
         .nav-links{gap:.6rem;flex-wrap:wrap;justify-content:flex-end}
         .nav-links a{white-space:nowrap}
@@ -124,6 +126,7 @@
         .copy-btn{min-height:40px}
         .theme-switch{order:3}
         footer{padding:32px 1rem}
+        }
 
         @media(min-width:641px) and (max-width:1024px){
             .features{grid-template-columns:repeat(2,1fr)}
@@ -156,7 +159,7 @@
               radial-gradient(42% 34% at 18% 12%,rgba(37,212,216,.16),transparent 70%),
               radial-gradient(38% 30% at 84% 18%,rgba(255,159,28,.10),transparent 70%),
               radial-gradient(46% 36% at 50% 88%,rgba(53,214,160,.08),transparent 70%);
-            animation:auroraDrift 22s ease-in-out infinite alternate;will-change:transform}
+            animation:auroraDrift 14s ease-in-out infinite alternate}
         @keyframes auroraDrift{from{transform:translate3d(-2%,-1%,0) scale(1)}to{transform:translate3d(2%,2%,0) scale(1.06)}}
         #particles{position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.5}
         #progressBar{position:fixed;top:0;left:0;height:3px;width:100%;z-index:200;transform-origin:left;transform:scaleX(0);
@@ -174,7 +177,7 @@
             -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
             animation:riseIn .9s var(--ease) .08s both,shimmer 6s linear infinite}
         @keyframes shimmer{to{background-position:-220% 0}}
-        .badge{animation:riseIn .9s var(--ease) both,floaty 5s ease-in-out 1s infinite}
+        .badge{animation:riseIn .6s var(--ease) both,floaty 4s ease-in-out 1s infinite}
         @keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
 
         /* nav */
@@ -186,7 +189,7 @@
         .nav-links a:hover::after{transform:scaleX(1);transform-origin:left}
 
         /* buttons — shine sweep + spring press, transform only */
-        .btn{position:relative;overflow:hidden;will-change:transform}
+        .btn{position:relative;overflow:hidden}
         .btn::before{content:'';position:absolute;inset:0;background:linear-gradient(105deg,transparent 35%,rgba(255,255,255,.45) 50%,transparent 65%);
             transform:translateX(-120%);transition:transform .6s var(--ease)}
         .btn:hover::before{transform:translateX(120%)}
@@ -196,7 +199,7 @@
 
         /* feature cards — 3D tilt + cursor spotlight */
         .features{perspective:900px}
-        .feature{position:relative;transform-style:preserve-3d;transition:border-color .3s,box-shadow .3s;will-change:transform}
+        .feature{position:relative;transform-style:preserve-3d;transition:border-color .25s,box-shadow .25s}
         .feature::after{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity .3s;
             background:radial-gradient(220px circle at var(--mx,50%) var(--my,50%),rgba(37,212,216,.14),transparent 65%)}
         .feature:hover::after{opacity:1}
@@ -256,7 +259,7 @@
         @media(max-width:640px){.theme-switch button span{display:none}.theme-switch button{padding:7px 9px}}
     
         /* ===== extraction hero scene: phone -> computer ===== */
-        .hero-grid{display:grid;grid-template-columns:minmax(300px,480px) minmax(0,1fr);gap:3rem;align-items:center;
+        .hero-grid{display:grid;grid-template-columns:minmax(300px,440px) minmax(0,1fr);gap:2.5rem;align-items:center;
             max-width:1180px;margin:0 auto;text-align:left}
         .hero-copy .badge{margin-bottom:20px}
         .hero-copy p{margin:0 0 36px}
@@ -270,13 +273,13 @@
         .stream{fill:none;stroke:var(--accent);stroke-width:2;stroke-dasharray:6 10;opacity:.6;
             animation:dashFlow 1.6s linear infinite}
         @keyframes dashFlow{to{stroke-dashoffset:-16}}
-        .scanline{animation:scanY 3.6s ease-in-out infinite}
+        .scanline{animation:scanY 2.4s ease-in-out infinite}
         @keyframes scanY{0%,100%{transform:translateY(0);opacity:0}12%{opacity:.9}50%{transform:translateY(150px);opacity:.9}62%{opacity:0}}
-        .ring{transform-origin:center;transform-box:fill-box;animation:spinSlow 7s linear infinite}
+        .ring{transform-origin:center;transform-box:fill-box;animation:spinSlow 4s linear infinite}
         @keyframes spinSlow{to{transform:rotate(360deg)}}
-        .rowpulse{animation:rowGlow 2.8s ease-in-out infinite}
+        .rowpulse{animation:rowGlow 1.8s ease-in-out infinite}
         @keyframes rowGlow{0%,100%{opacity:.25}50%{opacity:.95}}
-        .floaty2{animation:floaty 6s ease-in-out infinite}
+        .floaty2{animation:floaty 4s ease-in-out infinite}
         @media(max-width:900px){
             .hero-grid{grid-template-columns:1fr;gap:2rem;text-align:center}
             .extract-scene{max-width:420px;margin:0 auto;width:100%}
@@ -286,6 +289,10 @@
             .extract-scene{max-width:320px}
             .hero-btns{margin:0 auto}
         }
+    
+        /* perf: pause ambient motion when offscreen or on small screens */
+        @media(max-width:640px){.aurora{animation:none;opacity:.3}}
+        .extract-scene svg{content-visibility:auto}
     </style>
 </head>
 <body>
@@ -713,7 +720,7 @@ function root_is_light(){ return document.documentElement.dataset.theme === 'lig
       const dpr = Math.min(devicePixelRatio||1, 1.5);
       W = cv.width = innerWidth*dpr; H = cv.height = innerHeight*dpr;
       cv.style.width = innerWidth+'px'; cv.style.height = innerHeight+'px';
-      const n = Math.min(42, Math.floor(innerWidth/30));
+      const n = Math.min(26, Math.floor(innerWidth/48));
       pts = Array.from({length:n},()=>({x:Math.random()*W,y:Math.random()*H,
         vx:(Math.random()-.5)*.22*dpr, vy:(Math.random()-.5)*.22*dpr, r:(Math.random()*1.4+.6)*dpr}));
     }
