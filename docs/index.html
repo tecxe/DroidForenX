@@ -178,6 +178,38 @@
             .reveal{opacity:1;transform:none}
             #particles{display:none}
         }
+    
+        /* ===== light mode ===== */
+        [data-theme="light"]{
+            --bg:#f4f7fb;--surface:#ffffff;--card:#ffffff;--border:#dbe4f0;
+            --text:#0f1f33;--muted:#5b708c;--accent:#0891b2;--green:#059669;
+            --orange:#ea580c;--red:#dc2626;--purple:#7c3aed;
+        }
+        [data-theme="light"] .nav{background:rgba(255,255,255,.82)}
+        [data-theme="light"] .nav.scrolled{background:rgba(255,255,255,.94);box-shadow:0 8px 30px rgba(15,31,51,.10)}
+        [data-theme="light"] .hero h1{background:linear-gradient(110deg,#0f1f33 20%,#0891b2 40%,#0f1f33 60%);background-size:220% 100%;
+            -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;animation:riseIn .9s var(--ease) .08s both,shimmer 6s linear infinite}
+        [data-theme="light"] .aurora{opacity:.35}
+        [data-theme="light"] #particles{opacity:.35}
+        [data-theme="light"] .feature:hover{box-shadow:0 18px 40px rgba(15,31,51,.12)}
+        [data-theme="light"] .feature::after{background:radial-gradient(220px circle at var(--mx,50%) var(--my,50%),rgba(8,145,178,.12),transparent 65%)}
+        [data-theme="light"] .badge{background:rgba(8,145,178,.10);border-color:rgba(8,145,178,.30)}
+        [data-theme="light"] .btn-secondary{background:#eef3f9}
+        [data-theme="light"] .verify-result.match{background:rgba(5,150,105,.10)}
+        [data-theme="light"] .verify-result.no-match{background:rgba(220,38,38,.08)}
+
+        /* ===== System / Light / Dark segmented selector ===== */
+        .theme-switch{display:inline-flex;align-items:center;gap:2px;background:var(--card);border:1px solid var(--border);
+            border-radius:999px;padding:3px}
+        .theme-switch button{border:0;background:transparent;color:var(--muted);font:600 12px/1 inherit;
+            padding:7px 12px;border-radius:999px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+            transition:color .25s,background .25s,transform .25s var(--spring)}
+        .theme-switch button svg{width:14px;height:14px}
+        .theme-switch button:hover{color:var(--text)}
+        .theme-switch button:active{transform:scale(.94)}
+        .theme-switch button[aria-pressed="true"]{background:var(--accent);color:#fff;box-shadow:0 4px 14px rgba(37,212,216,.30)}
+        [data-theme="light"] .theme-switch button[aria-pressed="true"]{box-shadow:0 4px 14px rgba(8,145,178,.25)}
+        @media(max-width:640px){.theme-switch button span{display:none}.theme-switch button{padding:7px 9px}}
     </style>
 </head>
 <body>
@@ -190,6 +222,20 @@
     <div class="nav-links">
         <a href="#features">Features</a>
         <a href="#verify">Verify</a>
+        <div class="theme-switch" role="group" aria-label="Theme">
+            <button type="button" data-theme-mode="system" aria-pressed="true" title="Follow system theme">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                <span>System</span>
+            </button>
+            <button type="button" data-theme-mode="light" aria-pressed="false" title="Light theme">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+                <span>Light</span>
+            </button>
+            <button type="button" data-theme-mode="dark" aria-pressed="false" title="Dark theme">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+                <span>Dark</span>
+            </button>
+        </div>
     </div>
 </nav>
 
@@ -453,7 +499,35 @@ document.getElementById('verifyInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') verifyHash();
 });
 
+
+/* ===== theme: System / Light / Dark — saved choice, OS-follow in System ===== */
+(function(){
+  const root = document.documentElement;
+  const media = matchMedia('(prefers-color-scheme: light)');
+  const KEY = 'dfx-theme-mode';
+  let mode = localStorage.getItem(KEY) || 'system';
+  function resolve(){
+    return mode === 'system' ? (media.matches ? 'light' : 'dark') : mode;
+  }
+  function apply(){
+    root.dataset.theme = resolve();
+    document.querySelectorAll('[data-theme-mode]').forEach(b=>{
+      b.setAttribute('aria-pressed', String(b.dataset.themeMode === mode));
+    });
+  }
+  document.querySelectorAll('[data-theme-mode]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      mode = b.dataset.themeMode;
+      localStorage.setItem(KEY, mode);
+      apply();
+    });
+  });
+  media.addEventListener('change', ()=>{ if(mode === 'system') apply(); });
+  apply();
+})();
+
 /* ===== interactive layer: rAF-throttled, transform/opacity only ===== */
+function root_is_light(){ return document.documentElement.dataset.theme === 'light'; }
 (function(){
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -524,7 +598,7 @@ document.getElementById('verifyInput').addEventListener('keydown', (e) => {
     (function loop(){
       if(!document.hidden){
         ctx.clearRect(0,0,W,H);
-        ctx.fillStyle = 'rgba(37,212,216,.55)';
+        ctx.fillStyle = root_is_light() ? 'rgba(8,145,178,.5)' : 'rgba(37,212,216,.55)';
         for(const p of pts){
           p.x += p.vx; p.y += p.vy;
           if(p.x<0||p.x>W) p.vx *= -1;
