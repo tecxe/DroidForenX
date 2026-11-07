@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DroidForenX — Download</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
         :root{
@@ -11,7 +14,11 @@
             --text:#e2e8f0;--muted:#7890a8;--accent:#25d4d8;--green:#35d6a0;
             --orange:#ff9f1c;--red:#ef6b5b;--purple:#ff7a18;
         }
-        body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+        body{font-family:'Inter','Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+        h1,h2,h3,h4,.stat-val,.nav-brand{font-family:'Sora','Inter','Segoe UI',system-ui,sans-serif;letter-spacing:-.02em}
+        .hero h1{font-weight:800;letter-spacing:-.035em}
+        .section-title{font-weight:700;letter-spacing:-.03em}
+        .btn,.theme-switch button{font-family:'Inter','Segoe UI',system-ui,sans-serif;letter-spacing:.01em}
         a{color:var(--accent);text-decoration:none}
 
         .nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(8,12,20,0.85);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:0 2rem;height:64px;display:flex;align-items:center;justify-content:space-between}
