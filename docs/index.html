@@ -114,8 +114,10 @@
         /* ===== responsive: tablets & phones ===== */
         img,canvas,svg{max-width:100%}
         @media(max-width:640px){
-        .nav{padding:0 1rem;gap:.75rem}
-        .nav-links{gap:.6rem;flex-wrap:wrap;justify-content:flex-end}
+        .nav{height:auto;min-height:56px;flex-wrap:wrap;padding:.5rem 1rem;row-gap:.4rem}
+        .nav-links{flex-wrap:nowrap;gap:.5rem}
+        .theme-switch{order:3;width:100%;justify-content:center;margin-top:.1rem}
+        .extract-scene{max-width:280px}
         .nav-links a{white-space:nowrap}
         .hero{padding:120px 1.25rem 56px}
         .hero p{font-size:16px}
@@ -141,8 +143,9 @@
             .hero{padding:140px 2rem 64px}
         }
         @media(max-width:480px){
-            .nav-brand .logo{width:140px;height:34px}
+            .nav-brand .logo{width:150px;height:34px}
             .nav-links a{font-size:13px}
+            .extract-scene{max-width:248px}
             .hero h1{font-size:1.85rem;letter-spacing:-1px}
             .hero p{font-size:15px}
             .badge{font-size:11px}
