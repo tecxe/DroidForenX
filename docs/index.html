@@ -102,6 +102,47 @@
             .verify-input{flex-direction:column}
             .hash-box{flex-direction:column;align-items:flex-start}
         }
+
+        /* ===== responsive: tablets & phones ===== */
+        img,canvas,svg{max-width:100%}
+        .nav{padding:0 1rem;gap:.75rem}
+        .nav-links{gap:.6rem;flex-wrap:wrap;justify-content:flex-end}
+        .nav-links a{white-space:nowrap}
+        .hero{padding:120px 1.25rem 56px}
+        .hero p{font-size:16px}
+        .hero-btns{flex-direction:column;align-items:stretch;max-width:420px;margin:0 auto}
+        .hero-btns .btn{justify-content:center;width:100%;min-height:48px}
+        .stats{flex-wrap:wrap;gap:20px 32px;padding:28px 1rem}
+        .section{padding:56px 1.25rem}
+        .section-title{font-size:26px}
+        .features{grid-template-columns:1fr}
+        .feature{padding:22px}
+        .requirements,.verify-section{padding:24px 20px}
+        .req-grid{grid-template-columns:1fr}
+        .steps{grid-template-columns:1fr}
+        .verify-input button{min-height:48px}
+        .copy-btn{min-height:40px}
+        .theme-switch{order:3}
+        footer{padding:32px 1rem}
+
+        @media(min-width:641px) and (max-width:1024px){
+            .features{grid-template-columns:repeat(2,1fr)}
+            .steps{grid-template-columns:repeat(2,1fr)}
+            .hero{padding:140px 2rem 64px}
+        }
+        @media(max-width:480px){
+            .nav-brand .logo{width:140px;height:34px}
+            .nav-links a{font-size:13px}
+            .hero h1{font-size:1.85rem;letter-spacing:-1px}
+            .hero p{font-size:15px}
+            .badge{font-size:11px}
+            .stat-val{font-size:24px}
+            .hash-box code{font-size:11px}
+            .info-card .value{font-size:13px;word-break:break-all}
+        }
+        @media(hover:none){
+            .btn,.feature,.theme-switch button{min-height:44px}
+        }
     
         /* ============ Modern interactive layer (performance-safe) ============ */
         :root{--ease:cubic-bezier(.22,1,.36,1);--spring:cubic-bezier(.34,1.56,.64,1)}
