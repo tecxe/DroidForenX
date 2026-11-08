@@ -175,13 +175,13 @@ class FaqPage(QWidget):
 
         container = QWidget()
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(32, 24, 32, 24)
-        layout.setSpacing(20)
+        layout.setContentsMargins(36, 28, 36, 28)
+        layout.setSpacing(24)
         scroll.setWidget(container)
 
         title = QLabel("Frequently Asked Questions")
         title.setStyleSheet(
-            "font-size: 22px; font-weight: 700; color: #e2e8f0; "
+            "font-size: 26px; font-weight: 700; color: #e2e8f0; "
             "background: transparent; border: none;")
         layout.addWidget(title)
 
@@ -191,7 +191,7 @@ class FaqPage(QWidget):
             "page is what the chat assistant was replaced with: the same "
             "questions, answered deterministically.")
         subtitle.setStyleSheet(
-            "font-size: 13px; color: #64748b; background: transparent; "
+            "font-size: 15px; color: #64748b; background: transparent; "
             "border: none;")
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
@@ -212,16 +212,16 @@ class FaqPage(QWidget):
             ask.setCursor(Qt.CursorShape.PointingHandCursor)
             ask.setStyleSheet(
                 "QPushButton { background: transparent; color: #e2e8f0; "
-                "border: none; border-radius: 10px; padding: 14px 16px; "
-                "font-size: 14px; font-weight: 600; text-align: left; }"
+                "border: none; border-radius: 10px; padding: 18px 20px; "
+                "font-size: 17px; font-weight: 600; text-align: left; }"
                 "QPushButton:checked { color: #22d3ee; }")
             card_layout.addWidget(ask)
 
             body = QLabel(answer, card)
             body.setWordWrap(True)
             body.setStyleSheet(
-                "font-size: 13px; color: #94a3b8; background: transparent; "
-                "border: none; padding: 0 16px 14px 16px;")
+                "font-size: 15px; color: #94a3b8; background: transparent; "
+                "border: none; padding: 0 20px 18px 20px;")
             body.setVisible(False)
             card_layout.addWidget(body)
 
