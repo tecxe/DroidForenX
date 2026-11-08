@@ -5,6 +5,7 @@ import re
 import json
 import time
 import sqlite3
+import os
 import shutil
 import subprocess
 import sys
@@ -2073,6 +2074,10 @@ class AcquirePage(QWidget):
             )
             return
         try:
+            # scrcpy shells out to `adb` (start-server, forward, push). Point
+            # it at the ADB we already bundle instead of relying on PATH.
+            env = dict(os.environ)
+            env["ADB"] = adb.find_adb()
             self._scrcpy_proc = subprocess.Popen(
                 [scrcpy_bin, "-s", serial],
                 stdin=subprocess.DEVNULL,
@@ -2080,6 +2085,7 @@ class AcquirePage(QWidget):
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
                 close_fds=True,
+                env=env,
             )
         except Exception as exc:
             self.console.log(f"Failed to launch scrcpy for {serial}: {exc}", "error")
