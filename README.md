@@ -56,8 +56,10 @@ screenshots were refreshed for **v1.0.39**; the Help menu and update prompt
 screenshots were added for **v1.0.40** on **4 November 2026**. Click an image to
 open it at full size.
 
-The Windows v1.0.40 binaries were rebuilt on **4 November 2026** to fix a Qt
-startup error in the original release package.
+The current release is **v1.0.41**: the scrcpy God's eye mirror (bundled
+inside the build) and the floating FAQs button. The Windows v1.0.40 binaries
+were rebuilt on **4 November 2026** to fix a Qt startup error in the
+original release package.
 
 `tools/capture_docs.py` takes them: it points `database.DB_PATH` at a temporary
 directory, seeds a case, shows the real window and grabs it with
@@ -357,22 +359,39 @@ tool falls back to `PATH` automatically.
 
 The acquisition page ships an all-seeing eye: the **God's eye** button sits in
 the acquisition action row directly beside **Create Image**. Pressing it
-launches the host-side [scrcpy](https://github.com/Genymobile/scrcpy) binary
-against the connected device, turning the device into a live, controllable
-screen - the operator watches the evidence behaving and can drive it, then
-detaches by closing the mirror window (or via the page's **Stop** button, which
-also detaches the mirror).
+launches [scrcpy](https://github.com/Genymobile/scrcpy) against the connected
+device, turning the device into a live, controllable screen - the operator
+watches the evidence behaving and can drive it, then detaches by closing the
+mirror window (or via the page's **Stop** button, which also detaches the
+mirror).
+
+scrcpy ships **inside** the build (under `desktop/scrcpy_bundle/`, bundled
+the same way ADB is, with its FFmpeg and SDL3 DLLs), so God's eye works out
+of the box - no host install needed. The app points scrcpy at its own
+bundled ADB via the `ADB` environment variable. If the bundled copy is
+missing, a host install is used instead - `PATH` first, then beside the
+frozen executable or in a `tools/` folder:
 
 ```powershell
 winget install --id Genymobile.scrcpy   # Windows
 sudo apt install scrcpy                  # Linux
 ```
 
-scrcpy ships **inside** the build (under `desktop/scrcpy_bundle/`, bundled
-the same way ADB is), so God's eye works out of the box. If the bundled copy
-is missing, a host install is used instead - `PATH` first, then beside the
-frozen executable or in a `tools/` folder. If no scrcpy is found at all, the
-button logs the install hint to the acquisition console and stays harmless.
+If no scrcpy is found at all, the button logs the install hint to the
+acquisition console and stays harmless.
+
+#### FAQs - how the system works
+
+A round **?** button floats at the bottom-right of the window, where the chat
+assistant drawer used to live. It opens a structured FAQ page - categorised
+(Getting started, How it works, Limits and honest answers, The tool itself),
+with lists, numbered steps and amber callout notes instead of paragraphs.
+The questions are the general ones officers ask: what DroidForenX is, what
+the AI assistant was meant to be, the four stages, how Android forensics
+works, how to turn on Developer Mode and USB debugging, and where the tool's
+honest limits sit. There is no chat assistant in this build, by design - a
+forensic tool should not guess, so every answer here is deterministic and
+backed by a loader status or a test.
 
 ### macOS
 
