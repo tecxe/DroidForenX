@@ -821,7 +821,11 @@ should install from `requirements-lock.txt` rather than `requirements.txt`. The
 lock pins every dependency including the transitive ones, and `build.py` takes
 `SOURCE_DATE_EPOCH` from the HEAD commit, so two builds of the same commit
 produce a byte-identical executable and the published SHA-256 can be reproduced
-by anyone. `test_reproducible_build.py` compares the installed environment
+by anyone. Each release tag points at the code commit its binaries were built
+from - `git checkout v1.0.41` and run `python build.py` to land on the published
+hash. Documentation-only commits after that tag keep their real commit dates and
+never move it, because nothing they change reaches the executable.
+`test_reproducible_build.py` compares the installed environment
 against the lock, and the full two-build byte comparison runs only with
 `DROIDFORENX_SLOW_TESTS=1`.
 
