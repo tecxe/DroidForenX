@@ -6,7 +6,7 @@ reads without root, what it refuses, what it cannot do, and how to check its
 work. Every answer here is a claim the test suite or a loader status can back.
 """
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QFrame, QScrollArea,
-                             QToolBox)
+                             QPushButton)
 from PyQt6.QtCore import Qt
 
 #: (question, answer) pairs - general questions about how the system works.
@@ -196,25 +196,44 @@ class FaqPage(QWidget):
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
 
-        self.faq_box = QToolBox(container)
-        self.faq_box.setStyleSheet(
-            "QToolBox { border: none; background: transparent; }"
-            "QToolBox::tab { background: #111827; color: #e2e8f0; "
-            "border: 1px solid #1e293b; border-radius: 8px; padding: 14px 16px; "
-            "font-size: 13px; font-weight: 600; min-height: 22px; }"
-            "QToolBox::tab:selected { background: #1e293b; color: #22d3ee; }")
+        self.faq_items = []
         for question, answer in FAQS:
-            page = QWidget()
-            page_layout = QVBoxLayout(page)
-            page_layout.setContentsMargins(8, 10, 8, 10)
-            body = QLabel(answer)
+            card = QFrame(container)
+            card.setStyleSheet(
+                "#faqCard { background: #111827; border: 1px solid #1e293b; "
+                "border-radius: 10px; }")
+            card.setObjectName("faqCard")
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(0, 0, 0, 0)
+            card_layout.setSpacing(0)
+
+            ask = QPushButton(question, card)
+            ask.setCheckable(True)
+            ask.setCursor(Qt.CursorShape.PointingHandCursor)
+            ask.setStyleSheet(
+                "QPushButton { background: transparent; color: #e2e8f0; "
+                "border: none; border-radius: 10px; padding: 14px 16px; "
+                "font-size: 14px; font-weight: 600; text-align: left; }"
+                "QPushButton:checked { color: #22d3ee; }")
+            card_layout.addWidget(ask)
+
+            body = QLabel(answer, card)
             body.setWordWrap(True)
             body.setStyleSheet(
                 "font-size: 13px; color: #94a3b8; background: transparent; "
-                "border: none; line-height: 1.6;")
-            page_layout.addWidget(body)
-            self.faq_box.addItem(page, question)
-        layout.addWidget(self.faq_box, 1)
+                "border: none; padding: 0 16px 14px 16px;")
+            body.setVisible(False)
+            card_layout.addWidget(body)
+
+            def _toggle(checked, ask=ask, body=body):
+                body.setVisible(checked)
+
+            ask.toggled.connect(_toggle)
+            self.faq_items.append((ask, body))
+            layout.addWidget(card)
+        # first answer open by default so the page never looks empty
+        if self.faq_items:
+            self.faq_items[0][0].setChecked(True)
 
         note = QLabel(
             "Still stuck? The acquisition console log says what the handset "

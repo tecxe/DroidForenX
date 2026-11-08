@@ -335,7 +335,7 @@ class MainWindow(QMainWindow):
         self.faq_button.setStyleSheet(
             "#faqButton { background: #f59e0b; color: #0b1220; border: none;"
             " border-radius: 26px; font-size: 22px; font-weight: 800; }"
-            "#faqButton:hover { background: #fbbf24; }")
+            "#faqButton:hover { background: #f59e0b; }")
         self.faq_button.clicked.connect(self._open_faqs)
         self._place_faq_button()
 

@@ -58,7 +58,10 @@ class FaqPageTest(unittest.TestCase):
         self.assertTrue(any("USB debugging" in q for q in questions))
 
     def test_the_toolbox_carries_every_question(self):
-        self.assertEqual(self.page.faq_box.count(), len(FAQS))
+        self.assertEqual(len(self.page.faq_items), len(FAQS))
+        for (ask, body), (question, answer) in zip(self.page.faq_items, FAQS):
+            self.assertIn(question[:20], ask.text())
+            self.assertIn(answer[:20], body.text())
 
 
 if __name__ == "__main__":
