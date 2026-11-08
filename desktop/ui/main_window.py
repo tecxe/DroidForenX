@@ -244,7 +244,6 @@ class MainWindow(QMainWindow):
             ("INVESTIGATION", [
                 ("  Artifact Viewer", 7),
                 ("  SIM Info", 8),
-                ("  FAQs", 9),
             ]),
         ]
 
@@ -322,6 +321,23 @@ class MainWindow(QMainWindow):
 
         # ── Content Area ──
         self.stack = QStackedWidget()
+        self._content = self.stack
+
+        # FAQs float bottom-right as a round button - where the chat
+        # assistant drawer used to live. Clicking opens the FAQ page in a
+        # dialog instead of taking over a sidebar slot.
+        self.faq_button = QToolButton(central)
+        self.faq_button.setObjectName("faqButton")
+        self.faq_button.setText("?")
+        self.faq_button.setToolTip("FAQs - how the system works")
+        self.faq_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.faq_button.setFixedSize(52, 52)
+        self.faq_button.setStyleSheet(
+            "#faqButton { background: #f59e0b; color: #0b1220; border: none;"
+            " border-radius: 26px; font-size: 22px; font-weight: 800; }"
+            "#faqButton:hover { background: #fbbf24; }")
+        self.faq_button.clicked.connect(self._open_faqs)
+        self._place_faq_button()
 
         # Initialize pages
         self.home_page = HomePage()
@@ -333,7 +349,6 @@ class MainWindow(QMainWindow):
         self.report_page = ReportPage(get_db)
         self.artifacts_page = ArtifactsPage()
         self.sim_page = SimForensicsPage()
-        self.faq_page = FaqPage()
 
         self.stack.addWidget(self.home_page)
         self.stack.addWidget(self.case_page)
@@ -344,7 +359,6 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.report_page)
         self.stack.addWidget(self.artifacts_page)
         self.stack.addWidget(self.sim_page)
-        self.stack.addWidget(self.faq_page)
 
         main_layout.addWidget(self.stack)
 
@@ -666,6 +680,33 @@ class MainWindow(QMainWindow):
         self.examine_page.navigate.connect(self._navigate_by_name)
         self.report_page.navigate.connect(self._navigate_by_name)
 
+    def _place_faq_button(self):
+        if getattr(self, "faq_button", None) is None:
+            return
+        host = self._content
+        self.faq_button.move(
+            host.width() - self.faq_button.width() - 20,
+            host.height() - self.faq_button.height() - 20)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._place_faq_button()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(0, self._place_faq_button)
+
+    def _open_faqs(self):
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout
+        dialog = QDialog(self)
+        dialog.setWindowTitle("FAQs - How DroidForenX Works")
+        dialog.resize(760, 620)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(FaqPage(dialog))
+        dialog.exec()
+
     def _navigate_to(self, index: int):
         self.stack.setCurrentIndex(index)
         for btn, idx in self.nav_buttons:
@@ -677,13 +718,13 @@ class MainWindow(QMainWindow):
         page_names = {0: "Dashboard", 1: "Case Management", 2: "Device Connection",
                       3: "Identification", 4: "Acquisition",
                       5: "Examination", 6: "Reporting", 7: "Artifact Viewer",
-                      8: "SIM Info", 9: "FAQs"}
+                      8: "SIM Info"}
         self.statusBar().showMessage(f"DroidForenX — {page_names.get(index, 'Unknown')}")
 
     def _navigate_by_name(self, name: str):
         mapping = {"home": 0, "case": 1, "device": 2, "identify": 3,
                    "acquire": 4, "examine": 5, "report": 6, "artifacts": 7,
-                   "sim": 8, "faq": 9, "faqs": 9}
+                   "sim": 8}
         self._navigate_to(mapping.get(name, 0))
 
     def _auto_scan_devices(self):

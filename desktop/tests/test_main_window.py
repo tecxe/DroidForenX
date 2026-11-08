@@ -505,3 +505,37 @@ class NavigationRouteTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+@unittest.skipUnless(_QT_IMPORT, "PyQt6 is not available")
+class FaqButtonTest(unittest.TestCase):
+    """FAQs live in a round floating button, bottom-right - not a page."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._app = _make_qapp()
+        cls.window = MainWindow()
+        cls.window.resize(1200, 800)
+        cls.window.show()
+        for _ in range(4):
+            cls._app.processEvents()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.window.close()
+        cls.window.deleteLater()
+        cls._app.processEvents()
+
+    def test_the_faq_button_is_a_visible_round_control(self):
+        btn = self.window.faq_button
+        self.assertTrue(btn.isVisible())
+        self.assertEqual(btn.width(), btn.height())
+        self.assertTrue(bool(btn.toolTip().strip()))
+
+    def test_the_faq_button_sits_bottom_right_of_the_content(self):
+        btn = self.window.faq_button
+        host = self.window._content
+        self.assertGreaterEqual(btn.x() + btn.width(), host.width() - 40)
+        self.assertGreaterEqual(btn.y() + btn.height(), host.height() - 40)
+
+    def test_there_is_no_faq_page_in_the_stack(self):
+        # Nine pages: dashboard through SIM Info. FAQs float instead.
+        self.assertEqual(self.window.stack.count(), 9)
