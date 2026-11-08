@@ -58,10 +58,12 @@ class FaqPageTest(unittest.TestCase):
         self.assertTrue(any("USB debugging" in q for q in questions))
 
     def test_the_toolbox_carries_every_question(self):
+        from PyQt6.QtWidgets import QLabel
         self.assertEqual(len(self.page.faq_items), len(FAQS))
         for (ask, body), (question, answer) in zip(self.page.faq_items, FAQS):
             self.assertIn(question[:20], ask.text())
-            self.assertIn(answer[:20], body.text())
+            texts = [lbl.text() for lbl in body.findChildren(QLabel)]
+            self.assertTrue(any(answer[:20] in t for t in texts))
 
 
 if __name__ == "__main__":
