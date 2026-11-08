@@ -18,6 +18,7 @@ from .pages.examine_page import ExaminePage
 from .pages.report_page import ReportPage
 from .pages.artifacts_page import ArtifactsPage
 from .pages.sim_page import SimForensicsPage
+from .pages.faq_page import FaqPage
 from ..core.adb_manager import list_devices, get_device_info
 from ..core.database import get_db, init_db, audit_log
 from ..core.update_checker import UpdateInfo, fetch_latest_release
@@ -243,6 +244,7 @@ class MainWindow(QMainWindow):
             ("INVESTIGATION", [
                 ("  Artifact Viewer", 7),
                 ("  SIM Info", 8),
+                ("  FAQs", 9),
             ]),
         ]
 
@@ -331,6 +333,7 @@ class MainWindow(QMainWindow):
         self.report_page = ReportPage(get_db)
         self.artifacts_page = ArtifactsPage()
         self.sim_page = SimForensicsPage()
+        self.faq_page = FaqPage()
 
         self.stack.addWidget(self.home_page)
         self.stack.addWidget(self.case_page)
@@ -341,6 +344,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.report_page)
         self.stack.addWidget(self.artifacts_page)
         self.stack.addWidget(self.sim_page)
+        self.stack.addWidget(self.faq_page)
 
         main_layout.addWidget(self.stack)
 
@@ -673,13 +677,13 @@ class MainWindow(QMainWindow):
         page_names = {0: "Dashboard", 1: "Case Management", 2: "Device Connection",
                       3: "Identification", 4: "Acquisition",
                       5: "Examination", 6: "Reporting", 7: "Artifact Viewer",
-                      8: "SIM Info"}
+                      8: "SIM Info", 9: "FAQs"}
         self.statusBar().showMessage(f"DroidForenX — {page_names.get(index, 'Unknown')}")
 
     def _navigate_by_name(self, name: str):
         mapping = {"home": 0, "case": 1, "device": 2, "identify": 3,
                    "acquire": 4, "examine": 5, "report": 6, "artifacts": 7,
-                   "sim": 8}
+                   "sim": 8, "faq": 9, "faqs": 9}
         self._navigate_to(mapping.get(name, 0))
 
     def _auto_scan_devices(self):
