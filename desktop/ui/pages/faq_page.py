@@ -198,9 +198,10 @@ class FaqPage(QWidget):
 
         self.faq_box = QToolBox(container)
         self.faq_box.setStyleSheet(
+            "QToolBox { border: none; background: transparent; }"
             "QToolBox::tab { background: #111827; color: #e2e8f0; "
-            "border: 1px solid #1e293b; border-radius: 8px; padding: 10px 14px; "
-            "font-size: 14px; font-weight: 600; }"
+            "border: 1px solid #1e293b; border-radius: 8px; padding: 14px 16px; "
+            "font-size: 13px; font-weight: 600; min-height: 22px; }"
             "QToolBox::tab:selected { background: #1e293b; color: #22d3ee; }")
         for question, answer in FAQS:
             page = QWidget()
