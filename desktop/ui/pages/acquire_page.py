@@ -5,6 +5,9 @@ import re
 import json
 import time
 import sqlite3
+import shutil
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -1726,6 +1729,7 @@ class AcquirePage(QWidget):
         self._serial = ""
         self._case_id = ""
         self._session_id = ""
+        self._scrcpy_proc = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -1821,6 +1825,17 @@ class AcquirePage(QWidget):
             "Write a RAW or ZIP image of a partition or an acquired folder")
         self.btn_create_image.clicked.connect(self._open_create_image)
         btn_row.addWidget(self.btn_create_image)
+
+        # The all-seeing eye: scrcpy mirror + control for the device under
+        # investigation. Sits right on top of Create Image, because watching
+        # the screen and writing the image of it are the same question answered
+        # two ways.
+        self.btn_scrcpy = QPushButton("👁 God's eye")
+        self.btn_scrcpy.setFixedHeight(42)
+        self.btn_scrcpy.setToolTip(
+            "Launch scrcpy to mirror and control the device screen remotely")
+        self.btn_scrcpy.clicked.connect(self._start_scrcpy)
+        btn_row.addWidget(self.btn_scrcpy)
 
         self.btn_capture_screen = QPushButton("Capture Screen")
         self.btn_capture_screen.setFixedHeight(42)
@@ -1987,10 +2002,100 @@ class AcquirePage(QWidget):
         self.worker.start()
         self.acquisition_started.emit()
 
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # God's eye — scrcpy screen mirror / control
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def _find_scrcpy(self) -> str:
+        """Locate the host-side scrcpy binary used for screen mirror/control."""
+        candidates = [
+            shutil.which("scrcpy"),
+            shutil.which("scrcpy.exe"),
+            shutil.which("scrcpy-server"),
+            shutil.which("scrcpy-android"),
+            "/usr/bin/scrcpy",
+            "/usr/local/bin/scrcpy",
+        ]
+        for cand in candidates:
+            if cand:
+                return cand
+        # Bundled or operator-placed copies: beside the frozen exe, in a
+        # tools folder next to it, or in the home tool cache.
+        roots = []
+        if getattr(sys, "frozen", False):
+            roots.append(Path(sys.executable).resolve().parent)
+        roots += [
+            Path.cwd() / "tools",
+            Path.home() / ".droidforenx" / "tools",
+            Path.home() / "droidforenx-tools",
+        ]
+        for root in roots:
+            for name in ("scrcpy.exe", "scrcpy"):
+                for folder in (root, root / "scrcpy"):
+                    hit = folder / name
+                    if hit.is_file():
+                        return str(hit)
+        return ""
+
+    def _start_scrcpy(self):
+        """Open the scrcpy mirror for the device under investigation.
+
+        scrcpy turns the connected device into a live, controllable screen: it
+        mirrors the display and forwards touch/keyboard input back. In a forensic
+        context the operator watches the device behave through it, then detaches.
+        """
+        serial = self._serial or self.device_bar.get_first_serial()
+        if not serial:
+            self.console.log("No device detected. Connect a device via USB.", "error")
+            return
+        self._serial = serial
+        scrcpy_bin = self._find_scrcpy()
+        if not scrcpy_bin:
+            self.console.log(
+                "scrcpy not found on this host — install it to enable screen mirror/control: "
+                "winget install --id Genymobile.scrcpy (Windows) or sudo apt install scrcpy (Linux)",
+                "error",
+            )
+            return
+        try:
+            self._scrcpy_proc = subprocess.Popen(
+                [scrcpy_bin, "-s", serial],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+                close_fds=True,
+            )
+        except Exception as exc:
+            self.console.log(f"Failed to launch scrcpy for {serial}: {exc}", "error")
+            self._scrcpy_proc = None
+            return
+        self.console.log(
+            f"👁 God's eye: scrcpy mirroring {serial} — live screen view + control. "
+            "Close the mirror window to detach.", "info")
+
+    def _stop_scrcpy(self):
+        proc = getattr(self, "_scrcpy_proc", None)
+        if proc is None:
+            return
+        self._scrcpy_proc = None
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:
+            try:
+                proc.kill()
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+        self.console.log("scrcpy mirror detached.", "warning")
+
     def _stop_acquisition(self):
         if hasattr(self, "worker") and self.worker.isRunning():
             self.worker.stop()
             self.console.log("Acquisition stopped by user.", "warning")
+        self._stop_scrcpy()
 
     def _on_progress(self, current, total):
         try:

@@ -230,7 +230,7 @@ run on import and need a connected handset, not a test runner.
 
 ![Test suite finishing, one test skipped](docs/images/tests.png)
 
-The run above is v1.0.37: 437 tests with one skip - 47 for the imaging writers
+The run above is v1.0.41: 442 tests with two skips - 47 for the imaging writers
 and device sources, 32 for the media gallery, WhatsApp and Telegram viewers and
 back-arrow behaviour, 30 for SIM parsing and storage, 30 for WhatsApp parsing,
 deleted-entry recovery and freelist salvage, 28 for the report composer, 27 for
@@ -239,7 +239,7 @@ Create Image dialog, 22 for the artifact views and their appendix, 21 for the
 window shell and stage navigation, 19 for percentage progress, 18 for Telegram
 exports, chat kinds, cache schemas and notifications, 16 for case editing and
 deletion, 14 for the workspace skeleton, 13 for artifact images, 12 for
-reproducible-build pinning, 10 for branding, 9 for the performance-safety suite,
+reproducible-build pinning, 10 for branding, 9 for the performance-safety suite, 4 for the scrcpy mirror/control button,
 8 for the forensic engine, the image registry and the acquire page, 5 for the
 evidence workbook, 5 for the UI export and 3 for the device page.
 
@@ -352,6 +352,25 @@ python3 setup_adb.py --check  # report availability
 
 If the bundle is missing, `sudo apt install android-tools-adb` also works — the
 tool falls back to `PATH` automatically.
+
+#### God's eye - scrcpy screen mirror / control
+
+The acquisition page ships an all-seeing eye: the **God's eye** button sits in
+the acquisition action row directly beside **Create Image**. Pressing it
+launches the host-side [scrcpy](https://github.com/Genymobile/scrcpy) binary
+against the connected device, turning the device into a live, controllable
+screen - the operator watches the evidence behaving and can drive it, then
+detaches by closing the mirror window (or via the page's **Stop** button, which
+also detaches the mirror).
+
+```powershell
+winget install --id Genymobile.scrcpy   # Windows
+sudo apt install scrcpy                  # Linux
+```
+
+The binary is found on `PATH`, beside the frozen executable, in a `tools/`
+folder next to it, or in `~/.droidforenx/tools/`. If `scrcpy` is absent the
+button logs the install hint to the acquisition console and stays harmless.
 
 ### macOS
 
@@ -785,7 +804,7 @@ by anyone. `test_reproducible_build.py` compares the installed environment
 against the lock, and the full two-build byte comparison runs only with
 `DROIDFORENX_SLOW_TESTS=1`.
 
-447 tests, no device required. They cover the properties that matter:
+442 tests, no device required. They cover the properties that matter:
 
 - an acquired artifact survives being read (the original bug was that 11
   loaders deleted evidence after parsing)

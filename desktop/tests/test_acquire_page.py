@@ -149,3 +149,59 @@ class ResultsCardTest(unittest.TestCase):
         finally:
             fresh.deleteLater()
             _pump(self._app)
+@unittest.skipUnless(_QT_IMPORT, "PyQt6 is not available")
+class ScrcpyEyeTest(unittest.TestCase):
+    """The God's eye button - scrcpy screen mirror/control in the acquire phase."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._app = _make_qapp()
+        cls.page = AcquirePage(lambda: None)
+        cls.page.setStyleSheet(MAIN_STYLESHEET)
+        cls.page.resize(1200, 900)
+        cls.page.show()
+        _pump(cls._app)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.page.close()
+        cls.page.deleteLater()
+        _pump(cls._app)
+
+    def test_the_scrcpy_button_is_named_and_visible(self):
+        btn = self.page.btn_scrcpy
+        self.assertTrue(btn.isVisible())
+        self.assertIn("God's eye", btn.text())
+        self.assertTrue(bool(btn.toolTip().strip()))
+
+    def _row_layouts(self):
+        from PyQt6.QtWidgets import QHBoxLayout
+        layouts = []
+        for layout in self.page.findChildren(QHBoxLayout):
+            widgets = [layout.itemAt(i).widget() for i in range(layout.count())]
+            if self.page.btn_create_image in widgets:
+                layouts.append((layout, widgets))
+        return layouts
+
+    def test_the_scrcpy_button_sits_in_the_action_row(self):
+        rows = self._row_layouts()
+        self.assertTrue(len(rows) >= 1, "the create-image button must live in a row layout")
+        _row_layout, widgets = rows[0]
+        self.assertIn(self.page.btn_scrcpy, widgets)
+
+    @unittest.skipUnless(shutil.which("scrcpy") is not None, "scrcpy is not installed")
+    def test_the_scrcpy_binary_is_located(self):
+        found = self.page._find_scrcpy()
+        self.assertTrue(found.endswith("scrcpy") or found.endswith("scrcpy.exe"))
+
+    def test_start_scrcpy_without_a_binary_reports_and_does_not_crash(self):
+        original = self.page._find_scrcpy
+        self.page._find_scrcpy = lambda: ""
+        try:
+            self.page._serial = "TESTSERIAL0000"
+            self.page._start_scrcpy()
+            text = self.page.console.console.toPlainText()
+            self.assertIn("scrcpy not found", text)
+            self.assertIsNone(getattr(self.page, "_scrcpy_proc", None))
+        finally:
+            self.page._find_scrcpy = original

@@ -51,6 +51,9 @@ ALLOW_UNMAPPED = {
     # the plate behind the sidebar wordmark: the artwork is light lettering on
     # transparency, so it has to sit on a dark surface in light mode too
     "#0b1220",
+    # already the light-mode counterpart of #7c3aed in SWATCH (the Capture
+    # Screen button hover), so it intentionally stays put in light mode
+    "#6d28d9",
 }
 
 
