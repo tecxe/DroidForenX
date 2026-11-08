@@ -326,7 +326,7 @@ class MainWindow(QMainWindow):
         # FAQs float bottom-right as a round button - where the chat
         # assistant drawer used to live. Clicking opens the FAQ page in a
         # dialog instead of taking over a sidebar slot.
-        self.faq_button = QToolButton(central)
+        self.faq_button = QToolButton(self.stack)
         self.faq_button.setObjectName("faqButton")
         self.faq_button.setText("?")
         self.faq_button.setToolTip("FAQs - how the system works")
@@ -687,6 +687,7 @@ class MainWindow(QMainWindow):
         self.faq_button.move(
             host.width() - self.faq_button.width() - 20,
             host.height() - self.faq_button.height() - 20)
+        self.faq_button.raise_()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
