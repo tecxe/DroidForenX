@@ -25,6 +25,7 @@ ROOT = Path(SPECPATH).resolve()
 IS_WINDOWS = sys.platform == "win32"
 ADB_NAME = "adb.exe" if IS_WINDOWS else "adb"
 ADB_SRC = ROOT / "desktop" / "adb_bundle" / ADB_NAME
+SCRCPY_SRC = ROOT / "desktop" / "scrcpy_bundle" / ("scrcpy.exe" if IS_WINDOWS else "scrcpy")
 
 # desktop.core / desktop.ui / desktop.report pull each other in at runtime, so
 # let PyInstaller see the whole tree rather than trusting import analysis alone.
@@ -66,6 +67,17 @@ else:
     print(
         f"[spec] WARNING: {ADB_SRC} not found. The executable will rely on adb "
         "being on PATH at runtime. Run `python setup_adb.py` to bundle it."
+    )
+
+# scrcpy (God's eye remote screen control). Same pattern as ADB: the bundle
+# lands at _MEIPASS/scrcpy_bundle/ and AcquirePage._find_scrcpy() probes it
+# first, so the mirror works out of the box with no host install.
+if SCRCPY_SRC.exists():
+    datas.append((str(SCRCPY_SRC.parent), "scrcpy_bundle"))
+else:
+    print(
+        f"[spec] WARNING: {SCRCPY_SRC} not found. God's eye will need scrcpy "
+        "on PATH at runtime."
     )
 
 # The wordmark and the window icon. Kept at their

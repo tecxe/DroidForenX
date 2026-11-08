@@ -2009,6 +2009,19 @@ class AcquirePage(QWidget):
 
     def _find_scrcpy(self) -> str:
         """Locate the host-side scrcpy binary used for screen mirror/control."""
+        # Bundled copy first: it ships inside the exe at _MEIPASS/scrcpy_bundle
+        # (and beside the source tree in a checkout), so God's eye works with
+        # no host install. The bundled folder carries scrcpy's own DLLs, so
+        # the binary runs from there without a PATH entry.
+        bundle_roots = []
+        if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", ""):
+            bundle_roots.append(Path(sys._MEIPASS) / "scrcpy_bundle")
+        bundle_roots.append(Path(__file__).resolve().parents[2] / "scrcpy_bundle")
+        for root in bundle_roots:
+            for name in ("scrcpy.exe", "scrcpy"):
+                hit = root / name
+                if hit.is_file():
+                    return str(hit)
         candidates = [
             shutil.which("scrcpy"),
             shutil.which("scrcpy.exe"),
@@ -2053,8 +2066,9 @@ class AcquirePage(QWidget):
         scrcpy_bin = self._find_scrcpy()
         if not scrcpy_bin:
             self.console.log(
-                "scrcpy not found on this host — install it to enable screen mirror/control: "
-                "winget install --id Genymobile.scrcpy (Windows) or sudo apt install scrcpy (Linux)",
+                "scrcpy not found - the bundled copy is missing and no scrcpy is "
+                "on PATH. Install it with: winget install --id Genymobile.scrcpy "
+                "(Windows) or sudo apt install scrcpy (Linux)",
                 "error",
             )
             return

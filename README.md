@@ -368,8 +368,10 @@ winget install --id Genymobile.scrcpy   # Windows
 sudo apt install scrcpy                  # Linux
 ```
 
-The binary is found on `PATH`, beside the frozen executable, in a `tools/`
-folder next to it, or in `~/.droidforenx/tools/`. If `scrcpy` is absent the
+scrcpy ships **inside** the build (under `desktop/scrcpy_bundle/`, bundled
+the same way ADB is), so God's eye works out of the box. If the bundled copy
+is missing, a host install is used instead - `PATH` first, then beside the
+frozen executable or in a `tools/` folder. If no scrcpy is found at all, the
 button logs the install hint to the acquisition console and stays harmless.
 
 ### macOS
